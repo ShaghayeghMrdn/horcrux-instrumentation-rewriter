@@ -1,0 +1,19 @@
+{
+  "name": "web-performance",
+  "version": "1.0.0",
+  "description": "web performance code",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "httpster -p 8080"
+  },
+  "author": "Ayush Goel",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/goelayu/WebPeformance",
+  "dependencies": {
+    "chrome-launcher": "^0.3.2",
+    "chrome-remote-interface": "^0.24.2",
+    "commander": "^2.11.0",
+    "devtools-timeline-model": "^1.0",
+    "httpster": "^1.0.3"
+  }
+}
