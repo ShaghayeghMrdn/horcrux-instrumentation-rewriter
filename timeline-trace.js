@@ -1,72 +1,96 @@
 var fs = require('fs');
 var readline = require('readline');
 var Chrome = require('chrome-remote-interface');
-const { exec } = require('child_process');
+var chromeLauncher = require('chrome-launcher');
 
 var TRACE_CATEGORIES = ["-*", "devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.frame", "toplevel", "blink.console", "disabled-by-default-devtools.timeline.stack", "disabled-by-default-devtools.screenshot", "disabled-by-default-v8.cpu_profile", "disabled-by-default-v8.cpu_profiler", "disabled-by-default-v8.cpu_profiler.hires"];
 
 var rawEvents = [];
 
 var program = require('commander');
+var mkdirp = require('mkdirp');
 
 program
     .version("0.1.0")
-    .option('-u, --urls [list-of-urls]', "Path to file containing the list of urls")
-    .option('-o , --output [output-dir]','path to the output directory for results','./')
+    .option('-u, --url [url]', "The url to be traced")
+    .option('-o , --output [output-dir]','path to the output directory for results','./trace')
+    .option('-d , --device [device]','Device to run chrome on')
     .parse(process.argv)
 
-var urlList = readline.createInterface({
-  input: fs.createReadStream(program.urls)
-});
+function getChromeTrace(url,launcher){
 
-// exec('/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir=$TMPDIR/chrome-profiling --no-default-browser-check', (err, stdout, stderr) => {
-//   if (err) {
-//     // node couldn't execute the command
-//     return;
-//   }
+    Chrome(function (chrome) {
+        with (chrome) {
+            Page.enable();
+            Network.enable();
+            // Disable cache (wonder if this works better than the browser...) 
+            // Answer: it seems to work better from the eye ball test
+            Network.setCacheDisabled({cacheDisabled: true});
 
-//   console.log(`stdout: ${stdout}`);
-//   console.log(`stderr: ${stderr}`);
+
+            // urlList.on('line', (line) => {
+            Tracing.start({
+                "categories":   TRACE_CATEGORIES.join(','),
+                "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
+            });
+
+            Page.navigate({'url': url});
+
+            Page.loadEventFired(function () {
+               Tracing.end()
+            });
+            // });
+
+            Tracing.tracingComplete(function () {
+                var file = program.output + "/" + url.substring(7,) + '/';
+                mkdirp(file , function(err) {
+                    if (err) console.log("Error file creating directory",err)
+                    else {
+                         fs.writeFileSync(file + Date.now(), JSON.stringify(rawEvents, null, 2));
+                         console.log('Trace file: ' + file + Date.now());
+                    }
+                })
+                chrome.close();
+                if (launcher) launcher.kill();
+            });
+
+            Tracing.dataCollected(function(data){
+                var events = data.value;
+                rawEvents = rawEvents.concat(events);
+            });
+
+        }
+        }).on('error', function (e) {
+            console.error('Cannot connect to Chrome' + url, e);
+        });
+}
+
+function launchChrome(url){
+    console.log("Tracing url:" + url)
+    if (program.device == "mac") {
+        chromeLauncher.launch({
+        port: 9222,
+        chromeFlags: [
+            '--headless',
+            '--remote-debugging-port=9222',
+            '--user-data-dir=$TMPDIR/chrome-profiling',
+            '--no-default-browser-check'
+            ]
+        }).then((launcher) => {
+            getChromeTrace(url, launcher)
+        });
+    } else {
+        getChromeTrace(url)
+    }
+}
+
+// urlList.on('line', (line) => {
+//     console.log("read url from line: " + line)
+//     launchChrome(line);
 // });
 
-
-Chrome(function (chrome) {
-    with (chrome) {
-        Page.enable();
-        Network.enable();
-
-        // Disable cache (wonder if this works better than the browser...) 
-        // Answer: it seems to work better from the eye ball test
-        Network.setCacheDisabled({cacheDisabled: true});
+launchChrome(program.url);
 
 
-        // urlList.on('line', (line) => {
-        Tracing.start({
-            "categories":   TRACE_CATEGORIES.join(','),
-            "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
-        });
 
-        Page.navigate({'url': 'http://paulirish.com'});
 
-        Page.loadEventFired(function () {
-           Tracing.end()
-        });
-        // });
-
-        Tracing.tracingComplete(function () {
-            var file = program.output + '/profile-' + Date.now() + '.devtools.trace';
-            fs.writeFileSync(file, JSON.stringify(rawEvents, null, 2));
-            console.log('Trace file: ' + file);
-
-            chrome.close();
-        });
-
-        Tracing.dataCollected(function(data){
-            var events = data.value;
-            rawEvents = rawEvents.concat(events);
-        });
-
-    }
-}).on('error', function (e) {
-    console.error('Cannot connect to Chrome', e);
-});
