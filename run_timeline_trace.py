@@ -14,6 +14,7 @@ __email__ = "goelayu@umich.edu"
 from Naked.toolshed.shell import execute_js
 import argparse
 import subprocess
+import time
 
 ANDROID_CHROME_INSTANCE = 'com.android.chrome/com.google.android.apps.chrome.Main'
 
@@ -44,6 +45,8 @@ if __name__ == '__main__':
                 cmd_base = 'adb shell "am start -a android.intent.action.VIEW -n {0}"'
                 cmd = cmd_base.format(ANDROID_CHROME_INSTANCE)
                 p = subprocess.Popen(cmd, shell=True)
+                time.sleep(2)
+
 
             execute_js("timeline-trace.js", "-u " + url.strip() + " -o " +
                        args.output + " -d " + args.device)
