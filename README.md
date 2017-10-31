@@ -1,13 +1,29 @@
 # Web Peformance
 Repository to extract web page timeline information using chrome dev tools api
 
-**Steps**
+# Steps
+
+## Desktop (Mac/Linux)
+### Generate trace:
+
+```
+python run_timeline_trace.py <path to list of urls> <path to output directory> <device type (mac|android)>
 ```
 
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --headless --remote-debugging-port=9222 --user-data-dir=$TMPDIR/chrome-profiling --no-default-browser-check
-
-npm install
-
-node timeline-trace.js
+### Analyse trace: (Group computation into separate categories)
 ```
-The output file can be loaded into chrome dev tool performance tab
+python run_log_trace_metrics.py <path to top level directory containing all traces> <path to output directory>
+```
+
+### Generate plot from parsed traces:
+```
+python generate_plot.py <path to parsed trace top level directory>
+```
+
+## Android
+
+ * Connect android to the desktop system running these scripts
+ * Enabel USB Debugging
+ * Start adb server: `adb devices`
+ * Follow the same steps as above, with android as the the device type
+
