@@ -7,6 +7,8 @@ var TRACE_CATEGORIES = ["-*", "devtools.timeline", "disabled-by-default-devtools
 
 var rawEvents = [];
 
+var pageLoadTime = {};
+
 var program = require('commander');
 var mkdirp = require('mkdirp');
 
@@ -23,6 +25,7 @@ function getChromeTrace(url,launcher){
         with (chrome) {
             Page.enable();
             Network.enable();
+            Runtime.enable();
             // Disable cache (wonder if this works better than the browser...) 
             // Answer: it seems to work better from the eye ball test
             Network.setCacheDisabled({cacheDisabled: true});
@@ -38,8 +41,10 @@ function getChromeTrace(url,launcher){
 
             Page.loadEventFired(function () {
                Tracing.end()
+              
             });
-            // });
+
+            extractPageLoadTime(Runtime);
 
             Tracing.tracingComplete(function () {
                 var file = program.output + "/" + url.substring(7,) + '/';
@@ -47,22 +52,43 @@ function getChromeTrace(url,launcher){
                     if (err) console.log("Error file creating directory",err)
                     else {
                          fs.writeFileSync(file + Date.now(), JSON.stringify(rawEvents, null, 2));
+                         fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
                          console.log('Trace file: ' + file + Date.now());
+                         console.log("Timing information:" + JSON.stringify(pageLoadTime))
                     }
                 })
+
                 chrome.close();
                 if (launcher) launcher.kill();
+                return;
             });
 
             Tracing.dataCollected(function(data){
                 var events = data.value;
                 rawEvents = rawEvents.concat(events);
             });
-
         }
         }).on('error', function (e) {
             console.error('Cannot connect to Chrome' + url, e);
         });
+}
+
+function extractPageLoadTime(Runtime){
+    Runtime.evaluate({expression: 'performance.timing.navigationStart'}).then((result) => {
+            pageLoadTime["startTime"] = result["result"]["value"]
+        });
+    Runtime.evaluate({expression: 'performance.timing.loadEventEnd'}).then((result) => {
+            pageLoadTime["endTime"] = result["result"]["value"]
+        });
+    Runtime.evaluate({expression: 'performance.timing.domContentLoadedEventEnd'}).then((result) => {
+            pageLoadTime["domContentLoaded"] = result["result"]["value"]
+        });
+}
+
+function dumpChromePid(pid){
+    mkdirp((program.output) , function(err){
+    fs.writeFileSync(program.output + "/chrome.pid", pid)
+    });
 }
 
 function launchChrome(url){
@@ -72,11 +98,16 @@ function launchChrome(url){
         port: 9222,
         chromeFlags: [
             '--headless',
+            '--disable-logging',
+            '--disable-extensions',
+            '--no-first-run',
+            '--enable-devtools-experiments', 
             '--remote-debugging-port=9222',
             '--user-data-dir=$TMPDIR/chrome-profiling',
             '--no-default-browser-check'
             ]
         }).then((launcher) => {
+            dumpChromePid(launcher.pid)
             getChromeTrace(url, launcher)
         });
     } else {
