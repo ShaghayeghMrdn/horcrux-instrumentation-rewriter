@@ -34,10 +34,13 @@ def wait_timeout(proc, seconds, output):
             print "Killing trace script. Timeout.."
 
             #Kill the chrome instance
-            pidData = open(output + "/chrome.pid","r")
-            chromePid = pidData.readlines()[0]
-            subprocess.Popen("kill -9 " + chromePid, shell=True)
-            print "Killed chrome orphan instance.."
+            try:
+                pidData = open(output + "/chrome.pid","r")
+                chromePid = pidData.readlines()[0]
+                subprocess.Popen("kill -9 " + chromePid, shell=True)
+                print "Killed chrome orphan instance.."
+            except IOError as e:
+                print e
         time.sleep(interval)
 
 
@@ -46,8 +49,14 @@ if __name__ == '__main__':
     parser.add_argument('urls', help="path to the list of urls")
     parser.add_argument('output', help="path to the output directory")
     parser.add_argument('device', help="device to run chrome tracer run")
+    parser.add_argument('--cold-cache',help="Run chrome with a cold cache",action='store_true' )
     args = parser.parse_args()
 
+    # Clear the user-directory if running with cold cache
+    if args.cold_cache and args.device =="mac":
+        subprocess.Popen("rm -r TMPDIR", shell=True)
+    elif args.cold_cache and args.device=="android":
+        subprocess.Popen("adb shell pm clear com.android.chrome", shell=True)
     # If device is android, enable tcp port forwarding
     if args.device == "android":
         cmd_base = 'adb forward tcp:{0} localabstract:chrome_devtools_remote'

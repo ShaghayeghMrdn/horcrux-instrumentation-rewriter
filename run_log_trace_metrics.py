@@ -51,9 +51,9 @@ def getTimingInformation(timeFile):
             return 0,0
         return plt, upt
 
-def dumpCSVFromDict(dict):
+def dumpCSVFromDict(dict, output):
     csvData = pd.DataFrame(dict)
-    with open(args.output + "/" + CSV_OUTPUT_FILE_activity,"w") as f:
+    with open(args.output + "/" + output,"w") as f:
         f.write("url")
         csvData.to_csv(f)
 
@@ -81,22 +81,29 @@ if __name__ == '__main__':
 
     print "Done parsing trace..\nGenerating csv file now..\n"
 
-    computationDistribution = {}
+    computationDistributionCat = {}
+    computationDistributionAct = {}
     # computationDistribution["plt"] = {}
     # computationDistribution["upt"] = {}
 
     #Creating csv file to generate plots
     for root, folder, files in os.walk(args.output):
-        if len(files) > 2 and files[1] == "PerActivity":
-            categoryDict = dictFromFile(os.path.join(root, files[1]))
+        if len(files) > 2 and files[0] == "page_load_time":
+            categoryDict = dictFromFile(os.path.join(root, files[2]))
+            activityDict = dictFromFile(os.path.join(root, files[1]))
             website = extractWebsiteName(root)
-            print website
             plt, upt = getTimingInformation(os.path.join(root, files[0]))
             
             # computationDistribution["plt"][website] = plt
             # computationDistribution["upt"][website] = upt
             for category, time in categoryDict.items():
-                if category not in computationDistribution:
-                    computationDistribution[category] = {}
-                computationDistribution[category][website] = time
-    dumpCSVFromDict(computationDistribution)
+                if category not in computationDistributionCat:
+                    computationDistributionCat[category] = {}
+                computationDistributionCat[category][website] = time
+
+            for activity, time in activityDict.items():
+                if activity not in computationDistributionAct:
+                    computationDistributionAct[activity] = {}
+                computationDistributionAct[activity][website] = time
+    dumpCSVFromDict(computationDistributionCat, CSV_OUTPUT_FILE_category)
+    dumpCSVFromDict(computationDistributionAct, CSV_OUTPUT_FILE_activity)

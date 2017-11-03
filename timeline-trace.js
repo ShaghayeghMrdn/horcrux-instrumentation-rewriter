@@ -9,6 +9,8 @@ var rawEvents = [];
 
 var pageLoadTime = {};
 
+var cacheCounter = 0
+
 var program = require('commander');
 var mkdirp = require('mkdirp');
 
@@ -98,12 +100,15 @@ function launchChrome(url){
         port: 9222,
         chromeFlags: [
             '--headless',
-            '--disable-logging',
+            '--enable-logging',
+            '--v=1',
+            // '--v8-cache-options=off',
+            // '--v8-cache-strategies-for-cache-storage=off',
             '--disable-extensions',
             '--no-first-run',
             '--enable-devtools-experiments', 
             '--remote-debugging-port=9222',
-            '--user-data-dir=$TMPDIR/chrome-profiling',
+            "--user-data-dir=TMPDIR/chrome-profiling",
             '--no-default-browser-check'
             ]
         }).then((launcher) => {
