@@ -7,39 +7,39 @@ from remodifying the source code of the webpage itself, to optimizing the
 network component of the over all execution time and more recently some work
 has been in improving the computatio time latency. 
 
-Erman et all \cite{} %In Proceedings of the Ninth ACM Conference on Emerging Networking Experiments and Technologies
+Erman et all \cite{erman2013conext} %In Proceedings of the Ninth ACM Conference on Emerging Networking Experiments and Technologies
 has shown that unline desktop browsers, optimizations such as SPDY/HTTP@ does not improve
 performance of Web pages on mobile browsers. They show that this is because of the negative interactions
 between the cellular state machine and the transport protocol. SImilary Qian
-et al \cite{ } %Web caching on smartphones: Ideal vs. reality. In MobiSys 
+et al \cite{quian2012mobisys} %Web caching on smartphones: Ideal vs. reality. In MobiSys 
 show that caching does not provide
 page load improvements for mobile browsers. 
-Google already released a paper last year \cite{} %Caching Doesn’t Improve Mobile Web Performance (Much)
+Google already released a paper last year \cite{vesuna2016caching} %Caching Doesn’t Improve Mobile Web Performance (Much)
 which talks of how there is very little improvement to the overall page load time despite 
 significant improvements in the caching hit rate. 
 
 Many of the research on explicitly improving mobile browser performance has seen mixed results.
-FLywheel \cite{} is Google's compression proxy that compressses web content to significanlty 
+FLywheel \cite{agababov2015nsdi} is Google's compression proxy that compressses web content to significanlty 
 reduce the use of expensive cellular data. The authots note that whie Flywheel succeeds in
 reducong the data usage, its effect on page load performance is more mixed; it helps
-performance of certain pages and hurts performance of others. Flexiweb \cite{} is built over
+performance of certain pages and hurts performance of others. Flexiweb \cite{singh2015mobicom} is built over
 Google's compression proxy to ensure that the proxy does not hurt page load times. But FlexiWeb
-is not designed to explicitly improve page load performance. Wang et al \cite{Wprof} show that
+is not designed to explicitly improve page load performance. Wang et al \cite{wang2013demystifying} show that
 speculative loading in one of only client only approaches that can improve mobile
 browser performance. However, speculative loading requires knowledge of what objects are likely
 to be requested by the user. 
 
 Other research works have looked at metrics orthognal to the page load time metric. Parcel
-\cite{} %Proxy assisted browsing in cellular networks for energy and latency reduction.
+\cite{sivakumar2014conext} %Proxy assisted browsing in cellular networks for energy and latency reduction.
  uses a proxy
-approach to divide the page load process between the mobile device and the proxy. Becayse Parcel is
+approach to divide the page load process between the mobile device and the proxy. Because Parcel is
 a network appraoch, the evaluations are largely with respect to reduction to network
-latencies. Klotski \cite{} focusses on increasing the number of objects rendered in the first
+latencies. Klotski \cite{butkiewicz2015usenix} focusses on increasing the number of objects rendered in the first
 5 seconds to improve the user quality of experience. 
 
 Other client side imporvements reduce enrge usage and computational delays using parallel
-browsers \cite{} %A Case for Parallelizing Web Pages. In HotPar,  Fast and Parallel Web Page Layout. In WWW.
-and improved hardware \cite{} % High-Performance and Energy-Efficient Mobile Web Browsing on Big/Little Systems. In HPCA
+browsers \cite{mai2012hotpar, meyerovich2010www} %A Case for Parallelizing Web Pages. In HotPar,  Fast and Parallel Web Page Layout. In WWW.
+and improved hardware \cite{zhu2013hpca} % High-Performance and Energy-Efficient Mobile Web Browsing on Big/Little Systems. In HPCA
  By improving the parallelization 
 for necessary page load tasks (eg: rendering) these systems reduce energy usage
 and have positive impact on page load times. 
