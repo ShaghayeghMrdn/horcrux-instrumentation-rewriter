@@ -1,21 +1,6 @@
 \section{Progress}
 \label{sec:Progress}
 
-\begin{figure*}[!bth]
-\begin{subfigure}[b]{0.5\textwidth}
-\centering
-\includegraphics[width=0.9\columnwidth]{figs/cat_p2.png}
-\tightcaption{Breakdown of computation on pixel 2}
-\label{fig:act_p2}
-\end{subfigure}
-\begin{subfigure}[b]{0.5\textwidth}
-\centering
-\includegraphics[width=0.9\columnwidth]{figs/act_p2.png}
-\tightcaption{Breakdown of computation into finer events on pixel 2}
-\label{fig:cat_p2}
-\end{subfigure}
-\end{figure*}
-
 As a preeliminary step in research, we first established a corpus of
 the top 75 news and sports websites on which we woudl run most of our
 experiments in order to cater to the most popular and compute
@@ -32,6 +17,21 @@ total time being spent on the network, and most importantly the finer
 level breakdown of the computation time to understand the true nature
 of computation on mobile devices. 
 
+\begin{figure*}[!bth]
+\begin{subfigure}[b]{0.5\textwidth}
+\centering
+\includegraphics[width=0.9\columnwidth]{figs/cat_p2.png}
+\caption{Breakdown of computation on pixel 2}
+\label{fig:act_p2}
+\end{subfigure}
+\begin{subfigure}[b]{0.5\textwidth}
+\centering
+\includegraphics[width=0.9\columnwidth]{figs/act_p2.png}
+\caption{Breakdown of computation into finer events on pixel 2}
+\label{fig:cat_p2}
+\end{subfigure}
+\caption{{\color{red}Figure 2 captioon placeholder}}
+\end{figure*}
 We categorised computation time into four categorires, scripting,
 loading, rendering and painting. Scripting is the total time being
 spent on compiling javascript, evaluating and executing it. Loading is
@@ -43,28 +43,30 @@ kicks in which starts to convert this DOM tree into a render tree,
 which contains the exact coordinates and the shape of each of the DOM
 node. This is what rendering time comprises of.  Painting time is the
 time taken to process the render tree, and actually convert each pixel
-into a bitmap.  Figure 3 shows the computation break down for these
-first level of categories for Google pixel 2. We further break down
-this time into the most finest level events which are returned by
-Google Chrome's trace and then group them by their event name.
+into a bitmap.  Figure~\ref{fig:act_p2} shows the computation break
+down for these first level of categories for Google pixel 2. We
+further break down this time into the most finest level events which
+are returned by Google Chrome's trace and then group them by their
+event name.
 
 These results are extremely coherent with our design of implementing a
 javsvcript chrome caching mechanism and show the possibility of a
 large improvement in the total page load due to the high percentage
-share of execution time as seen in Figure 4. 
+share of execution time as seen in Figure~\ref{fig:cat_p2}.
 \begin{figure*}[!bth]
 \begin{subfigure}[b]{0.5\textwidth}
 \centering
 \includegraphics[width=0.9\columnwidth]{figs/v8cache_P2_scripting.pdf}
-\tightcaption{Comparison of total scripting time with and without chrome's optimisations}
+\caption{Comparison of total scripting time with and without chrome's optimisations}
 \label{fig:scripting_p2}
 \end{subfigure}
 \begin{subfigure}[b]{0.5\textwidth}
 \centering
 \includegraphics[width=0.9\columnwidth]{figs/v8cache_P2_compile.pdf}
-\tightcaption{Comparison of total compiling time with and without chrome's optimisations}
+\caption{Comparison of total compiling time with and without chrome's optimisations}
 \label{fig:compile_p2}
 \end{subfigure}
+\caption{{\color{red}Figure 3 captioon placeholder}}
 \end{figure*}
 
 Recently Chrome in their 2017 dev summit talked about the various
@@ -77,8 +79,8 @@ of compiler and parser cache.  We further broke down this computation
 and compared the exact compile time across different optimisation
 settings. We first captured trace for the top 75 websites with the
 chrome compile and parse optimization disabled and then again with the
-optimization enabled. As shown in Figure 6 to our suprise, there was
-no reduction in the compile time, as opposed to the claim by Chrome
-quoting a 40\% decrease in the overall compile time.  All of our work
-will be on top of Chrome's latest changes to ensure compatibility and
-relevance of our work. 
+optimization enabled. As shown in Figure~\ref{fig:compile_p2} to our
+suprise, there was no reduction in the compile time, as opposed to the
+claim by Chrome quoting a 40\% decrease in the overall compile time.
+All of our work will be on top of Chrome's latest changes to ensure
+compatibility and relevance of our work. 
