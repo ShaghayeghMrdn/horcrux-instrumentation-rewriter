@@ -5,12 +5,12 @@ Work on improving web performance has been going for more than two decades now.
 Prior work has focused on various components of the overall page load time
 from remodifying the source code of the webpage itself, to optimizing the
 network component of the over all execution time and more recently some work
-has been in improving the computatio time latency. 
+has been done in improving the computation time latency. 
 
 Erman et all \cite{erman2013conext} %In Proceedings of the Ninth ACM Conference on Emerging Networking Experiments and Technologies
-has shown that unline desktop browsers, optimizations such as SPDY/HTTP@ does not improve
+has shown that unline desktop browsers, optimizations such as SPDY/HTTP2 does not improve
 performance of Web pages on mobile browsers. They show that this is because of the negative interactions
-between the cellular state machine and the transport protocol. SImilary Qian
+between the cellular state machine and the transport protocol. Similary Qian
 et al \cite{quian2012mobisys} %Web caching on smartphones: Ideal vs. reality. In MobiSys 
 show that caching does not provide
 page load improvements for mobile browsers. 
@@ -20,12 +20,12 @@ significant improvements in the caching hit rate.
 
 Many of the research on explicitly improving mobile browser performance has seen mixed results.
 FLywheel \cite{agababov2015nsdi} is Google's compression proxy that compressses web content to significanlty 
-reduce the use of expensive cellular data. The authots note that whie Flywheel succeeds in
-reducong the data usage, its effect on page load performance is more mixed; it helps
+reduce the use of expensive cellular data. The authots note that while Flywheel succeeds in
+reducing the data usage, its effect on page load performance is more mixed; it helps
 performance of certain pages and hurts performance of others. Flexiweb \cite{singh2015mobicom} is built over
 Google's compression proxy to ensure that the proxy does not hurt page load times. But FlexiWeb
 is not designed to explicitly improve page load performance. Wang et al \cite{wang2013demystifying} show that
-speculative loading in one of only client only approaches that can improve mobile
+speculative loading is one of only client only approaches that can improve mobile
 browser performance. However, speculative loading requires knowledge of what objects are likely
 to be requested by the user. 
 
@@ -37,7 +37,7 @@ a network appraoch, the evaluations are largely with respect to reduction to net
 latencies. Klotski \cite{butkiewicz2015usenix} focusses on increasing the number of objects rendered in the first
 5 seconds to improve the user quality of experience. 
 
-Other client side imporvements reduce enrge usage and computational delays using parallel
+Other client side imporvements reduce energy usage and computational delays using parallel
 browsers \cite{mai2012hotpar, meyerovich2010www} %A Case for Parallelizing Web Pages. In HotPar,  Fast and Parallel Web Page Layout. In WWW.
 and improved hardware \cite{zhu2013hpca} % High-Performance and Energy-Efficient Mobile Web Browsing on Big/Little Systems. In HPCA
  By improving the parallelization 

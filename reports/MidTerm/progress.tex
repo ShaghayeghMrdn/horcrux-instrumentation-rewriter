@@ -4,7 +4,7 @@
 
 \begin{figure}[t!]
 \centering
-\includegraphics[width=0.9\columnwidth]{figs/cat_p2.png}
+\includegraphics[width=0.99\columnwidth, scale=2.0]{figs/comp_1.png}
 \tightcaption{Breakdown of computation on pixel 2}
 \label{fig:act_p2}
 \end{figure}
@@ -12,11 +12,9 @@
 As a preeliminary step in research, we first established a corpus of the top
 75 news and sports websites on which we woudl run most of our experiments
 in order to cater to the most popular and compute intensive websites. 
-These websites are taken from the Alexa top website list \cite{}.
-We ran all our experiments on Macbook Pro 2017, Google Pixel 2, and Moto G5
-to contrast performance numbers between the three most famous devices with
-drastically different compute powers. We used chrome v 61 to run all  our experiments
-both on the desktop and the mobile devices. We leveraged chrome developer tools in order
+These websites are taken from the Alexa top website list.
+We ran all our experiments on  Google Pixel 2. We used chrome v 61 to run all  our experiments
+both on the mobile device. We leveraged chrome developer tools in order
 to capture the runtime traces both for network and compute. We then analysed these runtime
 traces to draw insight into the critical path of the website, the total time being spent on the 
 compute vs the total time being spent on the network, and most importantly the finer
@@ -38,7 +36,7 @@ which are returned by Google Chrome's trace and then group them by their event n
 
 \begin{figure}[t!]
 \centering
-\includegraphics[width=0.9\columnwidth]{figs/act_p2.png}
+\includegraphics[width=0.9\columnwidth]{figs/comp_2.png}
 \tightcaption{Breakdown of computation into finer events on pixel 2}
 \label{fig:cat_p2}
 \end{figure}
@@ -50,28 +48,42 @@ load due to the high percentage share of execution time as seen in Figure 4.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.9\columnwidth]{figs/v8cache_P2_scripting.pdf}
-\tightcaption{Comparison of total scripting time with and without chrome's optimisations}
+\includegraphics[width=0.9\columnwidth]{figs/chrome_script.png}
+\tightcaption{CDF of scripting time with and without chrome's optimisations}
 \label{fig:scripting_p2}
 \end{figure}
 
 Recently Chrome in their 2017 dev summit talked about the various optimisation techniques
-they have employed in the latest chrome browser to improve the total page load time.
-We did a comparison of the total page load with and without chrome's optimisation to see
-the improvements. As we can see, there has been a significant reduction in the overall scripting
-time. This is primarily due to the introduction of compiler and parser cache. 
-We further broke down this computation and compared the exact compile time across different 
-optimisation settings. We first captured trace for the top 75 websites with the chrome compile
-and parse optimization disabled and then again with the optimization enabled. As shown in Figure 6
-to our suprise, there was no reduction in the compile time, as opposed to the claim by Chrome
-quoting a 40\% decrease in the overall compile time.  
-All of our work will be on top of Chrome's latest changes to ensure compatibility and relevance
-of our work. 
+they have employed in the latest Chrome browser to improve the total page load time.
+We did a comparison of the total page load time with and without chrome's optimisation to see
+the improvements. In order to do this, we captured the trace from Alexa's top 75 
+news and sports website once with a fresh cache, ie cold cache and then subsequently with a hot
+cache which contains all of Chrome's optimisation including it's compiler and parser cache. 
+As we can see from figure 7, there has been a significant reduction in the overall compilation
+time, with about 100ms reduction in median compile time. This is primarily due to the introduction of compiler and parser cache. 
+The line corresponding to Cold cache refers to fresh load of all the websites,
+whereas the line corresponding to the Hot cache refers to the subsequent load
+which makes use of the Chrome's caching framework. 
+This is also reflected partially in the overall scripting time
+as shown in Figure 5. Note that scripting time is the sum of compilation, execution and other
+minor javascript events in the execution pipeline like garbage collection. 
+However the interesting thing to note, is that despite all these optimisations,
+we observe almost neglible improvement in the median execution time of javascripts, as
+shown in Figure 6. This serves as a huge motivation for the vaste potential in
+improvement of the overall page load time, by optimising the javascript execution
+time.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.9\columnwidth]{figs/v8cache_P2_compile.pdf}
-\tightcaption{Comparison of total compiling time with and without chrome's optimisations}
+\includegraphics[width=0.9\columnwidth]{figs/chrome_exec.png}
+\tightcaption{CDF of total execution time with and without chrome's optimisations}
+\label{fig:compile_p2}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.9\columnwidth]{figs/chrome_compile.png}
+\tightcaption{CDF of compilation time with and without chrome's optimisations}
 \label{fig:compile_p2}
 \end{figure}
 
