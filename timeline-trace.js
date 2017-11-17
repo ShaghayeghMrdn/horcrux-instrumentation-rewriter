@@ -7,11 +7,14 @@ var TRACE_CATEGORIES = ["-*", "devtools.timeline", "disabled-by-default-devtools
 
 var rawEvents = [];
 
+var heapChunks = "";
+
 var pageLoadTime = {};
 
 var cacheCounter = 0
 
 var program = require('commander');
+
 var mkdirp = require('mkdirp');
 
 program
@@ -28,6 +31,8 @@ function getChromeTrace(url,launcher){
             Page.enable();
             Network.enable();
             Runtime.enable();
+            Debugger.enable();
+            HeapProfiler.enable();
             // Disable cache (wonder if this works better than the browser...) 
             // Answer: it seems to work better from the eye ball test
             Network.setCacheDisabled({cacheDisabled: true});
@@ -38,25 +43,36 @@ function getChromeTrace(url,launcher){
                 "categories":   TRACE_CATEGORIES.join(','),
                 "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
             });
+            networkFile = program.output + "/" + url.substring(7,) + '/Network.trace';
+
+            NetworkEventHandlers(Network, networkFile)
+
+            // heapFile = program.output + "/" + url.substring(7,) + '/Heap.trace'
+
+            HeapProfiler.addHeapSnapshotChunk(msg => heapChunks += msg.chunk);
+            
+            HeapProfiler.startTrackingHeapObjects();
 
             Page.navigate({'url': url});
 
             Page.loadEventFired(function () {
-               Tracing.end()
-              
+                HeapProfiler.takeHeapSnapshot();
+                Tracing.end();
+                extractPageLoadTime(Runtime);
+                HeapProfiler.stopTrackingHeapObjects();
             });
 
-            extractPageLoadTime(Runtime);
 
             Tracing.tracingComplete(function () {
                 var file = program.output + "/" + url.substring(7,) + '/';
                 mkdirp(file , function(err) {
                     if (err) console.log("Error file creating directory",err)
                     else {
-                         fs.writeFileSync(file + Date.now(), JSON.stringify(rawEvents, null, 2));
+                         fs.writeFileSync(file + 'Timeline.trace', JSON.stringify(rawEvents, null, 2));
                          fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
+                         fs.writeFileSync(file + "Heap.trace", JSON.stringify(heapChunks))
                          console.log('Trace file: ' + file + Date.now());
-                         console.log("Timing information:" + JSON.stringify(pageLoadTime))
+                         console.log("Timing information file:" + JSON.stringify(pageLoadTime))
                     }
                 })
 
@@ -73,6 +89,35 @@ function getChromeTrace(url,launcher){
         }).on('error', function (e) {
             console.error('Cannot connect to Chrome' + url, e);
         });
+}
+
+function NetworkEventHandlers(Network, file){
+    console.log("Network trace file: " + file)
+    mkdirp(file.split('/').slice(0,-1).join('/'), function (err) {
+        if (err)
+            console.log("Error creating the network file path")
+        else {
+                Network.requestWillBeSent(function(data){
+                    fs.appendFileSync(file, JSON.stringify({"Network.requestWillBeSent":data})+"\n");
+                });
+                Network.requestServedFromCache(function(data){
+                    fs.appendFileSync(file, JSON.stringify({"Network.requestServedFromCache":data})+"\n");
+                });
+
+                Network.responseReceived(function(data){
+                    fs.appendFileSync(file, JSON.stringify({"Network.responseReceived":data})+"\n");
+                });
+
+                Network.dataReceived(function(data){
+                    fs.appendFileSync(file, JSON.stringify({"Network.dataReceived":data})+"\n");
+                });
+
+                Network.loadingFinished(function(data){
+                    fs.appendFileSync(file, JSON.stringify({"Network.loadingFinished":data})+"\n");
+                });
+        }
+    });
+
 }
 
 function extractPageLoadTime(Runtime){
