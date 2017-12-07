@@ -2,12 +2,17 @@ var fs = require('fs');
 var readline = require('readline');
 var Chrome = require('chrome-remote-interface');
 var chromeLauncher = require('chrome-launcher');
+var async = require('async');
 
 var TRACE_CATEGORIES = ["-*", "devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.frame", "toplevel", "blink.console", "disabled-by-default-devtools.timeline.stack", "disabled-by-default-devtools.screenshot", "disabled-by-default-v8.cpu_profile", "disabled-by-default-v8.cpu_profiler", "disabled-by-default-v8.cpu_profiler.hires"];
 
 var rawEvents = [];
 
 var heapChunks = "";
+
+var windowObject = {};
+
+var windowDiff = {};
 
 var pageLoadTime = {};
 
@@ -22,6 +27,7 @@ program
     .option('-u, --url [url]', "The url to be traced")
     .option('-o , --output [output-dir]','path to the output directory for results','./trace')
     .option('-d , --device [device]','Device to run chrome on')
+    .option('-h, --heap','Enable heap profiling')
     .parse(process.argv)
 
 function getChromeTrace(url,launcher){
@@ -37,6 +43,7 @@ function getChromeTrace(url,launcher){
             // Answer: it seems to work better from the eye ball test
             Network.setCacheDisabled({cacheDisabled: true});
 
+            extractPageInformation(Runtime, "beforeLoad");
 
             // urlList.on('line', (line) => {
             Tracing.start({
@@ -47,38 +54,41 @@ function getChromeTrace(url,launcher){
 
             NetworkEventHandlers(Network, networkFile)
 
-            // heapFile = program.output + "/" + url.substring(7,) + '/Heap.trace'
-
-            HeapProfiler.addHeapSnapshotChunk(msg => heapChunks += msg.chunk);
-            
-            HeapProfiler.startTrackingHeapObjects();
+            if (program.heap) {
+                HeapProfiler.addHeapSnapshotChunk(msg => heapChunks += msg.chunk);
+                HeapProfiler.startTrackingHeapObjects();
+            }
 
             Page.navigate({'url': url});
 
+            var file = program.output + "/" + url.substring(7,) + '/';
+
             Page.loadEventFired(function () {
-                HeapProfiler.takeHeapSnapshot();
+                if (program.heap) HeapProfiler.takeHeapSnapshot();
                 Tracing.end();
                 extractPageLoadTime(Runtime);
-                HeapProfiler.stopTrackingHeapObjects();
+                extractPageInformation(Runtime, "afterLoad", file, chrome);
+                fetchEntireDOM(Runtime, file)
+                if (program.heap) HeapProfiler.stopTrackingHeapObjects();
             });
 
 
             Tracing.tracingComplete(function () {
-                var file = program.output + "/" + url.substring(7,) + '/';
                 mkdirp(file , function(err) {
                     if (err) console.log("Error file creating directory",err)
                     else {
                          fs.writeFileSync(file + 'Timeline.trace', JSON.stringify(rawEvents, null, 2));
                          fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
-                         fs.writeFileSync(file + "Heap.trace", JSON.stringify(heapChunks))
+                         if (program.heap) fs.writeFileSync(file + "Heap.trace", JSON.stringify(heapChunks))
                          console.log('Trace file: ' + file + Date.now());
-                         console.log("Timing information file:" + JSON.stringify(pageLoadTime))
+                         console.log("Timing information file:" + JSON.stringify(pageLoadTime));
+                         // console.log("javascript execution impact: " + windowDiff);
                     }
                 })
 
-                chrome.close();
-                if (launcher) launcher.kill();
-                return;
+                // chrome.close();
+                // if (launcher) launcher.kill();
+                // return;
             });
 
             Tracing.dataCollected(function(data){
@@ -89,6 +99,19 @@ function getChromeTrace(url,launcher){
         }).on('error', function (e) {
             console.error('Cannot connect to Chrome' + url, e);
         });
+}
+
+function fetchEntireDOM(Runtime, file){
+    Runtime.evaluate({
+        returnByValue: true,
+        expression: 'document.body.outerHTML'
+    }, (err, result) => {
+        fs.writeFileSync(file + "DOM", result["result"]["value"])
+    })
+}
+
+function findDuplicate( propName ) {
+    return windowObject["beforeLoad"].indexOf( propName ) === -1;
 }
 
 function NetworkEventHandlers(Network, file){
@@ -121,17 +144,55 @@ function NetworkEventHandlers(Network, file){
 }
 
 function extractPageLoadTime(Runtime){
-    Runtime.evaluate({expression: 'performance.timing.navigationStart'}).then((result) => {
+    Runtime.evaluate({expression: 'performance.timing.navigationStart'}, (err, result) => {
             pageLoadTime["startTime"] = result["result"]["value"]
         });
-    Runtime.evaluate({expression: 'performance.timing.loadEventEnd'}).then((result) => {
+    Runtime.evaluate({expression: 'performance.timing.loadEventEnd'}, (err, result) => {
             pageLoadTime["endTime"] = result["result"]["value"]
         });
-    Runtime.evaluate({expression: 'performance.timing.domContentLoadedEventEnd'}).then((result) => {
+    Runtime.evaluate({expression: 'performance.timing.domContentLoadedEventEnd'},(err, result) => {
             pageLoadTime["domContentLoaded"] = result["result"]["value"]
         });
 }
 
+ function extractPageInformation(Runtime, when, file, chrome){
+     Runtime.evaluate({
+        returnByValue: true,
+        expression: `Object.getOwnPropertyNames( window )`
+    },(err, result) => {
+        windowObject[when] = result["result"]["value"]
+        if (when == "afterLoad") {
+            extractValuesFromKeys(Runtime, windowObject[when].filter(findDuplicate), file, chrome)
+        }
+    });
+}
+
+function extractValuesFromKeys(Runtime, keyArray, file, chrome){
+    // console.log("Fetching values for: " + keyArray)
+    async.forEachOf(keyArray, function(result, key, callback) {
+        windowDiff = {}
+        prop = keyArray[key]
+        Runtime.evaluate({
+            returnByValue: true,
+            expression: `window[${JSON.stringify(prop)}]`
+        },(err, result) => {
+            // console.log(JSON.stringify(keyArray[key]), result)
+            setGlobalWindowDiff(keyArray[key], result)
+            callback();
+        });
+    }, function () {
+        console.log("Done computing the js impact")
+        fs.writeFileSync(file + "js_affect", JSON.stringify(windowDiff));
+        chrome.close();
+        // return windowDiff
+    }); 
+}
+
+function setGlobalWindowDiff(key, result){
+    if ( typeof result !== 'undefined' && result && result["result"] )
+        windowDiff[key] = result["result"]["value"]
+    else windowDiff[key] = "NULL"
+}
 function dumpChromePid(pid){
     mkdirp((program.output) , function(err){
     fs.writeFileSync(program.output + "/chrome.pid", pid)

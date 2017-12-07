@@ -87,7 +87,7 @@ if __name__ == '__main__':
             for iter in range(args.num_repetitions):
                 if args.device == "android":
 
-                    cmd_base = 'adb shell "am start -a android.intent.action.VIEW -n {0}"'
+                    cmd_base = 'adb shell "am start -a android.intent.action.VIEW -n {0} -d about:blank"'
                     cmd = cmd_base.format(ANDROID_CHROME_INSTANCE)
                     p = subprocess.Popen(cmd, shell=True)
                     time.sleep(3)
