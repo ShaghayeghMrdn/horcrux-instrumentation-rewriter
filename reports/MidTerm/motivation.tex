@@ -1,17 +1,27 @@
 \section{Motivation}
 \label{sec:motivation}
 
-
-Major web browsers like Chrome, Firefox, and Safari have recenlty invested a lot of resources,
-time and energy into improving web performance on mobile devices, specifically by targeting 
-the network usage. However, the network now comprises less than 30\% \cite{njait2016www} of the total critical
-path for an average page load on a mobile device. This includes caching almost 95\% of the
-resources that are fetched from the server \cite{vesuna2016caching}, dns presolution, dns caching, tcp reconnect etc.
+% Recent effort from industry has been focused on 
+% Major web browsers like Chrome, Firefox, and Safari have recenlty invested a lot of resources,
+% time and energy into improving web performance on mobile devices, specifically by targeting 
+% the network usage. However, the network now comprises less than 30\% \cite{njait2016www} of the total critical
+% path for an average page load on a mobile device. 
+% This includes caching almost 95\% of the
+% resources that are fetched from the server \cite{vesuna2016caching}, dns presolution, dns caching, tcp reconnect etc.
 Chrome released a paper last year showing how improved caching algorithms, despite having 
-significant improvements on the desktop, don't have the same proportionate improvements 
-on mobile devices. This is primarily attributed to the fact that computation comprises more than 65\%
-of the critical path during a page load. This illustrates the need to further optimize the computation 
-time. 
+Recent effort from industry to improve mobile web performance has been
+focused on reducing network usage, under assumption that network is
+dominant factor in PLT. However, recent study~\cite{njait2016www}
+shows that the network latency composes of less than 30\% of the total
+PLT. The authors note that not only the performance of mobile network
+improved but also numerious optimizations (e.g., resource
+caching~\cite{vesuna2016caching}, DNS presolution and caching, TCP
+Fast reconnection) contribute to reduce the network latency.
+% significant improvements on the desktop, don't have the same proportionate improvements 
+% on mobile devices. This is primarily attributed to the fact that computation comprises more than 65\%
+% of the critical path during a page load. This illustrates the need to further optimize the computation 
+% time. 
+
 
 During the Chrome dev summit this year, their team announced the latest improvements they have 
 made in their browser to improve the page load time. Interestingly, most of their work focuses on
