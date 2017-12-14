@@ -25,9 +25,13 @@ the computation time on mobile is significanlty higher than their desktop counte
  Our experiments
 on the most popular news and sports websites on the latest mobile hardware and the latest 
 Chrome verison reveal that despite these recent efforts, scripting still takes significantly more
-time ,as compared to the other components of the total computation time. We break down computation
+time ,as compared to the other components of the total computation time. With our understanding of 
+computation being the current bottleneck for high page load times, 
+we conduct a set of experiments to evaluate the reasons for this
+exceedingly high computation time. In order to do this, We break down computation
 into four categories: scripting, loading, paitnint, and rendering.
 and observe that scripting essentially takes more than 70\% of the total
 computation time which is more than all the other categories combined (Figure 3). 
 This makes it all the more important to do an in-depth analysis of the computation time to clearly
-understand where exactly this time is being spent. 
+understand where exactly this time is being spent. Using results from this study, we would eventually
+design our caching framework for the javascript execution output. 

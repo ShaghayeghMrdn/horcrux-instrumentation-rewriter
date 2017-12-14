@@ -9,11 +9,11 @@
 \label{fig:act_p2}
 \end{figure}
 
-As a preliminary step in research, we first established a corpus of the top
+As a preliminary step in this direction, we first established a corpus of the top
 75 news and sports websites on which we would run our experiments
 in order to cater to the most popular and compute intensive websites. 
 These websites are taken from the Alexa top website list.
-We ran all our experiments on a Google Pixel 2. We used Chrome v 61 to run all of our experiments on the mobile device. We leveraged chrome developer tools in order
+We ran all our experiments on Google Pixel 2. We used Chrome v 61 to run all of our experiments on the mobile device. We leveraged chrome developer tools in order
 to capture the runtime traces, both for network and compute. We then analyzed these runtime
 traces to draw insight into the critical path of the website, the total time being spent on the 
 compute vs the total time being spent on the network, and most importantly the finer
@@ -85,4 +85,27 @@ time.
 \tightcaption{CDF of compilation time with and without chrome's optimisations}
 \label{fig:compile_p2}
 \end{figure}
+
+After establishing the impact of a javascript execution caching framework, we conducted
+experiments to understand the nature of the javascript computation. We have explained the
+results from these experiments in section 3.1. 
+We observed that most of the properties of the global window object remain unchanged.
+For a time difference of three seconds, we observe only a 2.5\% of properties to be have
+changed. This is kind of expected as not a lot is suppose to change within three seconds 
+between two web page loads. However interestingly, even for a gap of three hours between
+two loads, only 3.5\% of the properties change and for a gap for three days, only 4.5\% 
+properties changed. These are the 95\% percentile numbers, and therefore 
+further motivate us to expect extremely high gains from a javascript caching
+framework. 
+
+
+Currently, we are working on capturing the javascript execution at the second granularity,
+ie at the function level, which we covered in section 3.1. In order to do this, we have built
+a web proxy which sits between the client browser and the news and sports websites. Everytime 
+a request is made by the client, the proxy intercepts the request, and injects instrumentation
+code in the javascript files and the inline script tags inside the html files. 
+This instrumented code is read by the javascript debugger when the page is actually loaded, and 
+the debugger then builds a callgraph, with each node representing a function that was invoked. 
+Once a graph is built, we will use some a kind of a graph diffing algorithm, to quantify
+how much of the call graph was modified, across the two loads. 
 
