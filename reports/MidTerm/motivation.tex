@@ -2,32 +2,36 @@
 \label{sec:motivation}
 
 
-Major web browsers like Chrome, firefox, Safari have recenlty invested a lot of resources,
-time and energy in improving the web performance on the mobile, specially by targetting 
-the network usage. So much so that the network now comprises less than 30\% \cite{njait2016www} of the total critical
-path for an average page load on the mobile device. This includes caching almost 95\% of the
-resource that is fetched from the server \cite{vesuna2016caching}, dns presolution, dns caching, tcp reconnect etc.
-Chrome released a paper last year talking about how improved caching algorithms, despite having 
-significant improvements on the desktop, don't have the same proportionate imrpovements 
-on the mobile. This is primarily attributed to the fact that computation comprises more than 65\%
-of the critical path during a page load. This presses the need to further optimise the compuatation 
+Major web browsers like Chrome, Firefox, and Safari have recenlty invested a lot of resources,
+time and energy into improving web performance on mobile devices, specifically by targeting 
+the network usage. However, the network now comprises less than 30\% \cite{njait2016www} of the total critical
+path for an average page load on a mobile device. This includes caching almost 95\% of the
+resources that are fetched from the server \cite{vesuna2016caching}, dns presolution, dns caching, tcp reconnect etc.
+Chrome released a paper last year showing how improved caching algorithms, despite having 
+significant improvements on the desktop, don't have the same proportionate improvements 
+on mobile devices. This is primarily attributed to the fact that computation comprises more than 65\%
+of the critical path during a page load. This illustrates the need to further optimize the computation 
 time. 
 
 During the Chrome dev summit this year, their team announced the latest improvements they have 
-made in their browser to improve the page load time. Interstingly most of their work talks about
+made in their browser to improve the page load time. Interestingly, most of their work focuses on
 improving the compilation and parsing time by introducing compile and parser cache. 
 Recent studies \cite{url4} still report that the median page load time for a mobile website 
 is about 14 seconds. Research \cite{url4} shows that a user will only wait for 3 seconds 
 before abandoning a web site if it shows no response at all. A lot of prior work \cite {njait2016www}
 has been done to compare the page load times on mobile vs desktop, and recent results
-uptil last year claim that despite the increasing compute resources in mobile devices 
-the computation time on mobile is significanlty higher than their desktop counterparts. 
+from 2016 claim that despite the increasing compute resources in mobile devices,
+the computation time on mobile is significantly higher than their desktop counterparts. 
  Our experiments
 on the most popular news and sports websites on the latest mobile hardware and the latest 
-chrome verison reveal that despite these recent efforts, scripting still takes a significantly more
-amount of time as compared to the other components of the total computation time. We break down computation
-into four categories: scripting, loading, paitnint, rendering.
+Chrome version reveal that despite these recent efforts, scripting still takes significantly more
+time ,as compared to the other components of the total computation time. With our understanding of 
+computation being the current bottleneck for high page load times, 
+we conduct a set of experiments to evaluate the reasons for this
+exceedingly high computation time. In order to do this, we break down computation
+into four categories: scripting, loading, painting, and rendering.
 and observe that scripting essentially takes more than 70\% of the total
 computation time which is more than all the other categories combined (Figure 3). 
-This makes it all the more important to do an in depth of analysis of the computation time to clearly
-understand where exactly is the time being spent. 
+This makes it all the more important to do an in-depth analysis of the computation time to clearly
+understand where exactly this time is being spent. Using results from this study, we would eventually
+design our caching framework for the javascript execution output. 
