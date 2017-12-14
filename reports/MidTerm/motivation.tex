@@ -1,6 +1,26 @@
 \section{Motivation}
 \label{sec:motivation}
 
+% that increasing computation power in mobile 
+% Recent studies \cite{url4} still report that the median page load time for a mobile website 
+% is about 14 seconds. Research \cite{url4} shows that a user will only wait for 3 seconds 
+% before abandoning a web site if it shows no response at all. A lot of prior work \cite {njait2016www}
+% has been done to compare the page load times on mobile vs desktop, and recent results
+% from 2016 claim that despite the increasing compute resources in mobile devices,
+% the computation time on mobile is significantly higher than their desktop counterparts. 
+Computation power in mobile devices has dramatically improved over
+the course of past years. However, recent work~\cite{njait2016www}
+claims that PLT on mobile devices is not proportional to the
+increasing computation capability of those devices, compared to PLT on
+resource-rich desktops.  The consequence of such disproportion is
+well-addressed in recent report~\cite{url4}. The authors report that median
+PLT for mobile websites is 14 seconds and claim that end-users
+tolerate PLT latency for 3 seconds on the average untill ``leaving'' a
+website, which negatively influences companies' revenue~\cite{revenue}.
+Thus, high PLT on mobile devices degrades user-experience and comes at
+monetary loss. Given that more than half of web traffic is generated
+from mobile devices~\cite{traffic}, reducing PLT is critical.
+
 % Chrome released a paper last year showing how improved caching algorithms, despite having 
 % significant improvements on the desktop, don't have the same proportionate improvements 
 % on mobile devices. This is primarily attributed to the fact that computation comprises more than 65\%
@@ -21,38 +41,53 @@ algorithms.
 % path for an average page load on a mobile device. 
 % This includes caching almost 95\% of the
 % resources that are fetched from the server \cite{vesuna2016caching}, dns presolution, dns caching, tcp reconnect etc.
-Also, recent effort from industry to improve mobile web performance
+
+Further, recent effort from industry to improve mobile web performance
 has been focused on reducing network usage, under assumption that
 network is dominant factor in PLT. However, recent
 study~\cite{njait2016www} shows that the network latency composes of
 less than 30\% of the total PLT. The authors note that not only the
-performance of mobile network improved but also numerious
+performance of mobile network improved but also numerous
 optimizations (e.g., resource caching~\cite{vesuna2016caching}, DNS
 presolution and caching, TCP Fast reconnection) contribute to reduce
 the network latency.
-Above prior works suggest that for mobile devices, computation time is
-the most dominant factor in total PLT and therefore, reducing
-computation time is a key to further reduce PLT.
 
-During the Chrome dev summit this year, their team announced the latest improvements they have 
-made in their browser to improve the page load time. Interestingly, most of their work focuses on
-improving the compilation and parsing time by introducing compile and parser cache. 
-Recent studies \cite{url4} still report that the median page load time for a mobile website 
-is about 14 seconds. Research \cite{url4} shows that a user will only wait for 3 seconds 
-before abandoning a web site if it shows no response at all. A lot of prior work \cite {njait2016www}
-has been done to compare the page load times on mobile vs desktop, and recent results
-from 2016 claim that despite the increasing compute resources in mobile devices,
-the computation time on mobile is significantly higher than their desktop counterparts. 
- Our experiments
-on the most popular news and sports websites on the latest mobile hardware and the latest 
-Chrome version reveal that despite these recent efforts, scripting still takes significantly more
-time ,as compared to the other components of the total computation time. With our understanding of 
-computation being the current bottleneck for high page load times, 
-we conduct a set of experiments to evaluate the reasons for this
-exceedingly high computation time. In order to do this, we break down computation
-into four categories: scripting, loading, painting, and rendering.
-and observe that scripting essentially takes more than 70\% of the total
-computation time which is more than all the other categories combined (Figure 3). 
-This makes it all the more important to do an in-depth analysis of the computation time to clearly
-understand where exactly this time is being spent. Using results from this study, we would eventually
-design our caching framework for the javascript execution output. 
+Aforementioned prior works suggest that for mobile devices,
+computation time is the most dominant factor in total PLT.  These key
+findings motivate our work to investigate the main bottleneck in
+current computation time in mobile devices and to build a system that
+caches computation for Javascript.
+
+\section{Study in computation time}
+% During the Chrome dev summit this year, their team announced the latest improvements they have 
+% made in their browser to improve the page load time. Interestingly, most of their work focuses on
+% improving the compilation and parsing time by introducing compile and parser cache. 
+ % Our experiments
+% on the most popular news and sports websites on the latest mobile hardware and the latest 
+% Chrome version reveal that despite these recent efforts, scripting still takes significantly more
+% time ,as compared to the other components of the total computation time. With our understanding of 
+% computation being the current bottleneck for high page load times, 
+% we conduct a set of experiments to evaluate the reasons for this
+% exceedingly high computation time. In order to do this, we break down computation
+% into four categories: scripting, loading, painting, and rendering.
+% and observe that scripting essentially takes more than 70\% of the total
+% computation time which is more than all the other categories combined (Figure 3). 
+% This makes it all the more important to do an in-depth analysis of the computation time to clearly
+% understand where exactly this time is being spent. Using results from this study, we would eventually
+% design our caching framework for the javascript execution output. 
+
+
+We conducted a study of computation time for browsing popular news and
+sports websites. \todo{add methodology}
+
+The result suggests the bottleneck in high PLT comes from computation
+time. Also, we conducted micro-benchmark to break
+down PLT into four main categories: scripting, loading, painting, and
+rendering. The micro-benchmark provides useful insight about elements
+of computation time. First, script time consists of 70\% of total PLT,
+\todo{is this correct reference to the figure?}
+as shown in Fig.~\ref{fig:properties-sec}. Our study suggests that
+most of PLT on mobile devices stems from scripting time. Note that our
+study does not include network time, which can be another potential
+source of PLT.
+
