@@ -11,6 +11,7 @@ var rawEvents = [];
 var heapChunks = "";
 
 var windowObject = {};
+windowObject["beforeLoad"] = []
 
 var windowDiff = {};
 
@@ -28,6 +29,8 @@ program
     .option('-o , --output [output-dir]','path to the output directory for results','./trace')
     .option('-d , --device [device]','Device to run chrome on')
     .option('-h, --heap','Enable heap profiling')
+    .option('-n, --network', 'Enable network profiling')
+    .option('-t, --trace', 'Enable timeline tracing')
     .parse(process.argv)
 
 function getChromeTrace(url,launcher){
@@ -43,16 +46,19 @@ function getChromeTrace(url,launcher){
             // Answer: it seems to work better from the eye ball test
             Network.setCacheDisabled({cacheDisabled: true});
 
-            extractPageInformation(Runtime, "beforeLoad");
+            // extractPageInformation(Runtime, "beforeLoad");
 
-            // urlList.on('line', (line) => {
-            Tracing.start({
-                "categories":   TRACE_CATEGORIES.join(','),
-                "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
-            });
-            networkFile = program.output + "/" + url.substring(7,) + '/Network.trace';
+            if (program.trace){
+                Tracing.start({
+                    "categories":   TRACE_CATEGORIES.join(','),
+                    "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
+                });
+            }
 
-            NetworkEventHandlers(Network, networkFile)
+            if (program.network){
+                networkFile = program.output + "/" + url.substring(7,) + '/Network.trace';
+                NetworkEventHandlers(Network, networkFile)
+            }                
 
             if (program.heap) {
                 HeapProfiler.addHeapSnapshotChunk(msg => heapChunks += msg.chunk);
@@ -62,13 +68,13 @@ function getChromeTrace(url,launcher){
             Page.navigate({'url': url});
 
             var file = program.output + "/" + url.substring(7,) + '/';
-
+            mkdirp(file)
             Page.loadEventFired(function () {
                 if (program.heap) HeapProfiler.takeHeapSnapshot();
-                Tracing.end();
+                if (program.trace) Tracing.end();
                 extractPageLoadTime(Runtime);
-                extractPageInformation(Runtime, "afterLoad", file, chrome);
-                fetchEntireDOM(Runtime, file)
+                extractPageInformation(Runtime, "afterLoad", file, chrome, url);
+                fetchEntireDOM(Runtime, file, chrome)
                 if (program.heap) HeapProfiler.stopTrackingHeapObjects();
             });
 
@@ -78,10 +84,7 @@ function getChromeTrace(url,launcher){
                     if (err) console.log("Error file creating directory",err)
                     else {
                          fs.writeFileSync(file + 'Timeline.trace', JSON.stringify(rawEvents, null, 2));
-                         fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
-                         if (program.heap) fs.writeFileSync(file + "Heap.trace", JSON.stringify(heapChunks))
                          console.log('Trace file: ' + file + Date.now());
-                         console.log("Timing information file:" + JSON.stringify(pageLoadTime));
                          // console.log("javascript execution impact: " + windowDiff);
                     }
                 })
@@ -101,12 +104,20 @@ function getChromeTrace(url,launcher){
         });
 }
 
-function fetchEntireDOM(Runtime, file){
-    Runtime.evaluate({
-        returnByValue: true,
-        expression: 'document.body.outerHTML'
-    }, (err, result) => {
-        fs.writeFileSync(file + "DOM", result["result"]["value"])
+function fetchEntireDOM(Runtime, file, chrome){
+    serializeWithStyle = fs.readFileSync("serializeWithStyles.js","utf-8")
+    // Register SW
+    Runtime.evaluate({expression: serializeWithStyle}, (err, result) => {
+        console.log("Registered SW")
+        Runtime.evaluate({
+            returnByValue: true,
+            expression: 'document.body.serializeWithStyles()'
+        }, (err, result) => {
+            console.log("Fetched the entire DOM")
+            fs.writeFileSync(file + "DOM", result["result"]["value"])
+            // Closing chrome now
+            chrome.close()
+        })
     })
 }
 
@@ -155,22 +166,21 @@ function extractPageLoadTime(Runtime){
         });
 }
 
- function extractPageInformation(Runtime, when, file, chrome){
+ function extractPageInformation(Runtime, when, file, chrome, url){
      Runtime.evaluate({
         returnByValue: true,
         expression: `Object.getOwnPropertyNames( window )`
     },(err, result) => {
         windowObject[when] = result["result"]["value"]
         if (when == "afterLoad") {
-            extractValuesFromKeys(Runtime, windowObject[when].filter(findDuplicate), file, chrome)
+            extractValuesFromKeys(Runtime, windowObject[when].filter(findDuplicate), file, chrome, url)
         }
     });
 }
 
-function extractValuesFromKeys(Runtime, keyArray, file, chrome){
+function extractValuesFromKeys(Runtime, keyArray, file, chrome, url){
     // console.log("Fetching values for: " + keyArray)
     async.forEachOf(keyArray, function(result, key, callback) {
-        windowDiff = {}
         prop = keyArray[key]
         Runtime.evaluate({
             returnByValue: true,
@@ -183,7 +193,10 @@ function extractValuesFromKeys(Runtime, keyArray, file, chrome){
     }, function () {
         console.log("Done computing the js impact")
         fs.writeFileSync(file + "js_affect", JSON.stringify(windowDiff));
-        chrome.close();
+        fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
+        console.log("Timing information file:" + JSON.stringify(pageLoadTime));
+        if (program.heap) fs.writeFileSync(file + "Heap.trace", JSON.stringify(heapChunks))
+        // chrome.close();
         // return windowDiff
     }); 
 }
@@ -232,6 +245,8 @@ function launchChrome(url){
 // });
 
 launchChrome(program.url);
+
+
 
 
 
