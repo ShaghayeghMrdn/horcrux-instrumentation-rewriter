@@ -20,16 +20,16 @@ compute vs the total time being spent on the network, and most importantly the f
 level breakdown of the computation time to understand the true nature of computation on mobile
 devices. 
 
-We categorised computation time into four categorires, scripting, loading, rendering and
+We categorized computation time into four categories, scripting, loading, rendering and
 painting. Scripting is the total time being spent on
 compiling, evaluating and executing javascript. Loading consists of parsing the html and css, which happens 
 immediately after the payload for the network requests are received by the browser. Loading
 takes these payload objects and parses them before converting them to a DOM tree. Once the DOM tree is built,
 the rendering engine converts this DOM tree into a render tree, which contains the
-exact coordinates and the shape of each of the DOM node. This process comrpises the rendering time of the web page.
+exact coordinates and the shape of each of the DOM node. This process comprises the rendering time of the web page.
 Painting time is the time taken to process the render tree, and convert
 each pixel into a bitmap.
-Figure 3 shows the computation break down for these first level of categories
+Figure 6 shows the computation break down for these first level of categories
 for the Google Pixel 2. We further break down this time into the finer level events
 which are returned by Google Chrome's trace and then group them by their event name.
 
@@ -41,48 +41,48 @@ which are returned by Google Chrome's trace and then group them by their event n
 \end{figure}
 
 
-These results are extremely coherent with our design of implementing a javsvcript chrome
+These results are extremely coherent with our design of implementing a javascript 
 caching mechanism and show the possibility of a large improvement in the total page
-load due to the high percentage share of execution time as seen in Figure 4. 
+load due to the high percentage share of execution time as seen in Figure 7. 
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.9\columnwidth]{figs/chrome_script.png}
-\tightcaption{CDF of scripting time with and without chrome's optimisations}
+\tightcaption{CDF of scripting time with and without chrome's optimizations}
 \label{fig:scripting_p2}
 \end{figure}
 
-Recently in their 2017 dev summit, the Chrome team discussed the various optimisation techniques
+Recently in their 2017 dev summit, the Chrome team discussed the various optimization techniques
 they have employed in the latest Chrome browser to improve the total page load time.
 We did a comparison of the total page load time with and without Chrome's optimizations to see
 the improvements. In order to do this, we captured the trace from Alexa's top 75 
 news and sports website once with a fresh cache, ie cold cache, and then subsequently with a hot
 cache which contains all of Chrome's optimizations, including its compiler and parser cache. 
-As we can see from Figure 7, there has been a significant reduction in the overall compilation
+As we can see from Figure 10, there has been a significant reduction in the overall compilation
 time, with about 100ms reduction in median compile time. This is primarily due to the introduction of compiler and parser cache. 
-The line corresponding to Cold cache refers to the fresh load of all the websites,
-whereas the line corresponding to the Hot cache refers to the subsequent load
+The line corresponding to cold cache refers to the fresh load of all the websites,
+whereas the line corresponding to the hot cache refers to the subsequent load
 which makes use of Chrome's caching framework. 
 This is also reflected partially in the overall scripting time
-as shown in Figure 5. Note that scripting time is the sum of compilation, execution and other
+as shown in Figure 8. Note that scripting time is the sum of compilation, execution and other
 minor javascript events in the execution pipeline like garbage collection. 
 However the interesting thing to note, is that despite all these optimizations,
-we observe almost neglible improvement in the median execution time of the javascript, as
-shown in Figure 6. This serves as a huge motivation for the vast potential in
+we observe almost negligible improvement in the median execution time of the javascript, as
+shown in Figure 9. This serves as a huge motivation for the vast potential in
 improving the overall page load time, by optimizing the javascript execution
 time.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.9\columnwidth]{figs/chrome_exec.png}
-\tightcaption{CDF of total execution time with and without chrome's optimisations}
+\tightcaption{CDF of total execution time with and without chrome's optimizations}
 \label{fig:compile_p2}
 \end{figure}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.9\columnwidth]{figs/chrome_compile.png}
-\tightcaption{CDF of compilation time with and without chrome's optimisations}
+\tightcaption{CDF of compilation time with and without chrome's optimizations}
 \label{fig:compile_p2}
 \end{figure}
 
@@ -91,9 +91,10 @@ experiments to understand the nature of the javascript computation. We have expl
 results from these experiments in section 3.1. 
 We observed that most of the properties of the global window object remain unchanged.
 For a time difference of three seconds, we observe only a 2.5\% of properties to be have
-changed. This is kind of expected as not a lot is suppose to change within three seconds 
+changed as shown in Figure 3. This is kind of expected as not a lot is suppose to change within three seconds 
 between two web page loads. However interestingly, even for a gap of three hours between
-two loads, only 3.5\% of the properties change and for a gap for three days, only 4.5\% 
+two loads, only 3.5\% of the properties changed as shown in Figure 4 and for a gap
+ for three days, only 4.5\% 
 properties changed. These are the 95\% percentile numbers, and therefore 
 further motivate us to expect extremely high gains from a javascript caching
 framework. 
@@ -101,11 +102,11 @@ framework.
 
 Currently, we are working on capturing the javascript execution at the second granularity,
 ie at the function level, which we covered in section 3.1. In order to do this, we have built
-a web proxy which sits between the client browser and the news and sports websites. Everytime 
+a web proxy which sits between the client browser and the news and sports websites. Every time 
 a request is made by the client, the proxy intercepts the request, and injects instrumentation
-code in the javascript files and the inline script tags inside the html files. 
+code in the javascript files and the in line script tags inside the html files. 
 This instrumented code is read by the javascript debugger when the page is actually loaded, and 
-the debugger then builds a callgraph, with each node representing a function that was invoked. 
-Once a graph is built, we will use some a kind of a graph diffing algorithm, to quantify
+the debugger then builds a call graph, with each node representing a function that was invoked. 
+Once a graph is built, we will use some kind of a graph diffing algorithm, to quantify
 how much of the call graph was modified, across the two loads. 
 

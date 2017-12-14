@@ -3,14 +3,14 @@
 
 Work on improving web performance has been ongoing for more than two decades now. 
 Prior work has focused on various components of the overall page load time
-from remodifying the source code of the webpage itself, to optimizing the
+from re modifying the source code of the web page itself, to optimizing the
 network component of the overall execution time. More recently, some work
-has been in improving the computatio time latency. 
+has been in improving the computation time latency. 
 
 Erman et all \cite{erman2013conext} %In Proceedings of the Ninth ACM Conference on Emerging Networking Experiments and Technologies
 has shown that unlike desktop browsers, optimizations such as SPDY/HTTP2 does not improve
 PLT on mobile browsers. They show that this is because of the negative interactions
-between the cellular state machine and the transport protocol. Similary, Qian
+between the cellular state machine and the transport protocol. Similarly, Qian
 et al \cite{quian2012mobisys} %Web caching on smartphones: Ideal vs. reality. In MobiSys 
 show that caching does not provide
 page load improvements for mobile browsers. 
@@ -19,8 +19,8 @@ showed how there is very little improvement to the overall page load time despit
 significant improvements in the cache hit rate. 
 
 Much of the research on explicitly improving mobile browser performance has seen mixed results.
-FLywheel \cite{agababov2015nsdi} is Google's compression proxy that compresses web content to significanlty 
-reduce the use of expensive cellular data. The authors note that whie Flywheel succeeds in
+FLywheel \cite{agababov2015nsdi} is Google's compression proxy that compresses web content to significantly 
+reduce the use of expensive cellular data. The authors note that while Flywheel succeeds in
 reducing the data usage, its effect on page load time is more mixed; it helps
 the performance of certain pages and hurts the performance of others. Flexiweb \cite{singh2015mobicom} is built over
 Google's compression proxy to ensure that the proxy does not hurt page load times. However, FlexiWeb
@@ -33,7 +33,7 @@ Other research works have looked at metrics that are orthogonal to the page load
 \cite{sivakumar2014conext} %Proxy assisted browsing in cellular networks for energy and latency reduction.
  uses a proxy
 approach to divide the page load process between the mobile device and the proxy. Because Parcel is
-a network appraoch, the evaluations are primarily focused on the reduction of network
+a network approach, the evaluations are primarily focused on the reduction of network
 latency. Klotski \cite{butkiewicz2015usenix} focuses on increasing the number of objects rendered in the first
 5 seconds to improve the user quality of experience. 
 
