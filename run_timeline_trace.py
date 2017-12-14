@@ -15,11 +15,13 @@ from Naked.toolshed.shell import execute_js
 import argparse
 import subprocess
 import time
+import os
 
 ANDROID_CHROME_INSTANCE = 'com.android.chrome/com.google.android.apps.chrome.Main'
+ANDROID_CHROME_USER_PATH = ' /data/user/0/com.android.chrome/*'
 
 
-def wait_timeout(proc, seconds, output):
+def wait_timeout(proc, seconds, output, url, iter):
     """Wait for a process to finish, or raise exception after timeout"""
     start = time.time()
     end = start + seconds
@@ -32,7 +34,8 @@ def wait_timeout(proc, seconds, output):
         if time.time() >= end:
             proc.kill()
             print "Killing trace script. Timeout.."
-
+            
+            garbage_collection(output,url,iter)
             #Kill the chrome instance
             try:
                 pidData = open(output + "/chrome.pid","r")
@@ -43,12 +46,23 @@ def wait_timeout(proc, seconds, output):
                 print e
         time.sleep(interval)
 
+def garbage_collection(path, url,iter):
+    print "Deleting any intermediate result.."
+    for i in range(iter+1):
+        pathToDelete = os.path.join(path,str(i), url[7:])
+        print "GC: " + pathToDelete
+        try:
+            subprocess.Popen("rm -r {0}".format(pathToDelete),shell=True)
+        except OSError as e:
+            print e 
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('urls', help="path to the list of urls")
     parser.add_argument('output', help="path to the output directory")
     parser.add_argument('device', help="device to run chrome tracer run")
+    parser.add_argument('num_repetitions', type=int)
     parser.add_argument('--cold-cache',help="Run chrome with a cold cache",action='store_true' )
     args = parser.parse_args()
 
@@ -67,21 +81,27 @@ if __name__ == '__main__':
         listOfUrls = f.readlines()
         # start chrome on mobile device
 
-        for url in listOfUrls:
-            if args.device == "android":
+        # for url in listOfUrls:
+        while len(listOfUrls) > 0:
+            url = listOfUrls.pop(0)
+            for iter in range(args.num_repetitions):
+                if args.device == "android":
 
-                # cmd_base = 'adb shell am force-stop {0}'
-                # cmd = cmd_base.format("com.android.chrome")
-                # subprocess.call(cmd, shell=True)
+                    cmd_base = 'adb shell "am start -a android.intent.action.VIEW -n {0} -d about:blank"'
+                    cmd = cmd_base.format(ANDROID_CHROME_INSTANCE)
+                    p = subprocess.Popen(cmd, shell=True)
+                    time.sleep(3)
 
-                cmd_base = 'adb shell "am start -a android.intent.action.VIEW -n {0}"'
-                cmd = cmd_base.format(ANDROID_CHROME_INSTANCE)
-                p = subprocess.Popen(cmd, shell=True)
-                time.sleep(3)
-
-
-            nodeProc = subprocess.Popen("node timeline-trace.js -u " + url.strip() + " -o " +
-                       args.output + " -d " + args.device, shell=True)
-            wait_timeout(nodeProc, 85, args.output)
+                # if iter == 0:
+                #     #clearing the cache for the first iteration
+                #     cmd = 'adb shell "su -c \"rm -rf /data/user/0/com.android.chrome/*\""'
+                #     subprocess.Popen(cmd, shell=True)
+                    
+                nodeProc = subprocess.Popen("node timeline-trace.js -u " + url.strip() + " -o " +
+                           args.output + "/" + str(iter) + " -d " + args.device, shell=True)
+                wait_timeout(nodeProc, 85, args.output, url, iter)
+                if nodeProc.poll() != 0:
+                    # listOfUrls.append(url)
+                    break
 
 
