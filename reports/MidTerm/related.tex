@@ -1,49 +1,58 @@
 \section{Related Work}
 \label{sec:related}
 
-Work on improving web performance has been ongoing for more than two decades now. 
-Prior work has focused on various components of the overall page load time
-from re-modifying the source code of the web page itself to optimizing the
-network component of the overall execution time. More recently, some work
-has focused on improving the computation time latency. 
+Many prior works~\cite{erman2013conext, quian2012mobisys,
+sivakumar2014conext, mai2012hotpar, meyerovich2010www, zhu2013hpca}
+in the domain of improving web performance have been
+done, ranging from optimizing webpage to reducing network time.
+Recent works~\cite{vesuna2016caching, agababov2015nsdi,
+butkiewicz2015usenix} propose improving computation time to further
+reduce PLT.
 
-Erman et all \cite{erman2013conext} %In Proceedings of the Ninth ACM Conference on Emerging Networking Experiments and Technologies
-has shown that unlike desktop browsers, optimizations such as SPDY/HTTP2 do not improve
-PLT on mobile browsers. They show that this is because of the negative interactions
-between the cellular state machine and the transport protocol. Similarly, Qian
-et al \cite{quian2012mobisys} %Web caching on smartphones: Ideal vs. reality. In MobiSys 
-show that caching does not provide
-page load improvements for mobile browsers. 
-A recent paper from Google in 2016 \cite{vesuna2016caching} %Caching Doesn’t Improve Mobile Web Performance (Much)
-showed how there is very little improvement to the overall page load time despite 
-significant improvements in the cache hit rate. 
+Recent studies~\cite{erman2013conext, quian2012mobisys,
+vesuna2016caching} show that computation time is major component in
+PLT of mobile browsers.  Erman et al.~\cite{erman2013conext} has shown
+that unlike desktop browsers, optimizations such as SPDY/HTTP2 do not
+improve PLT on mobile browsers. The authors show that this is because
+of the negative interactions between the cellular state machine and
+the transport protocol.  Similar to our study, Qian et
+al.~\cite{quian2012mobisys} argue that caching resources does not
+contriute to reduction in PLT for mobile devices. Furthermore, A
+recent study~\cite{vesuna2016caching} shows that how there is very
+little improvement to the overall page load time despite significant
+improvements in the cache hit rate. 
 
-Much of the research on explicitly improving mobile browser performance has seen mixed results.
-FLywheel \cite{agababov2015nsdi} is Google's compression proxy that compresses web content to significantly 
+On contrast to, the research on explicitly improving mobile browser
+performance has seen mixed results.
+FLywheel~\cite{agababov2015nsdi} is Google's compression proxy that compresses web content to significantly 
 reduce the use of expensive cellular data. The authors note that while Flywheel succeeds in
 reducing the data usage, its effect on page load time is more mixed; it helps
-the performance of certain pages and hurts the performance of others. Flexiweb \cite{singh2015mobicom} is built over
+the performance of certain pages and hurts the performance of others.
+Flexiweb~\cite{singh2015mobicom} is built over
 Google's compression proxy to ensure that the proxy does not hurt page load times. However, FlexiWeb
-is not designed to explicitly improve page load performance. Wang et al \cite{wang2013demystifying} show that
+is not designed to explicitly improve page load performance. Wang et
+al.~\cite{wang2013demystifying} show that
 speculative loading in one of only client only approaches that can improve mobile
 browser performance. However, speculative loading requires knowledge of what objects are likely
 to be requested by the user. 
 
-Other research works have looked at metrics that are orthogonal to the page load time metric. Parcel
-\cite{sivakumar2014conext} %Proxy assisted browsing in cellular networks for energy and latency reduction.
- uses a proxy
-approach to divide the page load process between the mobile device and the proxy. Because Parcel is
-a network approach, the evaluations are primarily focused on the reduction of network
-latency. Klotski \cite{butkiewicz2015usenix} focuses on increasing the number of objects rendered in the first
-5 seconds to improve the user quality of experience. 
 
-Other client side improvements reduce energy usage and computational delays using parallel
-browsers \cite{mai2012hotpar, meyerovich2010www} %A Case for Parallelizing Web Pages. In HotPar,  Fast and Parallel Web Page Layout. In WWW.
-and improved hardware \cite{zhu2013hpca} % High-Performance and Energy-Efficient Mobile Web Browsing on Big/Little Systems. In HPCA
- By improving the parallelization 
-for necessary page load tasks, such as rendering, these systems reduce energy usage
-and have a positive impact on page load times. 
+Other research works have looked at metrics that are orthogonal to the
+page load time metric. Parcel~\cite{sivakumar2014conext} uses a proxy
+approach to divide the page load process between the mobile device and
+the proxy. Because Parcel is a network approach, the evaluations are
+primarily focused on the reduction of network latency.
+Klotski~\cite{butkiewicz2015usenix} focuses on increasing the number
+of objects rendered in the first 5 seconds to improve the user quality
+of experience. 
 
-While there have been several recent efforts on improving mobile browser performance
-they have not been uniformly successful due to their various limitations.
+Other client side improvements reduce energy usage and computational
+delays using parallel browsers~\cite{mai2012hotpar, meyerovich2010www}
+and improved hardware~\cite{zhu2013hpca}.  By improving the
+parallelization for necessary page load tasks, such as rendering,
+these systems reduce energy usage and have a positive impact on page
+load times. 
+
+% While there have been several recent efforts on improving mobile browser performance
+% they have not been uniformly successful due to their various limitations.
 
