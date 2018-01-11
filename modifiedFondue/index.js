@@ -85,7 +85,6 @@ function instrument(src, options) {
 		tracer_name: '__tracer',
 	};
 	options = mergeInto(options, defaultOptions);
-
 	var prefix = '', shebang = '', output, m;
 
 	if (m = /^(#![^\n]+)\n/.exec(src)) {
@@ -602,5 +601,9 @@ var traceFilter = function (content, options) {
 
 module.exports = {
 	instrument: instrument,
+<<<<<<< HEAD
+	// instrumentationPrefix: instrumentationPrefix,
+=======
 	instrumentationPrefix: instrumentationPrefix,
+>>>>>>> ae167ca3de62cc8867545af150b6f0e36886aa84
 };

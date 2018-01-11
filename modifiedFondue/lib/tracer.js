@@ -1121,6 +1121,7 @@ if (typeof {name} === 'undefined') {
         }
     }();
 
+
     function getTypesFromWindowObject(windowObject){
         var types = {}
         Object.getOwnPropertyNames(window).forEach(function(n){
@@ -1534,9 +1535,7 @@ if (typeof {name} === 'undefined') {
 			entry.parents = parents;
 		}
 
-        // if (invocation.type !== 'undefined') {
-        //     entry.type = type
-        // }
+      
         entry.globalDelta = invocation.globalDelta
 		return entry;
 	}
