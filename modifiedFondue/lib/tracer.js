@@ -508,6 +508,7 @@ if (typeof {name} === 'undefined') {
 		this.timestamp = new Date().getTime();
 		this.type = type;
 		this.f = nodeById[info.nodeId];
+        this.currentWindowState = info.currentWindowState
 		this.childLinks = [];
 		this.parentLinks = [];
 		this.returnValue = undefined;
@@ -799,7 +800,6 @@ if (typeof {name} === 'undefined') {
 
 		// update hit counts
 		hit(invocation);
-
 		invocationStack.push(invocation);
 	}
 
@@ -1121,6 +1121,68 @@ if (typeof {name} === 'undefined') {
         }
     }();
 
+    function getTypesFromWindowObject(windowObject){
+        var types = {}
+        Object.getOwnPropertyNames(window).forEach(function(n){
+
+            if (!types[typeof window[n]]){
+                types[typeof window[n]] = []
+            }
+            var a={}
+            a[n] = window[n] 
+            if (typeof window[n] != 'function'){
+                types[typeof window[n]].push(a)
+            }
+        });
+        return types;
+    }
+
+    function compareWindowObjects(oldTypes, newTypes, info){
+        // console.log(JSON.stringify(oldWindow), JSON.stringify(newWindow))
+        // 
+        // console.log("Calling compare from node: " + info.nodeId)
+
+        var totalKeysCompared = 0
+        var keysMatched = 0
+        var unmatchObjects = {}
+
+        // console.log("total objects to be compared")
+        // Object.getOwnPropertyNames(newTypes).forEach(function(type){
+        //     console.log(" type: " + type + "size: " + newTypes[type].length)
+        // })
+        // console.log("Length of the object to be compared with");
+        // Object.getOwnPropertyNames(oldTypes).forEach(function(type){
+        //     console.log(" type: " + type + "size: " + oldTypes[type].length)
+        // })
+
+        Object.getOwnPropertyNames(newTypes).forEach(function(type){
+            if (!oldTypes[type]){
+                return;
+            }
+            newTypes[type].forEach(function(item1, index1){
+                var keyMatch = false;
+                totalKeysCompared++;
+
+                oldTypes[type].forEach(function(item2, index2){
+                    if (Object.keys(item1)[0] == Object.keys(item2)[0]){
+                        keyMatch = true
+                        if ( newTypes[type][index1][Object.keys(item1)[0]] == oldTypes[type][index2][Object.keys(item2)[0]]){
+                            keysMatched++;
+                            return;
+                        }
+                    else {
+                        unmatchObjects[Object.keys(item1)[0]] = [newTypes[type][index1][Object.keys(item1)[0]], oldTypes[type][index2][Object.keys(item2)[0]]]
+                        }
+                    }
+                });
+                if (!keyMatch){
+                    unmatchObjects[Object.keys(item1)[0]] = [newTypes[type][index1][Object.keys(item1)[0]],"NOMATCH"]
+                }
+            });
+        });
+
+        return [unmatchObjects, keysMatched, totalKeysCompared]
+    }
 
 	/**
 	 * the rewriter calls traceEnter from just before the try clause it wraps
@@ -1136,8 +1198,7 @@ if (typeof {name} === 'undefined') {
         if ( typeof window == 'undefined'){
             console.log("Fondue can't track changes to the window object")
         } else {
-             info.currentWindowState = window
-             // console.log("current window object has: " + Object.getOwnPropertyNames(window).length + " keys ");
+             info.currentWindowState = getTypesFromWindowObject(window)
         }
 		pushNewInvocation(info, 'function');
 	};
@@ -1159,9 +1220,7 @@ if (typeof {name} === 'undefined') {
         if (!top) {
             throw new Error('value returned with nothing on the stack');
         }
-        // console.log("Thew new window object has  " + Object.getOwnPropertyNames(window).length + "keys ")
-        // console.log("The top that is currently on stack " + JSON.stringify(top))
-        top.globalDelta = deepDiffMapper.map(this.currentWindowState, window);
+        top.globalDelta = compareWindowObjects(top.currentWindowState, getTypesFromWindowObject(window), info);
         // console.log("The global delta for this functions is " + JSON.stringify(top))
 		popInvocation(info);
 	};
@@ -1173,7 +1232,6 @@ if (typeof {name} === 'undefined') {
 		if (!top) {
 			throw new Error('value returned with nothing on the stack');
 		}
-        console.log("The top while updating the return value is " + JSON.stringify(top));
 		top.returnValue = scrapeObject(value);
 		return value;
 	}
@@ -1432,6 +1490,7 @@ if (typeof {name} === 'undefined') {
 		parents = (parents || []);
 		var entry = {
 			timestamp: invocation.timestamp,
+            duration: invocation.duration,
 			tick: invocation.tick,
 			invocationId: invocation.id,
 			topLevelInvocationId: invocation.topLevelInvocationId,
@@ -1474,6 +1533,10 @@ if (typeof {name} === 'undefined') {
 		if (parents.length > 0) {
 			entry.parents = parents;
 		}
+
+        // if (invocation.type !== 'undefined') {
+        //     entry.type = type
+        // }
         entry.globalDelta = invocation.globalDelta
 		return entry;
 	}
