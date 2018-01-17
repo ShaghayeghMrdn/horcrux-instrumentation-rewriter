@@ -601,9 +601,5 @@ var traceFilter = function (content, options) {
 
 module.exports = {
 	instrument: instrument,
-<<<<<<< HEAD
-	// instrumentationPrefix: instrumentationPrefix,
-=======
 	instrumentationPrefix: instrumentationPrefix,
->>>>>>> ae167ca3de62cc8867545af150b6f0e36886aa84
 };
