@@ -91,6 +91,7 @@ if (typeof {name} === 'undefined') {
 	var _logQueries = [];
 	var _fileCallGraph = [];
 	var _sourceMaps = {};
+    var enableWindowDiffing = {enableWindowDiffing}
 
 	var _connected = false;
 
@@ -512,7 +513,7 @@ if (typeof {name} === 'undefined') {
 		this.childLinks = [];
 		this.parentLinks = [];
 		this.returnValue = undefined;
-        this.globalDelta = undefined;
+        this.globalDelta = info.globalDelta;
 		this.exception = undefined;
 		this.topLevelInvocationId = undefined;
 		this.epochID = undefined;
@@ -725,7 +726,6 @@ if (typeof {name} === 'undefined') {
 			_invocationStackSize++;
 			return;
 		}
-
 		var invocation = new Invocation(info, type);
 		pushInvocation(invocation);
 		return invocation;
@@ -801,6 +801,8 @@ if (typeof {name} === 'undefined') {
 		// update hit counts
 		hit(invocation);
 		invocationStack.push(invocation);
+
+        var top = invocationStack[invocationStack.length - 1];
 	}
 
 	function popInvocation(info) {
@@ -1040,6 +1042,7 @@ if (typeof {name} === 'undefined') {
 				// have apply. so we apply Function.apply instead.
 				var t = customThis ? fthis : this;
 				return Function.apply.apply(func, [t].concat(arguments));
+                // return function(){}
 			} finally {
 				popInvocation();
 			}
@@ -1185,6 +1188,18 @@ if (typeof {name} === 'undefined') {
         return [unmatchObjects, keysMatched, totalKeysCompared]
     }
 
+    function getValuesFromKeys(keys){
+        var KeyValue = {}
+        keys.forEach(function(key){
+            try {
+                KeyValue[key] = Object.assign({},eval(key));
+            } catch (err) {
+                KeyValue[key] = null
+            }
+        });
+        return KeyValue;
+    }
+
 	/**
 	 * the rewriter calls traceEnter from just before the try clause it wraps
 	 * function bodies in. info is an object like:
@@ -1196,10 +1211,16 @@ if (typeof {name} === 'undefined') {
 	 *   }
 	 */
 	this.traceEnter = function (info) {
-        if ( typeof window == 'undefined'){
-            console.log("Fondue can't track changes to the window object")
-        } else {
-             info.currentWindowState = getTypesFromWindowObject(window)
+        if (enableWindowDiffing){
+            // if ( typeof window == 'undefined'){
+            //     console.log("Fondue can't track changes to the window object")
+            // } else {
+            //      info.currentWindowState = getTypesFromWindowObject(window)
+            // }
+            info.globalDelta = {}
+            if (info.globalVariables != undefined){
+                info.globalDelta["enter"] = getValuesFromKeys(Object.values(info.globalVariables[0]).concat(info.globalVariables.slice(1, info.globalVariables.length)));
+            }
         }
 		pushNewInvocation(info, 'function');
 	};
@@ -1217,12 +1238,17 @@ if (typeof {name} === 'undefined') {
 	 * local variables of the instrumented function.
 	 */
 	this.traceExit = function (info) {
-        var top = invocationStack[invocationStack.length - 1];
-        if (!top) {
-            throw new Error('value returned with nothing on the stack');
+        if (enableWindowDiffing){
+            var top = invocationStack[invocationStack.length - 1];
+            if (!top) {
+                throw new Error('value returned with nothing on the stack');
+            }
+            if (info.globalVariables != undefined){
+               top.globalDelta["exit"] = getValuesFromKeys(Object.values(info.globalVariables[0]).concat(info.globalVariables.slice(1, info.globalVariables.length)));
+           }
+            // top.globalDelta = compareWindowObjects(top.currentWindowState, getTypesFromWindowObject(window), info);
+            // top.globalDelta = 
         }
-        top.globalDelta = compareWindowObjects(top.currentWindowState, getTypesFromWindowObject(window), info);
-        // console.log("The global delta for this functions is " + JSON.stringify(top))
 		popInvocation(info);
 	};
 

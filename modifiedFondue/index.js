@@ -1,26 +1,4 @@
-/*
- * Copyright (c) 2012 Massachusetts Institute of Technology, Adobe Systems
- * Incorporated, and other contributors. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
- *
- */
+
 
 var falafel = require('falafel');
 var falafelMap = require('falafel-map');
@@ -57,6 +35,7 @@ function instrumentationPrefix(options) {
 		name: '__tracer',
 		nodejs: false,
 		maxInvocationsPerTick: 4096,
+		enableWindowDiffing: true,
 	});
 
 	// the inline comments below are markers for building the browser version of fondue
@@ -66,6 +45,7 @@ function instrumentationPrefix(options) {
 		version: JSON.stringify(require('./package.json').version),
 		nodejs: options.nodejs,
 		maxInvocationsPerTick: options.maxInvocationsPerTick,
+		enableWindowDiffing: options.enableWindowDiffing,
 	});
 }
 
@@ -120,11 +100,6 @@ function instrument(src, options) {
 
 	return output;
 }
-
-
-
-
-
 
 
 
@@ -459,6 +434,139 @@ var traceFilter = function (content, options) {
 			};
 		}
 
+		addLocalVariable = function (node, containsEqualTo) {
+		    parent = node.parent;
+		    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
+		        parent = parent.parent;
+		    }
+		    if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
+		        if (parent.localVariables == undefined){
+		            parent.localVariables = []
+		        }
+		        if (containsEqualTo > 0){
+		        	parent.localVariables.push(node.source().substring(0,ind).trim());
+		        } else {
+		        	parent.localVariables.push(node.source());
+		        }
+		        return;
+		    }
+
+		}
+
+		/* fetches the identifier from the node
+		 by recursively referencing the object in case of member expression
+		 or returns null if no identifier is found
+		 */
+		getIdentifierFromMemberExpression = function (node) {
+			if (node.type == "Identifier"){
+				return node;
+			}
+			if (node.type == "MemberExpression"){
+				return getIdentifierFromMemberExpression(node.object)
+			}
+			return null;
+		}
+
+		/* 
+		Returns 0 for local and -1 for non variables (literals, integers etc)
+		Returns 1 for global
+		*/
+		IsLocalVariable = function (node){
+			identifier = getIdentifierFromMemberExpression(node);
+			if (!identifier){
+				return -1;
+			}
+		    parent = identifier.parent;
+		    while (parent != undefined && parent.parent != undefined){
+		        if (parent.localVariables != undefined){
+		            if (parent.localVariables.includes(identifier.source())){
+		                return 0;
+		            }
+		        }
+		        parent = parent.parent;
+		    }
+		    return 1;
+		}
+
+		addGlobalVariable = function (node, otherArgs) {
+			regex = /^([^.\[]*)/
+			parent = node.parent;
+		    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
+		        parent = parent.parent;
+		    }
+		    if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
+		        if (parent.globalVariables == undefined){
+		            parent.globalVariables = []
+		            alias = {}; parent.globalVariables.push(alias);
+		        }
+		        functionArguments = getArgs(parent);
+		        if (otherArgs != undefined){
+		        	if (!isNaN(otherArgs)){
+
+		        		regexMatches = prevNode.source().match(regex)
+			        	if (regexMatches.length > 0) {
+			        		if (functionArguments.includes(regexMatches[0])){
+			        			try { if (!parent.localVariables.includes(node.source().substring(0,otherArgs).trim())) parent.localVariables.push(node.source().substring(0,otherArgs).trim()) } catch (err) {}
+			        			return;
+			        		}
+			        	}
+		        		parent.globalVariables[0][node.source().substring(0,otherArgs).trim()] = node.source().substring(otherArgs+1).trim()
+			        	try	{ localIndex = parent.localVariables.indexOf(node.source().substring(0,otherArgs).trim());
+			        		if (localIndex > -1){
+			        			parent.localVariables.splice(localIndex, 1);
+			        		} } catch (err) {}
+		        	} else {
+		        		regexMatches = otherArgs.source().match(regex)
+			        	if (regexMatches.length > 0) {
+			        		if (functionArguments.includes(regexMatches[0])){
+			        			try { if (!parent.localVariables.includes(node.source())) parent.localVariables.push(node.source()) } catch (err) {}
+			        			return;
+			        		}
+			        	}
+		        		parent.globalVariables[0][node.source()] = otherArgs.source();
+		        		try { localIndex = parent.localVariables.indexOf(node.source());
+		        		if (localIndex > -1){
+		        			parent.localVariables.splice(localIndex, 1);
+		        		} } catch (err) {}
+		        	}
+		        } else {
+		        	regexMatches = node.source().match(regex)
+		        	if (regexMatches.length > 0) {
+		        		if (functionArguments.includes(regexMatches[0])){
+		        			addLocalVariable(node);
+		        			return;
+		        		}
+		        	}
+		        	parent.globalVariables.push(node.source());
+		        	try { localIndex = parent.localVariables.indexOf(node.source());
+	        		if (localIndex > -1){
+	        			parent.localVariables.splice(localIndex, 1);
+	        		} } catch(err) {}
+		        }
+		    }
+		}
+
+		getArgs = function (node) {
+		  // First match everything inside the function argument parens.
+		try {
+			  var args = node.source().match(/function\s.*?\(([^)]*)\)/)[1];
+			 
+			  // Split the arguments string into an array comma delimited.
+			  return args.split(",").map(function(arg) {
+			    // Ensure no inline comments are parsed and trim the whitespace.
+			    return arg.replace(/\/\*.*\*\//, "").trim();
+			  }).filter(function(arg) {
+			    // Ensure no undefineds are added.
+			    return arg;
+			  });
+			} catch (err) {
+				return [];
+			}
+		}
+
+		//Track the previous node;
+		var prevNode = null;
+
 		m = fala({
 			source: content,
 			loc: true,
@@ -472,6 +580,9 @@ var traceFilter = function (content, options) {
 				end: node.loc.end
 			};
 
+			if (node.parent != undefined && node.parent.type == "VariableDeclarator"){
+				prevNode = node;
+			}
 			if (node.type === "Program") {
 				var info = { nodeId: makeId("toplevel", options.path, node.loc) };
 				var arg = JSON.stringify(info);
@@ -486,12 +597,14 @@ var traceFilter = function (content, options) {
 			}
 
 			if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration') {
-				var attrs = { nodeId: makeId('function', options.path, node.loc) };
+				functionArguments = getArgs(node);
+				node.arguments = functionArguments;
+				var attrs = { nodeId: makeId('function', options.path, node.loc), localVars: node.localVariables, globalVariables: node.globalVariables };
 
 				// convert the arguments to strings
 				var args = JSON.stringify(attrs);
 				var entryArgs = args.slice(0, args.length - 1) + ', arguments: ' + options.tracer_name + '.Array.prototype.slice.apply(arguments), this: this }';
-				var exitArgs = args;
+				var exitArgs = entryArgs;
 
 				if (options.trace_function_entry) {
 					// insert the traces for when the function is called and when it exits
@@ -544,7 +657,28 @@ var traceFilter = function (content, options) {
 				}
 				update(node, sourceNodes(node));
 			} else if (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator') {
-				update(node, sourceNodes(node));
+				if (node.type == "VariableDeclarator"){
+			        if ((ind = node.source().indexOf("=")) > 0) {
+			           if ( IsLocalVariable(prevNode) < 1 ) {
+			            	addLocalVariable(node, ind);
+			        	} else {
+			        		addGlobalVariable(node, ind);
+			        	}
+			        } else {
+			            addLocalVariable(node);
+			        }
+			    }
+			    update(node, sourceNodes(node));
+			// Handles any global variable being assigned any value
+			// or a local variable becoming an alias of a global variable
+			} else if (node.type == "AssignmentExpression"){
+				if (IsLocalVariable(node.left) > 0){
+					addGlobalVariable(node.left);
+				} else if (IsLocalVariable(node.right) > 0){
+					addGlobalVariable(node.left, node.right);
+				} else {
+					addLocalVariable(node.left);
+				}
 			} else if (node.type === 'SwitchStatement') {
 				if (options.trace_switches) {
 					for (var i in node.cases) {
