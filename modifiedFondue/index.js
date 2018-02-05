@@ -318,6 +318,104 @@ var traceFilter = function (content, options) {
 	var processed = content;
 	var functionSources = {};
 
+	var removeLocalVariable = function(node) {
+		parent = node.parent;
+	    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
+	        parent = parent.parent;
+	    }
+	    if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
+	    	try { localIndex = parent.localVariables.indexOf(node.source());
+    		if (localIndex > -1) parent.localVariables.splice(localIndex, 1);
+    		} catch(err) {}
+	    }
+	}
+
+	var addLocalVariable = function (node) {
+	    parent = node.parent;
+	    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
+	        parent = parent.parent;
+	    }
+	    if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
+	        if (parent.localVariables == undefined){
+	            parent.localVariables = []
+	        }
+	        if (node.id) parent.localVariables.push(node.id.name);
+	        else parent.localVariables.push(node.source());
+	        return;
+	    }
+
+	}
+
+	/* fetches the identifier from the node
+	 by recursively referencing the object in case of member expression
+	 or returns null if no identifier is found
+	 */
+	var getIdentifierFromMemberExpression = function (node) {
+		if (node.type == "Identifier"){
+			return node;
+		}
+		if (node.type == "MemberExpression"){
+			return getIdentifierFromMemberExpression(node.object)
+		}
+		return null;
+	}
+
+	/* 
+	Returns 0 for local and -1 for non variables (literals, integers etc)
+	Returns 1 for global
+	*/
+	var IsLocalVariable = function (node){
+		identifier = getIdentifierFromMemberExpression(node);
+		if (!identifier || node.type == "ObjectExpression" || node.type == "Literal"){
+			return 0;
+		}
+	    parent = identifier.parent;
+	    while (parent != undefined && parent.parent != undefined){
+	        if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
+	        	functionArguments = getArgs(parent);
+	        	if (parent.localVariables == undefined) parent.localVariables = []
+	            if (parent.localVariables.includes(identifier.name) || functionArguments.includes(identifier.name)){
+	                return 0;
+	            }
+	        }
+	        parent = parent.parent;
+	    }
+	    // console.log("variable: " + node.source() + "is not a local : ");
+	    return 1;
+	}
+
+	var addGlobalVariable = function (node, otherArgs) {
+		parent = node.parent;
+	    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
+	        parent = parent.parent;
+	    }
+	    if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
+	        if (parent.globalVariables == undefined){
+	            parent.globalVariables = []
+	            alias = {}; parent.globalVariables.push(alias);
+	        }
+	        if (node.source() in parent.globalVariables[0] || parent.globalVariables.includes(node.source()) || Object.values(parent.globalVariables[0]).includes(node.source()) ) return;
+	        if (otherArgs != undefined){
+        		if (node.id) parent.globalVariables[0][node.id.name] = otherArgs.name;
+        		else parent.globalVariables[0][node.name] = otherArgs.name;
+	        } else {
+	        	parent.globalVariables.push(node.source());
+	        }
+	        try { localIndex = parent.localVariables.indexOf(node.source());
+    		if (localIndex > -1) parent.localVariables.splice(localIndex, 1);
+    		} catch(err) {}
+	    }
+	}
+
+	var getArgs = function (node) {
+		var args = [];
+		if (node.params.length > 0){
+			node.params.forEach(function (param) {
+				args.push(param.source())
+			});
+		}
+		return args;
+	}
 	var extractTracePoints = function (content, path) {
 		var nodes = [];
 
@@ -345,7 +443,9 @@ var traceFilter = function (content, options) {
 						id: makeId("function", path, node.loc),
 						type: "function",
 						name: concoctFunctionName(node),
-						params: params
+						params: params,
+						localvars: node.localVariables,
+						globalvars: node.globalVariables
 					});
 
 				} else if (node.type === 'CallExpression') {
@@ -372,6 +472,36 @@ var traceFilter = function (content, options) {
 						name: '(' + basename(path) + ' toplevel)',
 					});
 
+				} else if (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator') {
+					if (node.type == "VariableDeclarator"){
+						if (node.init) {
+							if (IsLocalVariable(node.init) == 0) {
+								addLocalVariable(node);
+							} else {
+								// removeLocalVariable(node);
+								addGlobalVariable(node,node.init);
+							}
+						} else {
+							addLocalVariable(node);
+						}
+				    }
+				// Handles any global variable being assigned any value
+				// or a local variable becoming an alias of a global variable
+				} else if (node.type == "AssignmentExpression"){
+					if (IsLocalVariable(node.left) > 0){
+						//a global variable is being updated, and hence needs to be tracked
+						addGlobalVariable(node.left);
+					} else if (IsLocalVariable(node.right) > 0){
+						//the left node is local, however the right node is global, 
+						//therefore left becomes an alias to a global
+						// therefore no longer local
+						// also, now track the global variable being aliased
+						// console.log("ENtered condition where left: " + node.left.source() + "is local but right is global: " + node.right.source());
+						removeLocalVariable(node.left);
+						addGlobalVariable(node.left, node.right);
+					} else {
+						addLocalVariable(node.left);
+					}
 				} else if (node.type === 'IfStatement') {
 					var handleBranch = function (node) {
 						nodes.push({
@@ -434,138 +564,6 @@ var traceFilter = function (content, options) {
 			};
 		}
 
-		addLocalVariable = function (node, containsEqualTo) {
-		    parent = node.parent;
-		    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
-		        parent = parent.parent;
-		    }
-		    if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
-		        if (parent.localVariables == undefined){
-		            parent.localVariables = []
-		        }
-		        if (containsEqualTo > 0){
-		        	parent.localVariables.push(node.source().substring(0,ind).trim());
-		        } else {
-		        	parent.localVariables.push(node.source());
-		        }
-		        return;
-		    }
-
-		}
-
-		/* fetches the identifier from the node
-		 by recursively referencing the object in case of member expression
-		 or returns null if no identifier is found
-		 */
-		getIdentifierFromMemberExpression = function (node) {
-			if (node.type == "Identifier"){
-				return node;
-			}
-			if (node.type == "MemberExpression"){
-				return getIdentifierFromMemberExpression(node.object)
-			}
-			return null;
-		}
-
-		/* 
-		Returns 0 for local and -1 for non variables (literals, integers etc)
-		Returns 1 for global
-		*/
-		IsLocalVariable = function (node){
-			identifier = getIdentifierFromMemberExpression(node);
-			if (!identifier){
-				return -1;
-			}
-		    parent = identifier.parent;
-		    while (parent != undefined && parent.parent != undefined){
-		        if (parent.localVariables != undefined){
-		            if (parent.localVariables.includes(identifier.source())){
-		                return 0;
-		            }
-		        }
-		        parent = parent.parent;
-		    }
-		    return 1;
-		}
-
-		addGlobalVariable = function (node, otherArgs) {
-			regex = /^([^.\[]*)/
-			parent = node.parent;
-		    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
-		        parent = parent.parent;
-		    }
-		    if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
-		        if (parent.globalVariables == undefined){
-		            parent.globalVariables = []
-		            alias = {}; parent.globalVariables.push(alias);
-		        }
-		        functionArguments = getArgs(parent);
-		        if (otherArgs != undefined){
-		        	if (!isNaN(otherArgs)){
-
-		        		regexMatches = prevNode.source().match(regex)
-			        	if (regexMatches.length > 0) {
-			        		if (functionArguments.includes(regexMatches[0])){
-			        			try { if (!parent.localVariables.includes(node.source().substring(0,otherArgs).trim())) parent.localVariables.push(node.source().substring(0,otherArgs).trim()) } catch (err) {}
-			        			return;
-			        		}
-			        	}
-		        		parent.globalVariables[0][node.source().substring(0,otherArgs).trim()] = node.source().substring(otherArgs+1).trim()
-			        	try	{ localIndex = parent.localVariables.indexOf(node.source().substring(0,otherArgs).trim());
-			        		if (localIndex > -1){
-			        			parent.localVariables.splice(localIndex, 1);
-			        		} } catch (err) {}
-		        	} else {
-		        		regexMatches = otherArgs.source().match(regex)
-			        	if (regexMatches.length > 0) {
-			        		if (functionArguments.includes(regexMatches[0])){
-			        			try { if (!parent.localVariables.includes(node.source())) parent.localVariables.push(node.source()) } catch (err) {}
-			        			return;
-			        		}
-			        	}
-		        		parent.globalVariables[0][node.source()] = otherArgs.source();
-		        		try { localIndex = parent.localVariables.indexOf(node.source());
-		        		if (localIndex > -1){
-		        			parent.localVariables.splice(localIndex, 1);
-		        		} } catch (err) {}
-		        	}
-		        } else {
-		        	regexMatches = node.source().match(regex)
-		        	if (regexMatches.length > 0) {
-		        		if (functionArguments.includes(regexMatches[0])){
-		        			addLocalVariable(node);
-		        			return;
-		        		}
-		        	}
-		        	parent.globalVariables.push(node.source());
-		        	try { localIndex = parent.localVariables.indexOf(node.source());
-	        		if (localIndex > -1){
-	        			parent.localVariables.splice(localIndex, 1);
-	        		} } catch(err) {}
-		        }
-		    }
-		}
-
-		getArgs = function (node) {
-		  // First match everything inside the function argument parens.
-		try {
-			  var args = node.source().match(/function\s.*?\(([^)]*)\)/)[1];
-			 
-			  // Split the arguments string into an array comma delimited.
-			  return args.split(",").map(function(arg) {
-			    // Ensure no inline comments are parsed and trim the whitespace.
-			    return arg.replace(/\/\*.*\*\//, "").trim();
-			  }).filter(function(arg) {
-			    // Ensure no undefineds are added.
-			    return arg;
-			  });
-			} catch (err) {
-				return [];
-			}
-		}
-
-		//Track the previous node;
-		var prevNode = null;
 
 		m = fala({
 			source: content,
@@ -580,9 +578,6 @@ var traceFilter = function (content, options) {
 				end: node.loc.end
 			};
 
-			if (node.parent != undefined && node.parent.type == "VariableDeclarator"){
-				prevNode = node;
-			}
 			if (node.type === "Program") {
 				var info = { nodeId: makeId("toplevel", options.path, node.loc) };
 				var arg = JSON.stringify(info);
@@ -597,8 +592,6 @@ var traceFilter = function (content, options) {
 			}
 
 			if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration') {
-				functionArguments = getArgs(node);
-				node.arguments = functionArguments;
 				var attrs = { nodeId: makeId('function', options.path, node.loc), localVars: node.localVariables, globalVariables: node.globalVariables };
 
 				// convert the arguments to strings
@@ -610,7 +603,7 @@ var traceFilter = function (content, options) {
 					// insert the traces for when the function is called and when it exits
 					var traceBegin = options.tracer_name + '.traceEnter(' + entryArgs + ');';
 					var traceError = options.tracer_name + '.traceExceptionThrown(' + exitArgs + ', e); throw e;';
-					var traceEnd = ';' + options.tracer_name + '.traceExit(' + exitArgs + ')';
+					var traceEnd = ';' + options.tracer_name + '.traceExit(' + exitArgs + ');';
 
 					// add line break after oldBody in case it ends in a //-comment
 					update(node.body, '{ ', traceBegin, ' try { ', sourceNodes(node.body), '\n } catch (e) { ', traceError, ' } finally { ', traceEnd, ' } }');
@@ -658,23 +651,31 @@ var traceFilter = function (content, options) {
 				update(node, sourceNodes(node));
 			} else if (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator') {
 				if (node.type == "VariableDeclarator"){
-			        if ((ind = node.source().indexOf("=")) > 0) {
-			           if ( IsLocalVariable(prevNode) < 1 ) {
-			            	addLocalVariable(node, ind);
-			        	} else {
-			        		addGlobalVariable(node, ind);
-			        	}
-			        } else {
-			            addLocalVariable(node);
-			        }
+					if (node.init) {
+						if (IsLocalVariable(node.init) == 0) {
+							addLocalVariable(node);
+						} else {
+							// removeLocalVariable(node);
+							addGlobalVariable(node,node.init);
+						}
+					} else {
+						addLocalVariable(node);
+					}
 			    }
 			    update(node, sourceNodes(node));
 			// Handles any global variable being assigned any value
 			// or a local variable becoming an alias of a global variable
 			} else if (node.type == "AssignmentExpression"){
 				if (IsLocalVariable(node.left) > 0){
+					//a global variable is being updated, and hence needs to be tracked
 					addGlobalVariable(node.left);
 				} else if (IsLocalVariable(node.right) > 0){
+					//the left node is local, however the right node is global, 
+					//therefore left becomes an alias to a global
+					// therefore no longer local
+					// also, now track the global variable being aliased
+					// console.log("ENtered condition where left: " + node.left.source() + "is local but right is global: " + node.right.source());
+					removeLocalVariable(node.left);
 					addGlobalVariable(node.left, node.right);
 				} else {
 					addLocalVariable(node.left);

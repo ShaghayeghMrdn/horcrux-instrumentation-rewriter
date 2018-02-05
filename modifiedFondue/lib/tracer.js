@@ -509,7 +509,6 @@ if (typeof {name} === 'undefined') {
 		this.timestamp = new Date().getTime();
 		this.type = type;
 		this.f = nodeById[info.nodeId];
-        this.currentWindowState = info.currentWindowState
 		this.childLinks = [];
 		this.parentLinks = [];
 		this.returnValue = undefined;
@@ -801,8 +800,6 @@ if (typeof {name} === 'undefined') {
 		// update hit counts
 		hit(invocation);
 		invocationStack.push(invocation);
-
-        var top = invocationStack[invocationStack.length - 1];
 	}
 
 	function popInvocation(info) {
@@ -909,11 +906,11 @@ if (typeof {name} === 'undefined') {
 	};
 
 	this.traceFileEntry = function (info) {
-		pushNewInvocation(info, 'toplevel');
+        pushNewInvocation(info, 'toplevel');
 	};
 
 	this.traceFileExit = function (info) {
-		popInvocation(info);
+        popInvocation(info);
 	};
 
 	this.setGlobal = function (gthis) {
@@ -988,10 +985,12 @@ if (typeof {name} === 'undefined') {
 
 			info.arguments = Array.prototype.slice.apply(arguments); // XXX: mutating info may not be okay, but we want the arguments
 
-			var callSiteInvocation = pushNewInvocation(info, 'callsite');
+            var callSiteInvocation;
+			callSiteInvocation = pushNewInvocation(info, 'callsite');
 			pushNewInvocation({ nodeId: "log", arguments: info.arguments }, 'function');
 			popInvocation();
 			popInvocation();
+            
 
 			// if called directly from an invocation that's in the query, add
 			// this log statement invocation as well
@@ -1042,7 +1041,6 @@ if (typeof {name} === 'undefined') {
 				// have apply. so we apply Function.apply instead.
 				var t = customThis ? fthis : this;
 				return Function.apply.apply(func, [t].concat(arguments));
-                // return function(){}
 			} finally {
 				popInvocation();
 			}
@@ -1188,15 +1186,33 @@ if (typeof {name} === 'undefined') {
         return [unmatchObjects, keysMatched, totalKeysCompared]
     }
 
-    function getValuesFromKeys(keys){
+    function getObjectFromMemberExpression(node){
+        var regex = /^([^.\[]*)/;
+        match = node.match(regex);
+        if (match.length > 0) return match[0];
+        return "";
+    }
+
+    // Need to take care of hierarchical aliasing
+    // ie multiple aliasing, need to have a function. 
+    // to give the root of the alias tree
+    function getValuesFromKeys(globalVariables){
         var KeyValue = {}
-        keys.forEach(function(key){
-            try {
-                KeyValue[key] = Object.assign({},eval(key));
-            } catch (err) {
-                KeyValue[key] = null
+        globalVariables.slice(1).forEach(function(entry){
+            var object = getObjectFromMemberExpression(entry);
+            var actualKey = entry;
+            if (object in globalVariables[0]){
+                actualKey = entry.replace(object, globalVariables[0][object]);
             }
+            KeyValue[actualKey] = eval(actualKey);
         });
+        // keys.forEach(function(key){
+        //     try {
+        //         KeyValue[key] = Object.assign({},eval(key));
+        //     } catch (err) {
+        //         KeyValue[key] = null
+        //     }
+        // });
         return KeyValue;
     }
 
@@ -1211,18 +1227,15 @@ if (typeof {name} === 'undefined') {
 	 *   }
 	 */
 	this.traceEnter = function (info) {
-        if (enableWindowDiffing){
-            // if ( typeof window == 'undefined'){
-            //     console.log("Fondue can't track changes to the window object")
-            // } else {
-            //      info.currentWindowState = getTypesFromWindowObject(window)
-            // }
-            info.globalDelta = {}
-            if (info.globalVariables != undefined){
-                info.globalDelta["enter"] = getValuesFromKeys(Object.values(info.globalVariables[0]).concat(info.globalVariables.slice(1, info.globalVariables.length)));
+        try{
+           if (enableWindowDiffing){
+                info.globalDelta = {}
+                if (info.globalVariables != undefined){
+                    info.globalDelta["enter"] = getValuesFromKeys(info.globalVariables);
+                }
             }
-        }
-		pushNewInvocation(info, 'function');
+        } catch(err) {console.log("failed at evaluating global delta: " + err);}
+		 pushNewInvocation(info, 'function');
 	};
 
 	/**
@@ -1238,18 +1251,18 @@ if (typeof {name} === 'undefined') {
 	 * local variables of the instrumented function.
 	 */
 	this.traceExit = function (info) {
-        if (enableWindowDiffing){
-            var top = invocationStack[invocationStack.length - 1];
-            if (!top) {
-                throw new Error('value returned with nothing on the stack');
+        try {
+            if (enableWindowDiffing){
+                var top = invocationStack[invocationStack.length - 1];
+                if (!top) {
+                    throw new Error('value returned with nothing on the stack');
+                }
+                if (info.globalVariables != undefined){
+                   top.globalDelta["exit"] = getValuesFromKeys(info.globalVariables);
+               }
             }
-            if (info.globalVariables != undefined){
-               top.globalDelta["exit"] = getValuesFromKeys(Object.values(info.globalVariables[0]).concat(info.globalVariables.slice(1, info.globalVariables.length)));
-           }
-            // top.globalDelta = compareWindowObjects(top.currentWindowState, getTypesFromWindowObject(window), info);
-            // top.globalDelta = 
-        }
-		popInvocation(info);
+        } catch(err) {console.log("failed at evaluating global delta: " + err);}
+		 popInvocation(info);
 	};
 
 	this.traceReturnValue = function (value) {
