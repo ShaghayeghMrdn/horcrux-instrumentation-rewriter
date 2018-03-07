@@ -506,7 +506,7 @@ if (typeof {name} === 'undefined') {
 	function Invocation(info, type) {
 		this.tick = nextInvocationId++;
 		this.id = TRACER_ID + "-" + this.tick;
-		this.timestamp = new Date().getTime();
+		this.timestamp = Date.now();
 		this.type = type;
 		this.f = nodeById[info.nodeId];
 		this.childLinks = [];
@@ -889,6 +889,45 @@ if (typeof {name} === 'undefined') {
 		}
 	}
 
+
+    window.addEventListener("load" ,function() {
+        var MAXRESULT = 1000000;
+
+        var tracer = {name};
+
+        functions = {};
+        var uniqueFunctions = [];
+        var callsites = {}
+        var ids = [];
+        var ids_callsites = [];
+        var nodesHandle = tracer.trackNodes();
+        tracer.newNodes(nodesHandle).forEach(function (n) {
+            if (n.type === 'function') {
+                functions[n.id] = n;
+                ids.push(n.id);
+            } else if (n.type == 'callsite'){
+                callsites[n.id] = n;
+                ids_callsites.push(n.id);   
+            }
+        });
+
+        var logHandle = tracer.trackLogs({ids: ids});
+        invocations = tracer.logDelta(logHandle, MAXRESULT);
+
+        console.log("Number of functions: " + Object.keys(functions).length);
+        console.log("Number of invocations: " + invocations.length);
+
+        var modifiedFunctionCounter = 0
+        var uniqueFunctions = [];
+        importantInvocations = []
+        invocations.forEach(function(entry){
+
+            if (entry.globalDelta != undefined && Object.keys(entry.globalDelta["After"]).length > 0){
+                importantInvocations.push(entry)
+            }
+        });
+        console.log("Total number of important invocations executed " + importantInvocations.length);
+    });
 	/**
 	 * called from the top of every script processed by the rewriter
 	 */
@@ -906,6 +945,9 @@ if (typeof {name} === 'undefined') {
 	};
 
 	this.traceFileEntry = function (info) {
+        info.globalDelta = {};
+        info.globalDelta["Before"] = {};
+        info.globalDelta["After"] = {};
         pushNewInvocation(info, 'toplevel');
 	};
 
@@ -922,38 +964,40 @@ if (typeof {name} === 'undefined') {
 	 * a new function is returned that's associated with the parent invocation.
 	 */
 	this.traceFunCreate = function (f, src) {
-		var creatorInvocation = invocationStack[invocationStack.length - 1];
-		var creatorInvocationId = creatorInvocation ? creatorInvocation.id : undefined;
-		var newF;
+        try {
+    		var creatorInvocation = invocationStack[invocationStack.length - 1];
+    		var creatorInvocationId = creatorInvocation ? creatorInvocation.id : undefined;
+    		var newF;
 
-		// Some code changes its behavior depending on the arity of the callback.
-		// Therefore, we construct a replacement function that has the same arity.
-		// The most direct route seems to be to use eval() (as opposed to
-		// new Function()), so that creatorInvocation can be accessed from the
-		// closure.
+    		// Some code changes its behavior depending on the arity of the callback.
+    		// Therefore, we construct a replacement function that has the same arity.
+    		// The most direct route seems to be to use eval() (as opposed to
+    		// new Function()), so that creatorInvocation can be accessed from the
+    		// closure.
 
-		var arglist = '';
-		for (var i = 0; i < f.length; i++) {
-			arglist += (i > 0 ? ', ' : '') + 'v' + i;
-		}
+    		var arglist = '';
+    		for (var i = 0; i < f.length; i++) {
+    			arglist += (i > 0 ? ', ' : '') + 'v' + i;
+    		}
 
-		var sharedBody = 'return f.apply(this, arguments);';
+    		var sharedBody = 'return f.apply(this, arguments);';
 
-		if (creatorInvocation) {
-			// traceEnter checks anonFuncParentInvocation and creates
-			// an edge in the graph from the creator to the new invocation.
-			// Look up by ID instead of using creatorInvocation directly in case
-			// the trace has been cleared and the original invocation no longer
-			// exists.
-			var asyncBody = 'anonFuncParentInvocation = invocationById[creatorInvocationId];';
-			var newSrc = '(function (' + arglist + ') { ' + asyncBody + sharedBody + '})';
-			newF = eval(newSrc);
-		} else {
-			var newSrc = '(function (' + arglist + ') { ' + sharedBody + '})';
-			newF = eval(newSrc);
-		}
-		newF.toString = function () { return src };
-		return newF;
+    		if (creatorInvocation) {
+    			// traceEnter checks anonFuncParentInvocation and creates
+    			// an edge in the graph from the creator to the new invocation.
+    			// Look up by ID instead of using creatorInvocation directly in case
+    			// the trace has been cleared and the original invocation no longer
+    			// exists.
+    			var asyncBody = 'anonFuncParentInvocation = invocationById[creatorInvocationId];';
+    			var newSrc = '(function (' + arglist + ') { ' + asyncBody + sharedBody + '})';
+    			newF = eval(newSrc);
+    		} else {
+    			var newSrc = '(function (' + arglist + ') { ' + sharedBody + '})';
+    			newF = eval(newSrc);
+    		}
+    		newF.toString = function () { return src };
+    		return newF;
+        } catch (err) {console.log("[INFO][TRACE FUNC CREATE:] " + err + err.stack)}
 	};
 
 	/** helper for traceFunCall below */
@@ -986,10 +1030,12 @@ if (typeof {name} === 'undefined') {
 			info.arguments = Array.prototype.slice.apply(arguments); // XXX: mutating info may not be okay, but we want the arguments
 
             var callSiteInvocation;
-			callSiteInvocation = pushNewInvocation(info, 'callsite');
-			pushNewInvocation({ nodeId: "log", arguments: info.arguments }, 'function');
-			popInvocation();
-			popInvocation();
+            // if (performance.timing.loadEventEnd == 0) {
+    			callSiteInvocation = pushNewInvocation(info, 'callsite');
+    			pushNewInvocation({ nodeId: "log", arguments: info.arguments }, 'function');
+    			popInvocation();
+    			popInvocation();
+            // }
             
 
 			// if called directly from an invocation that's in the query, add
@@ -1034,15 +1080,19 @@ if (typeof {name} === 'undefined') {
 
 		return function () {
 			info.arguments = Array.prototype.slice.apply(arguments); // XXX: mutating info may not be okay, but we want the arguments
-			var invocation = pushNewInvocation(info, 'callsite');
+			 // if (performance.timing.loadEventEnd == 0) 
+                var invocation = pushNewInvocation(info, 'callsite');
 
 			try {
 				// this used to be func.apply(t, arguments), but not all functions
 				// have apply. so we apply Function.apply instead.
 				var t = customThis ? fthis : this;
 				return Function.apply.apply(func, [t].concat(arguments));
-			} finally {
-				popInvocation();
+			} catch (err) {
+                // console.log("Property doesn't exit [NON_FATAL]" + JSON.stringify(info));
+            } finally {
+				// if (performance.timing.loadEventEnd == 0) 
+                    popInvocation();
 			}
 		}
 	};
@@ -1139,53 +1189,6 @@ if (typeof {name} === 'undefined') {
         return types;
     }
 
-    function compareWindowObjects(oldTypes, newTypes, info){
-        // console.log(JSON.stringify(oldWindow), JSON.stringify(newWindow))
-        // 
-        // console.log("Calling compare from node: " + info.nodeId)
-
-        var totalKeysCompared = 0
-        var keysMatched = 0
-        var unmatchObjects = {}
-
-        // console.log("total objects to be compared")
-        // Object.getOwnPropertyNames(newTypes).forEach(function(type){
-        //     console.log(" type: " + type + "size: " + newTypes[type].length)
-        // })
-        // console.log("Length of the object to be compared with");
-        // Object.getOwnPropertyNames(oldTypes).forEach(function(type){
-        //     console.log(" type: " + type + "size: " + oldTypes[type].length)
-        // })
-
-        Object.getOwnPropertyNames(newTypes).forEach(function(type){
-            if (!oldTypes[type]){
-                return;
-            }
-            newTypes[type].forEach(function(item1, index1){
-                var keyMatch = false;
-                totalKeysCompared++;
-
-                oldTypes[type].forEach(function(item2, index2){
-                    if (Object.keys(item1)[0] == Object.keys(item2)[0]){
-                        keyMatch = true
-                        if ( newTypes[type][index1][Object.keys(item1)[0]] == oldTypes[type][index2][Object.keys(item2)[0]]){
-                            keysMatched++;
-                            return;
-                        }
-                    else {
-                        unmatchObjects[Object.keys(item1)[0]] = [newTypes[type][index1][Object.keys(item1)[0]], oldTypes[type][index2][Object.keys(item2)[0]]]
-                        }
-                    }
-                });
-                if (!keyMatch){
-                    unmatchObjects[Object.keys(item1)[0]] = [newTypes[type][index1][Object.keys(item1)[0]],"NOMATCH"]
-                }
-            });
-        });
-
-        return [unmatchObjects, keysMatched, totalKeysCompared]
-    }
-
     function getObjectFromMemberExpression(node){
         var regex = /^([^.\[]*)/;
         match = node.match(regex);
@@ -1193,6 +1196,7 @@ if (typeof {name} === 'undefined') {
         return "";
     }
 
+    // TODO
     // Need to take care of hierarchical aliasing
     // ie multiple aliasing, need to have a function. 
     // to give the root of the alias tree
@@ -1227,15 +1231,12 @@ if (typeof {name} === 'undefined') {
 	 *   }
 	 */
 	this.traceEnter = function (info) {
-        try{
-           if (enableWindowDiffing){
-                info.globalDelta = {}
-                if (info.globalVariables != undefined){
-                    info.globalDelta["enter"] = getValuesFromKeys(info.globalVariables);
-                }
-            }
-        } catch(err) {console.log("failed at evaluating global delta: " + err);}
-		 pushNewInvocation(info, 'function');
+        try{ 
+            info.globalDelta = {};
+            info.globalDelta["Before"] = {};
+            info.globalDelta["After"] = {};
+    		pushNewInvocation(info, 'function');
+        } catch(err) {console.log("[INFO][TRACE ENTER]: " + err + err.stack)}
 	};
 
 	/**
@@ -1251,29 +1252,50 @@ if (typeof {name} === 'undefined') {
 	 * local variables of the instrumented function.
 	 */
 	this.traceExit = function (info) {
-        try {
-            if (enableWindowDiffing){
-                var top = invocationStack[invocationStack.length - 1];
-                if (!top) {
-                    throw new Error('value returned with nothing on the stack');
-                }
-                if (info.globalVariables != undefined){
-                   top.globalDelta["exit"] = getValuesFromKeys(info.globalVariables);
-               }
-            }
-        } catch(err) {console.log("failed at evaluating global delta: " + err);}
-		 popInvocation(info);
+        try{
+		  popInvocation(info);
+        } catch(err) {console.log("[INFO][TRACE EXIT]: " + err + err.stack)}
 	};
 
-	this.traceReturnValue = function (value) {
-		if (_bailedTick) return value;
+    var escapeRegExp = function(str) {
+        return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|\']/g, "\\$&");
+    }
 
-		var top = invocationStack[invocationStack.length - 1];
-		if (!top) {
-			throw new Error('value returned with nothing on the stack');
-		}
-		top.returnValue = scrapeObject(value);
-		return value;
+    this.setValue = function (val,variableName, variable, typeOfRead) {
+        
+        /*
+        Following are the majority kind of reads we need to handle
+        */
+        try {
+            var top = invocationStack[invocationStack.length - 1];
+            if (!top) {
+                // console.log("Error while tracking the global write | Probably it is outside any function");
+            } else {
+                if (typeof(variable) != undefined) {
+                    // console.log("Top is: " + JSON.stringify(top.globalDelta));
+                    // console.log("variable is " + variable );
+                    top.globalDelta["Before"][variableName] = variable;
+                    top.globalDelta["After"][variableName] = val;
+                }
+            }
+            return val;
+        } catch (err) {
+            console.log("[INFO][SET VALUE]: " + err + err.stack);
+            return val;
+        } 
+    }
+
+	this.traceReturnValue = function (value) {
+		try {
+            if (_bailedTick) return value;
+
+    		var top = invocationStack[invocationStack.length - 1];
+    		if (!top) {
+    			throw new Error('value returned with nothing on the stack');
+    		}
+    		top.returnValue = scrapeObject(value);
+    		return value;
+        } catch (err) { console.log("[INFO][RETURN VALUE]: " + err + err.stack);}
 	}
 
 	/**
@@ -1452,6 +1474,18 @@ if (typeof {name} === 'undefined') {
 	this.nodes = function () {
 		return nodes;
 	};
+
+    this.invocationStack = function() {
+        return invocationStack;
+    }
+
+    this.invocationsByNodeId = function() {
+        return invocationsByNodeId;
+    }
+
+    this.invocationById = function() {
+        return invocationById;
+    }
 
 	this.trackNodes = function () {
 		return nodeTracker.track();

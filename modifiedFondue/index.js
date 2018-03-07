@@ -4,6 +4,7 @@ var falafel = require('falafel');
 var falafelMap = require('falafel-map');
 var fs = require('fs');
 var basename = require('path').basename;
+var esprima = require('esprima');
 
 
 // adds keys from options to defaultOptions, overwriting on conflicts & returning defaultOptions
@@ -34,8 +35,8 @@ function instrumentationPrefix(options) {
 	options = mergeInto(options, {
 		name: '__tracer',
 		nodejs: false,
-		maxInvocationsPerTick: 4096,
-		enableWindowDiffing: true,
+		maxInvocationsPerTick: 8192,
+		enableWindowDiffing: false,
 	});
 
 	// the inline comments below are markers for building the browser version of fondue
@@ -339,8 +340,8 @@ var traceFilter = function (content, options) {
 	        if (parent.localVariables == undefined){
 	            parent.localVariables = []
 	        }
-	        if (node.id) parent.localVariables.push(node.id.name);
-	        else parent.localVariables.push(node.source());
+	        if (node.id && parent.localVariables.indexOf(node.id.name) < 0) parent.localVariables.push(node.id.name);
+	        else if (parent.localVariables.indexOf(node.source()) < 0) parent.localVariables.push(node.source());
 	        return;
 	    }
 
@@ -365,8 +366,12 @@ var traceFilter = function (content, options) {
 	Returns 1 for global
 	*/
 	var IsLocalVariable = function (node){
+		if (node.type == "ConditionalExpression"){
+			return (IsLocalVariable(node.consequent) || IsLocalVariable(node.alternate))
+		}
+
 		identifier = getIdentifierFromMemberExpression(node);
-		if (!identifier || node.type == "ObjectExpression" || node.type == "Literal"){
+		if (!identifier || node.type == "ObjectExpression" || node.type == "Literal" || node.type == "NewExpression"){
 			return 0;
 		}
 	    parent = identifier.parent;
@@ -525,7 +530,7 @@ var traceFilter = function (content, options) {
 			}).toString();
 
 		} catch (e) {
-			console.error("exception during parsing", path, e.stack);
+			console.error("exception during parsing", path, e.stack, " CONTENT: ",content);
 			return;
 		}
 
@@ -563,15 +568,17 @@ var traceFilter = function (content, options) {
 				return node.source();
 			};
 		}
+		var escapeRegExp = function(str) {
+		  return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|\']/g, "\\$&");
+		}
 
-
+		var modifyParentExpression = false;
 		m = fala({
 			source: content,
 			loc: true,
 			sourceFilename: options.sourceFilename || options.path,
 			generatedFilename: options.generatedFilename || options.path,
 		}, function (node) {
-
 			var loc = {
 				path: options.path,
 				start: node.loc.start,
@@ -597,7 +604,7 @@ var traceFilter = function (content, options) {
 				// convert the arguments to strings
 				var args = JSON.stringify(attrs);
 				var entryArgs = args.slice(0, args.length - 1) + ', arguments: ' + options.tracer_name + '.Array.prototype.slice.apply(arguments), this: this }';
-				var exitArgs = entryArgs;
+				var exitArgs = args;
 
 				if (options.trace_function_entry) {
 					// insert the traces for when the function is called and when it exits
@@ -615,21 +622,26 @@ var traceFilter = function (content, options) {
 					}
 				}
 			} else if (node.type === 'CallExpression') {
-				if (options.trace_function_calls) {
-					var id = makeId("callsite", loc.path, loc);
+				// if (options.trace_function_calls) {
+				// 	var id = makeId("callsite", loc.path, loc);
 
-					if (node.callee.source() !== "require") {
-						if (node.callee.type === 'MemberExpression') {
-							if (node.callee.computed) {
-								update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: ', sourceNodes(node.callee.property), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
-							} else {
-								update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: "', sourceNodes(node.callee.property), '", nodeId: ', JSON.stringify(id), ', vars: {} })');
-							}
-						} else {
-							update(node.callee, ' ', options.tracer_name, '.traceFunCall({ func: ', sourceNodes(node.callee), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
-						}
-					}
+				// 	if (node.callee.source() !== "require") {
+				// 		if (node.callee.type === 'MemberExpression') {
+				// 			if (node.callee.computed) {
+				// 				update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: ', sourceNodes(node.callee.property), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
+				// 			} else {
+				// 				update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: "', sourceNodes(node.callee.property), '", nodeId: ', JSON.stringify(id), ', vars: {} })');
+				// 			}
+				// 		} else {
+				// 			update(node.callee, ' ', options.tracer_name, '.traceFunCall({ func: ', sourceNodes(node.callee), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
+				// 		}
+				// 	}
+				// }
+			} else if (node.type == "ExpressionStatement"){
+				if (modifyParentExpression){
+					update(node, ' \n try { ', sourceNodes(node), ' } catch(err){ console.log("error while updating global tracking" + err);} \n');
 				}
+				modifyParentExpression = false;
 			} else if (/Statement$/.test(node.type)) {
 				var semiColonStatements = ["BreakStatement", "ContinueStatement", "ExpressionStatement", "ReturnStatement", "ThrowStatement"];
 				if (node.type === "ReturnStatement" && node.argument) {
@@ -663,12 +675,17 @@ var traceFilter = function (content, options) {
 					}
 			    }
 			    update(node, sourceNodes(node));
+			
 			// Handles any global variable being assigned any value
 			// or a local variable becoming an alias of a global variable
 			} else if (node.type == "AssignmentExpression"){
 				if (IsLocalVariable(node.left) > 0){
 					//a global variable is being updated, and hence needs to be tracked
 					addGlobalVariable(node.left);
+					console.log("source: " + node.right.source() + " type : " + node.right.type);
+					update(node,node.left.source(),node.operator, options.tracer_name,'.setValue(',node.right.source(),',','\'',escapeRegExp(node.left.source()),'\'',',',node.left.source(),',',node.right.type')');
+					// update(node, node.left.source(), node.operator, options.tracer_name, '.setValue(', node.right.source(),',',node.left,')');
+
 				} else if (IsLocalVariable(node.right) > 0){
 					//the left node is local, however the right node is global, 
 					//therefore left becomes an alias to a global

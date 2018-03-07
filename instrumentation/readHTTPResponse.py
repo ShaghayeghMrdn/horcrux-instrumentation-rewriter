@@ -1,15 +1,17 @@
 
-
-import sys
 import brotli
 import http_record_pb2
 import zlib
 import os
 import re
 import subprocess
+import sys
+from copy import deepcopy
 from Naked.toolshed.shell import execute_js
 
 TEMP_FILE = "tmp"
+
+childPids = []
 deflate_compress = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS)
 zlib_compress = zlib.compressobj(9, zlib.DEFLATED, zlib.MAX_WBITS)
 gzip_compress = zlib.compressobj(9, zlib.DEFLATED, zlib.MAX_WBITS | 16)
@@ -25,8 +27,11 @@ def extractUrlFromString(url):
     urls = re.findall(regex, url)
     if not urls:
         return url[0]
+    else:
+        return url
 
 http_response = http_record_pb2.RequestResponse()
+
 file_counter = 0
 
 def copy(source, destination):
@@ -56,6 +61,9 @@ def unchunk(body):
 
     return new_body
 
+# create the output directory
+output_directory = sys.argv[1].split('/')[-2]
+subprocess.Popen("mkdir -p {}".format(os.path.join(sys.argv[2], output_directory)), shell=True)
 
 for root, folder, files in os.walk(sys.argv[1]):
     print "This directory has ", len(files), " number of files"
@@ -65,13 +73,15 @@ for root, folder, files in os.walk(sys.argv[1]):
             file_counter += 1
             f = open(os.path.join(root,file), "rb")
             http_response.ParseFromString(f.read())
+            output_http_response = deepcopy(http_response)
             f.close()
 
             copyFile = True
             fileType = None
             gzip = False
             gzipType = ""
-            setContentLength = False
+
+            markedToBeDeleted = []
 
             print "Checking: {} file : {}".format(file, file_counter)
             for header in http_response.response.header:
@@ -82,79 +92,112 @@ for root, folder, files in os.walk(sys.argv[1]):
                     elif "html" in header.value.lower():
                         fileType = "html"
                         copyFile = False
-                elif header.key == "Content-Encoding":
-                    # print "GZIIPED FILE is " , file
-                    gzip = True
-                    gzipType = header.value
-                    ind = [i for i, header in enumerate(http_response.response.header) if header.key == "Content-Encoding"]
-                    del http_response.response.header[ind[0]]
 
-                elif header.key == "Transfer-Encoding" and header.value == "chunked":
-                    http_response.response.body = unchunk(http_response.response.body)
-                    ind = [i for i, header in enumerate(http_response.response.header) if header.key == "Transfer-Encoding"]
-                    print "Deleting the Transfer-Encoding header", ind
-                    del http_response.response.header[ind[0]]
-
-                elif header.key == "Content-Length":
-                    setContentLength = True
-                    ind = [i for i, header in enumerate(http_response.response.header) if header.key == "Content-Length"]
-                    del http_response.response.header[ind[0]]
-
-
-            output_directory = sys.argv[1].split('/')[-2]
-            subprocess.Popen("mkdir -p {}".format(os.path.join(sys.argv[2], output_directory)), shell=True)
+            # print http_response.request.first_line
+            filename = http_response.request.first_line.split()[1].split('/')[-1]
+            if len(filename) > 20:
+                filename = filename[-20:]
+            if len(filename) == 0:
+                filename = "anonymous"
 
             if copyFile:
                 print "Simply copying the file without modification.. "
                 copy(os.path.join(root,file), os.path.join(sys.argv[2], output_directory))
             else:
-                print "Instrumenting: {} is a {} file".format(file, fileType)
-                f = open(TEMP_FILE, "w")
-                if gzip:
-                    try:
-                        print "Decompressing {} ...with type {}".format(file, gzipType)
-                        if gzipType.lower() != "br":
-                            decompressed_data = zlib.decompress(bytes(bytearray(http_response.response.body)), zlib.MAX_WBITS|32)
-                        else:
-                            decompressed_data = brotli.decompress(http_response.response.body)
-                        f.write(decompressed_data)
-                    except zlib.error as e:
-                        print "Corrupted decoding: " + file
-                        print "The corrupted encoding itself:"  + http_response.response.body
-                else: f.write(http_response.response.body)
-                f.close()
+                # pid = os.fork()
+                # if pid == 0:
+                    # TEMP_FILE = str(os.getpid())
+                    for header in http_response.response.header:
+                        if header.key == "Content-Encoding":
+                            # print "GZIIPED FILE is " , file
+                            gzip = True
+                            gzipType = header.value
+                            # ind = [i for i, header in enumerate(http_response.response.header) if header.key == "Content-Encoding"]
+                            # print "deleting ", ind, len(http_response.response.header), len(output_http_response.response.header)
+                            # del output_http_response.response.header[ind[0]]
+                            # header.value = "identity"
+                            markedToBeDeleted.append(header.key)
 
-                #Pass into the nodejs instrumentation script
-                cmd = subprocess.Popen("node instrument.js -i {} -o {} -t {}".format(TEMP_FILE, os.path.join(sys.argv[2], output_directory,file),fileType), shell=True)
-                while cmd.poll() is None:
-                    # print "Waiting for instrumentation..."
-                    continue
+                        elif header.key == "Transfer-Encoding" and header.value == "chunked":
+                            http_response.response.body = unchunk(http_response.response.body)
+                            # ind = [i for i, header in enumerate(http_response.response.header) if header.key == "Transfer-Encoding"]
+                            # print "deleting ", ind, len(http_response.response.header), len(output_http_response.response.header)
+                            # del output_http_response.response.header[ind[0]]
+                            # header.value = "identity"
+                            markedToBeDeleted.append(header.key)
 
-                tmpFile = open(TEMP_FILE, "rb")
-                modifiedContent = tmpFile.read()
-                # print modifiedContent
-                # if gzip:
-                #     print "Compressing the modified content.."
-                #     if gzipType.lower() == "gzip":
-                #         compress = gzip_compress
-                #         http_response.response.body = compress.compress(modifiedContent)
-                #     elif gzipType.lower() =="deflate":
-                #         compress = deflate_compress
-                #         http_response.response.body = compress.compress(modifiedContent) + compress.flush()
-                #     elif gzipType.lower() == "br":
-                #         http_response.response.body = brotli.compress(modifiedContent)
-                # else:
-                http_response.response.body = modifiedContent
+                    print "Marked to be deleted headers are: " , markedToBeDeleted
 
-                outputFile = open(os.path.join(sys.argv[2], output_directory, file), "w")
-                
-                outputFile.write(http_response.SerializeToString())
+                    print "Instrumenting: {} is a {} file".format(file, fileType)
+                    f = open(TEMP_FILE, "w")
+                    if gzip:
+                        try:
+                            print "Decompressing {} ...with type {}".format(file, gzipType)
+                            if gzipType.lower() != "br":
+                                decompressed_data = zlib.decompress(bytes(bytearray(http_response.response.body)), zlib.MAX_WBITS|32)
+                            else:
+                                decompressed_data = brotli.decompress(http_response.response.body)
+                            f.write(decompressed_data)
+                        except zlib.error as e:
+                            print "Corrupted decoding: " + file
+                            print "The corrupted encoding itself:"  + http_response.response.body
+                    else: f.write(http_response.response.body)
+                    f.close()
 
-                outputFile.close()
-                tmpFile.close()
+                    #Pass into the nodejs instrumentation script
+                    command = "node instrument.js -i {} -n '{}' -t {}".format(TEMP_FILE, re.escape(filename),fileType)
+                    print "Executing ", command
+                    cmd = subprocess.Popen(command, shell=True)
+                    while cmd.poll() is None:
+                        # print "Waiting for instrumentation..."
+                        continue
+                    tmpFile = open(TEMP_FILE, "rb")
+                    modifiedContent = tmpFile.read()
+                    modifiedLength = len(modifiedContent)
+                    # print modifiedContent
+                    # if gzip:
+                    #     print "Compressing the modified content.."
+                    #     if gzipType.lower() == "gzip":
+                    #         compress = gzip_compress
+                    #         output_http_response.response.body = compress.compress(modifiedContent) + compress.flush()
+                    #         modifiedLength = len(output_http_response.response.body)
+                    #     elif gzipType.lower() =="deflate":
+                    #         compress = deflate_compress
+                    #         output_http_response.response.body = compress.compress(modifiedContent) + compress.flush()
+                    #         modifiedLength = len(output_http_response.response.body)
+                    #     elif gzipType.lower() == "br":
+                    #         output_http_response.response.body = brotli.compress(modifiedContent)
+                    #         modifiedLength = len(output_http_response.response.body)
+                    # else:
+                    # print "Length of modified content is: ", len(modifiedContent);
+                    output_http_response.response.body = modifiedContent
+
+                    for key in markedToBeDeleted:
+                        for header in http_response.response.header:
+                            if header.key == key:
+                                output_http_response.response.header.remove(header)
+                                break
+
+                    for header in output_http_response.response.header:
+                        if header.key == "Content-Length":
+                            header.value = bytes(modifiedLength)
+
+                    # print " response header looks like " , output_http_response.response.header
+                    outputFile = open(os.path.join(sys.argv[2], output_directory, file), "w")
+                    
+                    outputFile.write(output_http_response.SerializeToString())
+
+                    outputFile.close()
+                    tmpFile.close()
+
+                    # subprocess.Popen("rm {}".format(TEMP_FILE), shell=True)
+
+                #     os._exit(0)
+                # childPids.append(pid)
 
         except IOError as e:
             print sys.argv[1] + ": Could not open file ", e
 
-# print zlib.decompress(bytes(bytearray(http_response.response.body)), 15+32)
+# for pid in childPids:
+#     os.waitpid(pid,0)
 

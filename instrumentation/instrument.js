@@ -1,6 +1,7 @@
 
 
 var fondue = require("../modifiedFondue/index.js")
+// var fondue = require("fondue");
 var fs =require("fs")
 var path = require("path")
 var program = require('commander');
@@ -8,7 +9,7 @@ var program = require('commander');
 program
     .version("0.1.0")
     .option("-i, --input [input]","path to the input file")
-    .option("-o, --output [output]", "path to the output directory")
+    .option("-n, --name [name]", "name of the file being instrumented")
     .option("-t , --type [type]", "[HTML | Javascript (js)]", "html")
     .parse(process.argv)
 
@@ -38,7 +39,7 @@ function instrumentHTML(src, fondueOptions) {
             lastScriptEnd = scriptEnd;
         }
     }
-    console.log("The location of scripts in html: " + JSON.stringify(scriptLocs));
+    // console.log("The location of scripts in html: " + JSON.stringify(scriptLocs));
     // process the scripts in reverse order
     for (var i = scriptLocs.length - 1; i >= 0; i--) {
         var loc = scriptLocs[i];
@@ -47,7 +48,7 @@ function instrumentHTML(src, fondueOptions) {
         var options = mergeInto(fondueOptions, {});
         options.path = options.path + "-script-" + i;
         var prefix = src.slice(0, loc.start).replace(/[^\n]/g, " "); // padding it out so line numbers make sense
-        // console.log("The prefix to this instrumented script is" + prefix)
+        // console.log("Instrumenting " + JSON.stringify(loc));
         src = src.slice(0, loc.start) + instrumentJavaScript(prefix + script, options, true) + src.slice(loc.end);
         // console.log("And the final src is :" + src)
     }
@@ -72,7 +73,7 @@ function instrumentJavaScript(src, fondueOptions, jsInHTML) {
     console.log("Instrumenting a js file")
     src = src.replace(/^\s+|\s+$/g, '');
     if (jsInHTML){
-        console.log("Instrumenting a snippet of js: ");
+        // console.log("Instrumenting a snippet of js: ");
     }
     src = fondue.instrument(src, fondueOptions).toString();
     // console.log("After instrumentation the source becomes: ");
@@ -89,7 +90,7 @@ function mergeInto(options, defaultOptions) {
 }
 
 //Required for the fondue library, to determine how to instrument
-var fondueOptions = mergeInto({}, {include_prefix: false });
+var fondueOptions = mergeInto({}, {include_prefix: false, path: program.name });
 
 src = fs.readFileSync(program.input,"utf-8")
 
