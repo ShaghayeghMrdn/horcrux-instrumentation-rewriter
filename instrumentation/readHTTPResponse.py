@@ -16,8 +16,8 @@ deflate_compress = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS)
 zlib_compress = zlib.compressobj(9, zlib.DEFLATED, zlib.MAX_WBITS)
 gzip_compress = zlib.compressobj(9, zlib.DEFLATED, zlib.MAX_WBITS | 16)
 
-if len(sys.argv) != 3:
-  print "Usage:", sys.argv[0], "HTTP_RESPONSE_FILE", "OUTPUT_DIRECTORY"
+if len(sys.argv) != 4:
+  print "Usage:", sys.argv[0], "HTTP_RESPONSE_FILE", "OUTPUT_DIRECTORY","CACHE_TOGGLE_VALUE (0,1)"
   sys.exit(-1)
 
 subprocess.Popen("mkdir -p {}".format(sys.argv[2]), shell=True)
@@ -145,7 +145,7 @@ for root, folder, files in os.walk(sys.argv[1]):
                     f.close()
 
                     #Pass into the nodejs instrumentation script
-                    command = "node instrument.js -i {} -n '{}' -t {}".format(TEMP_FILE, re.escape(filename),fileType)
+                    command = "node instrument.js -i {} -n '{}' -t {} --cache-toggle {}".format(TEMP_FILE, re.escape(filename),fileType, sys.argv[3])
                     print "Executing ", command
                     cmd = subprocess.Popen(command, shell=True)
                     while cmd.poll() is None:

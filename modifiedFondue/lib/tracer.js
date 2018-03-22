@@ -91,7 +91,7 @@ if (typeof {name} === 'undefined') {
 	var _logQueries = [];
 	var _fileCallGraph = [];
 	var _sourceMaps = {};
-    var enableWindowDiffing = {enableWindowDiffing}
+    var e2eTesting = {e2eTesting}
 
 	var _connected = false;
 
@@ -520,6 +520,10 @@ if (typeof {name} === 'undefined') {
 		this.arguments = info.arguments ? info.arguments.map(function (a) { return scrapeObject(a) }) : undefined;
 		this.this = (info.this && info.this !== globalThis) ? scrapeObject(info.this) : undefined;
 
+        //Just for debugging purposes
+        this.locals = info.localVars;
+        this.globals = info.globalVariables;
+
 		invocationById[this.id] = this;
 	}
 	Invocation.prototype.equalToInfo = function (info) {
@@ -737,6 +741,7 @@ if (typeof {name} === 'undefined') {
 
 		_invocationsThisTick++;
 		if (_invocationsThisTick === {maxInvocationsPerTick}) {
+            console.log("The invocationstack size is: " + _invocationStackSize);
 			bailThisTick(invocation.f);
 			return;
 		}
@@ -878,9 +883,9 @@ if (typeof {name} === 'undefined') {
 					return node;
 				}
 
-				var item = makeSubgraph(top);
-				_fileCallGraph.push(item);
-				fileCallGraphTracker.update(item);
+				// var item = makeSubgraph(top);
+				// _fileCallGraph.push(item);
+				// fileCallGraphTracker.update(item);
 			}
 		}
 
@@ -889,45 +894,46 @@ if (typeof {name} === 'undefined') {
 		}
 	}
 
+    if (!e2eTesting) {
+        window.addEventListener("load" ,function() {
+            var MAXRESULT = 1000000;
 
-    window.addEventListener("load" ,function() {
-        var MAXRESULT = 1000000;
+            var tracer = {name};
 
-        var tracer = {name};
+            functions = {};
+            var uniqueFunctions = [];
+            var callsites = {}
+            var ids = [];
+            var ids_callsites = [];
+            var nodesHandle = tracer.trackNodes();
+            tracer.newNodes(nodesHandle).forEach(function (n) {
+                if (n.type === 'function') {
+                    functions[n.id] = n;
+                    ids.push(n.id);
+                } else if (n.type == 'callsite'){
+                    callsites[n.id] = n;
+                    ids_callsites.push(n.id);   
+                }
+            });
 
-        functions = {};
-        var uniqueFunctions = [];
-        var callsites = {}
-        var ids = [];
-        var ids_callsites = [];
-        var nodesHandle = tracer.trackNodes();
-        tracer.newNodes(nodesHandle).forEach(function (n) {
-            if (n.type === 'function') {
-                functions[n.id] = n;
-                ids.push(n.id);
-            } else if (n.type == 'callsite'){
-                callsites[n.id] = n;
-                ids_callsites.push(n.id);   
-            }
+            var logHandle = tracer.trackLogs({ids: ids});
+            invocations = tracer.logDelta(logHandle, MAXRESULT);
+
+            console.log("Number of functions: " + Object.keys(functions).length);
+            console.log("Number of invocations: " + invocations.length);
+
+            var modifiedFunctionCounter = 0
+            var uniqueFunctions = [];
+            window.importantIDToInvocations = {};
+            invocations.forEach(function(entry){
+
+                if (entry.globalDelta != undefined && Object.keys(entry.globalDelta["After"]).length > 0){
+                    importantIDToInvocations[entry.id] = entry;
+                }
+            });
+            console.log("Total number of important invocations executed " + Object.keys(importantIDToInvocations).length);
         });
-
-        var logHandle = tracer.trackLogs({ids: ids});
-        invocations = tracer.logDelta(logHandle, MAXRESULT);
-
-        console.log("Number of functions: " + Object.keys(functions).length);
-        console.log("Number of invocations: " + invocations.length);
-
-        var modifiedFunctionCounter = 0
-        var uniqueFunctions = [];
-        importantInvocations = []
-        invocations.forEach(function(entry){
-
-            if (entry.globalDelta != undefined && Object.keys(entry.globalDelta["After"]).length > 0){
-                importantInvocations.push(entry)
-            }
-        });
-        console.log("Total number of important invocations executed " + importantInvocations.length);
-    });
+    }
 	/**
 	 * called from the top of every script processed by the rewriter
 	 */
@@ -948,6 +954,7 @@ if (typeof {name} === 'undefined') {
         info.globalDelta = {};
         info.globalDelta["Before"] = {};
         info.globalDelta["After"] = {};
+        info.globalDelta["Reads"] = {};
         pushNewInvocation(info, 'toplevel');
 	};
 
@@ -1235,9 +1242,55 @@ if (typeof {name} === 'undefined') {
             info.globalDelta = {};
             info.globalDelta["Before"] = {};
             info.globalDelta["After"] = {};
+            info.globalDelta["Reads"] = {};
+            info.globalDelta["Reads"]["__tracerArgs"] = info.arguments;
     		pushNewInvocation(info, 'function');
         } catch(err) {console.log("[INFO][TRACE ENTER]: " + err + err.stack)}
 	};
+
+    var isCyclic = function (obj) {
+      var seenObjects = [];
+
+      function detect (obj) {
+        if (obj && typeof obj === 'object') {
+          if (seenObjects.indexOf(obj) !== -1) {
+            return true;
+          }
+          seenObjects.push(obj);
+          for (var key in obj) {
+            console.log("The object we are lookin")
+            if (obj.hasOwnProperty(key) && detect(obj[key])) {
+              // console.log(obj, 'cycle at ' + key);
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+
+      return detect(obj);
+    }
+
+    var saveTraceInCache = function(info) {
+        try{
+            var top = invocationStack[invocationStack.length - 1];
+            if (!top) {
+                console.log("[ERROR] [Fetching top for saving trace] ");
+            } else if (!isCyclic(top.globalDelta)) {
+                localStorage.setItem(info.nodeId, JSON.stringify(top.globalDelta));
+
+                // localStorage.setItem(info.nodeId, JSON.stringify( top.globalDelta, function( key, value) {
+                //                                         if( key == 'circular') {
+                //                                             return "$ref"+value.id+"$";
+                //                                         } else {
+                //                                             return value;
+                //                                         }
+                //                                     }));
+            }
+        } catch (err) {
+            console.log("[ERROR][SAVE TRACE IN CACHE] " + err + err.stack);
+        }
+    };
 
 	/**
 	 * the rewriter calls traceExit from the finally clause it wraps function
@@ -1253,19 +1306,21 @@ if (typeof {name} === 'undefined') {
 	 */
 	this.traceExit = function (info) {
         try{
+          // if (!e2eTesting) saveTraceInCache(info);
 		  popInvocation(info);
         } catch(err) {console.log("[INFO][TRACE EXIT]: " + err + err.stack)}
 	};
+
+    this.replayCache = function(info) {
+        return true;
+    }
 
     var escapeRegExp = function(str) {
         return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|\']/g, "\\$&");
     }
 
-    this.setValue = function (val,variableName, variable, typeOfRead) {
-        
-        /*
-        Following are the majority kind of reads we need to handle
-        */
+    this.setValue = function (val,variableName, variable, reads=[]) {
+        // console.log(arguments[0].toString(), arguments);
         try {
             var top = invocationStack[invocationStack.length - 1];
             if (!top) {
@@ -1276,14 +1331,26 @@ if (typeof {name} === 'undefined') {
                     // console.log("variable is " + variable );
                     top.globalDelta["Before"][variableName] = variable;
                     top.globalDelta["After"][variableName] = val;
+
+                    // top.globalDelta["Reads"] = top.globalDelta["Reads"].concat(readArray);
+                    reads.forEach(function(read, it){
+                        if (it % 2 == 0){
+                            top.globalDelta["Reads"][reads[it+1]] = read;
+                        }
+                    });
                 }
             }
+            // console.log("Returning : " + val);
             return val;
         } catch (err) {
             console.log("[INFO][SET VALUE]: " + err + err.stack);
             return val;
         } 
     }
+
+    // this.initializeStorage = function() {
+    //     localStorage[origin] = 
+    // }
 
 	this.traceReturnValue = function (value) {
 		try {
@@ -1562,14 +1629,15 @@ if (typeof {name} === 'undefined') {
 	// okay, the second argument is kind of a hack
 	function makeLogEntry(invocation, parents) {
 		parents = (parents || []);
-		var entry = {
-			timestamp: invocation.timestamp,
-            duration: invocation.duration,
-			tick: invocation.tick,
-			invocationId: invocation.id,
-			topLevelInvocationId: invocation.topLevelInvocationId,
-			nodeId: invocation.f.id,
-		};
+		// var entry = {
+		// 	timestamp: invocation.timestamp,
+  //           duration: invocation.duration,
+		// 	tick: invocation.tick,
+		// 	invocationId: invocation.id,
+		// 	topLevelInvocationId: invocation.topLevelInvocationId,
+		// 	nodeId: invocation.f.id,
+		// };
+        var entry = invocation;
 		if (invocation.epochID !== undefined) {
 			var epoch = _epochsById[invocation.epochID];
 			entry.epoch = {

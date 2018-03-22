@@ -35,8 +35,7 @@ function instrumentationPrefix(options) {
 	options = mergeInto(options, {
 		name: '__tracer',
 		nodejs: false,
-		maxInvocationsPerTick: 8192,
-		enableWindowDiffing: false,
+		maxInvocationsPerTick: 28192,
 	});
 
 	// the inline comments below are markers for building the browser version of fondue
@@ -46,7 +45,7 @@ function instrumentationPrefix(options) {
 		version: JSON.stringify(require('./package.json').version),
 		nodejs: options.nodejs,
 		maxInvocationsPerTick: options.maxInvocationsPerTick,
-		enableWindowDiffing: options.enableWindowDiffing,
+		e2eTesting: options.e2eTesting,
 	});
 }
 
@@ -64,6 +63,7 @@ function instrument(src, options) {
 	var defaultOptions = {
 		include_prefix: true,
 		tracer_name: '__tracer',
+		e2eTesting: false,
 	};
 	options = mergeInto(options, defaultOptions);
 	var prefix = '', shebang = '', output, m;
@@ -74,11 +74,7 @@ function instrument(src, options) {
 	}
 
 	if (options.include_prefix) {
-		prefix += instrumentationPrefix({
-			name: options.tracer_name,
-			nodejs: options.nodejs,
-			maxInvocationsPerTick: options.maxInvocationsPerTick,
-		});
+		prefix += instrumentationPrefix(options);
 	}
 
 	if (src.indexOf("/*theseus" + " instrument: false */") !== -1) {
@@ -90,6 +86,7 @@ function instrument(src, options) {
 			tracer_name: options.tracer_name,
 			sourceFilename: options.sourceFilename,
 			generatedFilename: options.generatedFilename,
+			execution_cache_toggle: options.execution_cache_toggle,
 		});
 		output = {
 			map: m.map,
@@ -301,18 +298,18 @@ var traceFilter = function (content, options) {
 	if (content.trim() === '') {
 		return content;
 	}
-
 	var defaultOptions = {
 		path: '<anonymous>',
 		prefix: '',
 		tracer_name: '__tracer',
 		trace_function_entry: true,
-		trace_function_creation: true,
-		trace_function_calls: true,
+		trace_function_creation: false,
+		trace_function_calls: false,
 		trace_branches: false,
 		trace_switches: false,
 		trace_loops: false,
 		source_map: false,
+		execution_cache_toggle : 0,
 	};
 	options = mergeInto(options, defaultOptions);
 
@@ -352,6 +349,7 @@ var traceFilter = function (content, options) {
 	 or returns null if no identifier is found
 	 */
 	var getIdentifierFromMemberExpression = function (node) {
+		// console.log("Finding indentifier from member " + node.source());
 		if (node.type == "Identifier"){
 			return node;
 		}
@@ -361,25 +359,49 @@ var traceFilter = function (content, options) {
 		return null;
 	}
 
+	var getIdentifierFromAssignmentExpression = function (node) {
+		// console.log("Finding Identifier from AssignmentExpression " + node.source());
+		if (node.type == "Identifier"){
+			return node;
+		}
+		if (node.type == "AssignmentExpression"){
+			return getIdentifierFromAssignmentExpression(node.right)
+		}
+		return null;
+	}
+
 	/* 
 	Returns 0 for local and -1 for non variables (literals, integers etc)
 	Returns 1 for global
 	*/
 	var IsLocalVariable = function (node){
-		if (node.type == "ConditionalExpression"){
+
+		if (node == null || typeof(node) == "undefined") return 0;
+
+
+		else if (node.type == "ConditionalExpression"){
 			return (IsLocalVariable(node.consequent) || IsLocalVariable(node.alternate))
 		}
 
-		identifier = getIdentifierFromMemberExpression(node);
-		if (!identifier || node.type == "ObjectExpression" || node.type == "Literal" || node.type == "NewExpression"){
+		else if (node.type == "ObjectExpression" || node.type == "Literal" || 
+			node.type == "NewExpression" || node.type == "BinaryExpression" || node.type == "LogicalExpression"
+			|| node.type == "ArrayExpression" || node.type == ""){
 			return 0;
 		}
-	    parent = identifier.parent;
+
+		else if (node.type == "MemberExpression")
+			node = getIdentifierFromMemberExpression(node);
+
+		else if (node.type == "AssignmentExpression")
+			node = getIdentifierFromAssignmentExpression(node);
+
+		if (node == null ) return 0;
+	    parent = node.parent;
 	    while (parent != undefined && parent.parent != undefined){
 	        if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
 	        	functionArguments = getArgs(parent);
 	        	if (parent.localVariables == undefined) parent.localVariables = []
-	            if (parent.localVariables.includes(identifier.name) || functionArguments.includes(identifier.name)){
+	            if (parent.localVariables.includes(node.name) || functionArguments.includes(node.name)){
 	                return 0;
 	            }
 	        }
@@ -537,10 +559,12 @@ var traceFilter = function (content, options) {
 		return JSON.stringify({ nodes: nodes });
 	};
 
-	var prologue = "";
-	prologue += template(/*tracer-stub.js{*/fs.readFileSync(__dirname + '/lib/tracer-stub.js', 'utf8')/*}tracer-stub.js*/, { name: options.tracer_name });
-	if (options.source_map) prologue += "/*mapshere*/";
-	prologue += options.tracer_name + '.add(' + JSON.stringify(options.path) + ', ' + extractTracePoints(content, options.path) + ');\n\n';
+	if (!options.execution_cache_toggle ) {
+		var prologue = "";
+		prologue += template(/*tracer-stub.js{*/fs.readFileSync(__dirname + '/lib/tracer-stub.js', 'utf8')/*}tracer-stub.js*/, { name: options.tracer_name });
+		if (options.source_map) prologue += "/*mapshere*/";
+		prologue += options.tracer_name + '.add(' + JSON.stringify(options.path) + ', ' + extractTracePoints(content, options.path) + ');\n\n';
+	}
 
 	try {
 		var fala, update, sourceNodes;
@@ -572,7 +596,109 @@ var traceFilter = function (content, options) {
 		  return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|\']/g, "\\$&");
 		}
 
-		var modifyParentExpression = false;
+		var handleBinaryandLogical = function(node) {
+			if (node == undefined)
+				return [];
+			var reads = [];
+			// console.log("Handling binary and logical:" + node.source() + "with properties: " + Object.keys(node));
+			if (node.type == "Identifier" || node.type == "MemberExpression") {
+				reads.push(node)
+				return reads
+			} else if (node.type == "ObjectExpression") {
+				reads = handleObjectExpressions(node);
+				return reads;
+			}
+
+			reads = reads.concat(handleBinaryandLogical(node.left));
+			reads = reads.concat(handleBinaryandLogical(node.right));
+
+			return reads;
+		}
+
+		var handleObjectExpressions = function(node) {
+			var reads = [];
+
+			node.properties.forEach(function(elem){
+				if (elem.value.type == "Identifier")
+					reads.push(elem.value)
+			});
+
+			return reads;
+		}
+
+		var handleMemberExpression = function(node) {
+			var reads = [];
+
+			if (node.property.type == "Identifier")
+				reads.push(node.property);
+
+			if (node.object.type == "Identifier") {
+				reads.push(node.object);
+				return reads;
+			} else if (node.object.type == "MemberExpression") {
+				reads = reads.concat(handleMemberExpression(node.object));
+				return reads;
+			}
+			return reads;
+		}
+
+		var handleReads = function(node) {
+			/*
+			The following read types are available for the assignment expression RHS:
+			- Identifier
+			- Literal (ignored)
+			- CallExpression
+			- Object Expression 
+			- Logical Expression
+			- Binary Expression
+			- Unary expression
+			- New expression
+			- Array expression
+			- Memberexpression
+
+			First let's slice out all the variables read.
+			Then pass these through the local/global analysis 
+
+			*/
+
+			// console.log("Called read array handler" + node.source());
+			var readArray = [];
+			if (node.type == "Identifier")
+				readArray.push(node)
+			else if (node.type == "BinaryExpression" || node.type == "LogicalExpression") {
+				readArray = handleBinaryandLogical(node)
+			}
+		    else if (node.type == "ObjectExpression")
+				readArray = handleObjectExpressions(node)
+			else if (node.type == "UnaryExpression") {
+				if (node.argument.type == "Identifier")
+					readArray.push(node.argument);
+			} else if (node.type == "ConditionalExpression") {
+				readArray = handleBinaryandLogical(node.test);
+				if (node.consequent.type == "Identifier") readArray.push(node.consequent);
+				if (node.alternate.type == "Identifier") readArray.push(node.alternate);
+			} else if (node.type == "MemberExpression") {
+				readArray.push(node);
+			} else if (node.type == "ArrayExpression") {
+				node.elements.forEach(function (elem) {
+					if (elem.type == "Identifier")
+						readArray.push(elem);
+				});
+			}
+
+			if (readArray == null) return [];
+			// console.log("Read array: " + JSON.stringify(readArray));
+			var globalReads = [];
+			readArray.forEach(function(read){
+				if (IsLocalVariable(read) > 0) {
+					globalReads.push(read.source());
+					globalReads.push("\'" + escapeRegExp(read.source()) + "\'");
+				}
+
+			});
+			return globalReads;
+		}
+
 		m = fala({
 			source: content,
 			loc: true,
@@ -586,63 +712,74 @@ var traceFilter = function (content, options) {
 			};
 
 			if (node.type === "Program") {
-				var info = { nodeId: makeId("toplevel", options.path, node.loc) };
-				var arg = JSON.stringify(info);
+				if (!options.execution_cache_toggle) {
+					var info = { nodeId: makeId("toplevel", options.path, node.loc) };
+					var arg = JSON.stringify(info);
 
-				update(node,
-					options.prefix,
-					prologue,
-					options.tracer_name, '.traceFileEntry(' + arg + ');\n',
-					'try {\n', sourceNodes(node), '\n} finally {\n',
-					options.tracer_name, '.traceFileExit(' + arg + ');\n',
-					'}');
+					update(node,
+						options.prefix,
+						prologue,
+						options.tracer_name, '.traceFileEntry(' + arg + ');\n',
+						'try {\n', sourceNodes(node), '\n} finally {\n',
+						options.tracer_name, '.traceFileExit(' + arg + ');\n',
+						'}');
+				} else {
+					update(node, options.prefix,
+						'try {\n', sourceNodes(node), '\n} finally {}',)
+				}
 			}
 
 			if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration') {
-				var attrs = { nodeId: makeId('function', options.path, node.loc), localVars: node.localVariables, globalVariables: node.globalVariables };
+				var attrs = { nodeId: makeId('function', options.path, node.loc), localVars: node.localVariables, globalVars: node.globalVariables };
 
-				// convert the arguments to strings
-				var args = JSON.stringify(attrs);
-				var entryArgs = args.slice(0, args.length - 1) + ', arguments: ' + options.tracer_name + '.Array.prototype.slice.apply(arguments), this: this }';
-				var exitArgs = args;
+				if (!options.execution_cache_toggle) {
+					// convert the arguments to strings
+					var args = JSON.stringify(attrs);
+					var entryArgs = args.slice(0, args.length - 1) + ', arguments: ' + options.tracer_name + '.Array.prototype.slice.apply(arguments), this: this }';
+					var exitArgs = args;
 
-				if (options.trace_function_entry) {
-					// insert the traces for when the function is called and when it exits
-					var traceBegin = options.tracer_name + '.traceEnter(' + entryArgs + ');';
-					var traceError = options.tracer_name + '.traceExceptionThrown(' + exitArgs + ', e); throw e;';
-					var traceEnd = ';' + options.tracer_name + '.traceExit(' + exitArgs + ');';
+					if (options.trace_function_entry) {
+						// insert the traces for when the function is called and when it exits
+						var traceBegin = options.tracer_name + '.traceEnter(' + entryArgs + ');';
+						var traceError = options.tracer_name + '.traceExceptionThrown(' + exitArgs + ', e); throw e;';
+						var traceEnd = ';' + options.tracer_name + '.traceExit(' + exitArgs + ');';
 
-					// add line break after oldBody in case it ends in a //-comment
-					update(node.body, '{ ', traceBegin, ' try { ', sourceNodes(node.body), '\n } catch (e) { ', traceError, ' } finally { ', traceEnd, ' } }');
+						// add line break after oldBody in case it ends in a //-comment
+						update(node.body, '{ ', traceBegin, ' try { ', sourceNodes(node.body), '\n } catch (e) { ', traceError, ' } finally { ', traceEnd, ' } }');
+					}
+				} else {
+					var attrs = { nodeId: makeId('function', options.path, node.loc) };
+					var args = JSON.stringify(attrs);
+					var traceBegin = "if (" + options.tracer_name + ".replayCache(" + args + ")) return;"
+
+					update(node.body, '{', traceBegin, 'try { ', sourceNodes(node.body), '\n} catch (e) {console.log("ERROR while replaying cache")} finally {}}');
 				}
 
 				if (node.type === 'FunctionExpression' && options.trace_function_creation) {
+					console.log("[TRACER.js][743] tracing anonyomous functions");
 					if (node.parent.type !== 'Property' || node.parent.kind === 'init') {
 						update(node, options.tracer_name, '.traceFunCreate(', sourceNodes(node), ', ', JSON.stringify(functionSources[attrs.nodeId]), ')');
 					}
 				}
-			} else if (node.type === 'CallExpression') {
-				// if (options.trace_function_calls) {
-				// 	var id = makeId("callsite", loc.path, loc);
+			} else if (node.type === 'CallExpression' && !options.execution_cache_toggle) {
+				if (options.trace_function_calls) {
+					var id = makeId("callsite", loc.path, loc);
 
-				// 	if (node.callee.source() !== "require") {
-				// 		if (node.callee.type === 'MemberExpression') {
-				// 			if (node.callee.computed) {
-				// 				update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: ', sourceNodes(node.callee.property), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
-				// 			} else {
-				// 				update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: "', sourceNodes(node.callee.property), '", nodeId: ', JSON.stringify(id), ', vars: {} })');
-				// 			}
-				// 		} else {
-				// 			update(node.callee, ' ', options.tracer_name, '.traceFunCall({ func: ', sourceNodes(node.callee), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
-				// 		}
-				// 	}
-				// }
-			} else if (node.type == "ExpressionStatement"){
-				if (modifyParentExpression){
-					update(node, ' \n try { ', sourceNodes(node), ' } catch(err){ console.log("error while updating global tracking" + err);} \n');
+					if (node.callee.source() !== "require") {
+						if (node.callee.type === 'MemberExpression') {
+							if (node.callee.computed) {
+								update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: ', sourceNodes(node.callee.property), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
+							} else {
+								update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: "', sourceNodes(node.callee.property), '", nodeId: ', JSON.stringify(id), ', vars: {} })');
+							}
+						} else {
+							update(node.callee, ' ', options.tracer_name, '.traceFunCall({ func: ', sourceNodes(node.callee), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
+						}
+					}
 				}
-				modifyParentExpression = false;
-			} else if (/Statement$/.test(node.type)) {
+			} else if (node.type == "ExpressionStatement"){
+				
+			} else if (/Statement$/.test(node.type) && !options.execution_cache_toggle) {
 				var semiColonStatements = ["BreakStatement", "ContinueStatement", "ExpressionStatement", "ReturnStatement", "ThrowStatement"];
 				if (node.type === "ReturnStatement" && node.argument) {
 					if (options.trace_function_entry) {
@@ -661,9 +798,12 @@ var traceFilter = function (content, options) {
 					}
 				}
 				update(node, sourceNodes(node));
-			} else if (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator') {
+			} else if ( (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator') && !options.execution_cache_toggle) {
 				if (node.type == "VariableDeclarator"){
-					if (node.init) {
+					if (node.parent.source().includes("let ")) {
+						addLocalVariable(node);
+					}
+					else if (node.init) {
 						if (IsLocalVariable(node.init) == 0) {
 							addLocalVariable(node);
 						} else {
@@ -678,12 +818,18 @@ var traceFilter = function (content, options) {
 			
 			// Handles any global variable being assigned any value
 			// or a local variable becoming an alias of a global variable
-			} else if (node.type == "AssignmentExpression"){
+			} else if (node.type == "AssignmentExpression" && !options.execution_cache_toggle){
 				if (IsLocalVariable(node.left) > 0){
-					//a global variable is being updated, and hence needs to be tracked
 					addGlobalVariable(node.left);
-					console.log("source: " + node.right.source() + " type : " + node.right.type);
-					update(node,node.left.source(),node.operator, options.tracer_name,'.setValue(',node.right.source(),',','\'',escapeRegExp(node.left.source()),'\'',',',node.left.source(),',',node.right.type')');
+					// console.log("source: " + node.source() + " properties : " + Object.keys(node));
+					var readArray = [];
+					readArray = handleReads(node.right);
+					// console.log("Read array is : " + readArray);
+					update(node, node.left.source() , node.operator , options.tracer_name , ".setValue(" , node.right.source() , 
+						", \'" , escapeRegExp(node.left.source()) , "\', typeof(" , node.left.source() , ')== "undefined" ? null :' 
+						, node.left.source() , ",[" , readArray , "])" );
+					// update(node,node.left.source(),node.operator, options.tracer_name,'.setValue(',node.right.source(),',','\'',escapeRegExp(node.left.source()),
+					// 	'\'',', typeof(',node.left.source(),') == "undefined" ? null : ',node.left.source(),',[',readArray,'],',')');
 					// update(node, node.left.source(), node.operator, options.tracer_name, '.setValue(', node.right.source(),',',node.left,')');
 
 				} else if (IsLocalVariable(node.right) > 0){
@@ -697,7 +843,7 @@ var traceFilter = function (content, options) {
 				} else {
 					addLocalVariable(node.left);
 				}
-			} else if (node.type === 'SwitchStatement') {
+			} else if (node.type === 'SwitchStatement' && !options.execution_cache_toggle) {
 				if (options.trace_switches) {
 					for (var i in node.cases) {
 						var c = node.cases[i];

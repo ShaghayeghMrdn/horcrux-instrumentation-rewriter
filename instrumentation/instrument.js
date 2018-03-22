@@ -11,6 +11,7 @@ program
     .option("-i, --input [input]","path to the input file")
     .option("-n, --name [name]", "name of the file being instrumented")
     .option("-t , --type [type]", "[HTML | Javascript (js)]", "html")
+    .option("--cache-toggle [cacheToggle]" , "Record (0) or replay (1) cache ")
     .parse(process.argv)
 
 /* 
@@ -90,7 +91,7 @@ function mergeInto(options, defaultOptions) {
 }
 
 //Required for the fondue library, to determine how to instrument
-var fondueOptions = mergeInto({}, {include_prefix: false, path: program.name });
+var fondueOptions = mergeInto({}, {include_prefix: false, path: program.name, e2eTesting: false, execution_cache_toggle: parseInt(program.cacheToggle) });
 
 src = fs.readFileSync(program.input,"utf-8")
 
