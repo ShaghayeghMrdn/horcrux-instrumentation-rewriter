@@ -1,6 +1,6 @@
 
 
-var fondue = require("../modifiedFondue/index.js")
+var fondue = require("../JSAnalyzer/index.js")
 // var fondue = require("fondue");
 var fs =require("fs")
 var path = require("path")
