@@ -5,6 +5,7 @@ var falafelMap = require('falafel-map');
 var fs = require('fs');
 var basename = require('path').basename;
 var esprima = require('esprima');
+var mergeDeep = require('deepmerge');
 
 
 // adds keys from options to defaultOptions, overwriting on conflicts & returning defaultOptions
@@ -110,44 +111,27 @@ var makeId = function (type, path, loc) {
 	     + loc.end.column;
 };
 
-/**
- * injects code for tracing the execution of functions.
- *
- * the bodies of named functions are:
- *  - wrapped in try {} finally {},
- *  - have a call to traceEnter is prepended, and
- *  - have a call to traceExit added to the finally block
- *
- * here is an example:
- *
- *   function foo() {...}
- *     -->
- *   function foo() {
- *     tracer.traceEnter({
- *       start: { line: ..., column: ... },
- *       end: { line: ..., column: ... },
- *       vars: { a: a, b: b, ... }
- *     });
- *     try {
- *       ...
- *     } finally {
- *       tracer.traceExit({
- *         start: { line: ..., column: ... },
- *         end: { line: ..., column: ... }
- *       });
- *     }
- *   }
- *
- * anonymous functions get the same transformation, but they're also
- * wrapped in a call to traceFunCreate:
- *
- *   function () {...}
- *     -->
- *   tracer.traceFunCreate({
- *     start: { line: ..., column: ... },
- *     end: { line: ..., column: ... }
- *   }, function () {...})
- */
+/** comparator for positions in the form { line: XXX, column: YYY } */
+var comparePositions = function (a, b) {
+	if (a.line !== b.line) {
+		return a.line < b.line ? -1 : 1;
+	}
+	if (a.column !== b.column) {
+		return a.column < b.column ? -1 : 1;
+	}
+	return 0;
+};
+
+function contains(start, end, pos) {
+	var startsBefore = comparePositions(start, pos) <= 0;
+	var endsAfter    = comparePositions(end,   pos) >= 0;
+	return startsBefore && endsAfter;
+}
+
+var containsRange = function (start1, end1, start2, end2) {
+	return contains(start1, end1, start2) && contains(start1, end1, end2);
+}
+
 var traceFilter = function (content, options) {
 	if (content.trim() === '') {
 		return content;
@@ -239,17 +223,14 @@ var traceFilter = function (content, options) {
 
 		else if (node.type == "ConditionalExpression"){
 			return (IsLocalVariable(node.consequent) || IsLocalVariable(node.alternate))
-		}
-
-		else if (node.type == "ObjectExpression" || node.type == "Literal" || 
+		} else if (node.type == "ObjectExpression" || node.type == "Literal" || 
 			node.type == "NewExpression" || node.type == "BinaryExpression" || node.type == "LogicalExpression"
-			|| node.type == "ArrayExpression" || node.type == ""){
+			|| node.type == "ArrayExpression" || node.type == "" || node.type == "FunctionExpression" || node.type == "CallExpression"){     // TODO handle all the dom modifications: For now the callexpression like document.getElementbyId('') will be marked as local. 
 			return 0;
-		}
-
+		} else if (node.type == "UnaryExpression")
+			return IsLocalVariable(node.argument)
 		else if (node.type == "MemberExpression")
 			node = getIdentifierFromMemberExpression(node);
-
 		else if (node.type == "AssignmentExpression")
 			node = getIdentifierFromAssignmentExpression(node);
 
@@ -270,7 +251,8 @@ var traceFilter = function (content, options) {
 	}
 
 	var addGlobalVariable = function (node, otherArgs) {
-		parent = node.parent;
+		// console.log("adding alias " + node.source() + " " + otherArgs.source() + " with type " + otherArgs.type);
+		parent = node;
 	    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
 	        parent = parent.parent;
 	    }
@@ -280,8 +262,8 @@ var traceFilter = function (content, options) {
 	        }
 	        if (node.source() in parent.globalVariables || Object.values(parent.globalVariables).includes(node.source()) ) return;
 	        if (otherArgs != undefined){
-        		if (node.id) parent.globalVariables[node.id.name] = otherArgs.name; // if passing from variable declaration, ie node = "a = 1"
-        		else parent.globalVariables[node.name] = otherArgs.name; // if being passed from assignment expression, ie node = a
+        		if (node.id) parent.globalVariables[node.id.name] = otherArgs.source(); // if passing from variable declaration, ie node = "a = 1"
+        		else parent.globalVariables[node.source()] = otherArgs.source(); // if being passed from assignment expression, ie node = a
 	        } else {
 	        	console.log("[global but not alias]probably not going to enter this branch ever");
 	        	parent.globalVariables["ERROR"] = (node.source());
@@ -351,6 +333,8 @@ var traceFilter = function (content, options) {
 		var fala, update, sourceNodes;
 
 		var functionToMetadata = {};
+
+		var functionNameToLocation = {}; // Dictionary: key is function name, value is an array containing all the locations it was defined. 
 
 		if (options.source_map) {
 			fala = falafelMap;
@@ -465,7 +449,7 @@ var traceFilter = function (content, options) {
 						readArray.push(elem);
 				});
 			}
-
+			
 			if (readArray == null) return [];
 			// console.log("Read array: " + JSON.stringify(readArray));
 			var globalReads = [];
@@ -476,6 +460,7 @@ var traceFilter = function (content, options) {
 				}
 
 			});
+			// console.log("However only these are the global ones:  " + JSON.stringify(globalReads));
 			return globalReads;
 		}
 
@@ -513,15 +498,30 @@ var traceFilter = function (content, options) {
 
 
 		var propogateSignature = function(node, signature) {
+			// console.log("propogating: " + signature);
 			parent = node.parent;
 			while (parent != undefined ) {
 				if ((parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression")){
-					if (parent.id)
-						functionToMetadata[parent.id.name] = mergeDicts(functionToMetadata[parent.id.name], signature);
-					else functionToMetadata[makeId('function', options.path, parent.loc)] = mergeDicts(functionToMetadata[makeId('function', options.path, parent.loc)], signature);
+					// console.log("calling merge deep from outside");
+					functionToMetadata[makeId('function', options.path, parent.loc)] = JSON.stringify(
+						mergeDeep(JSON.parse(functionToMetadata[makeId('function', options.path, parent.loc)]), JSON.parse(signature)));
 				}
 				parent = parent.parent;
 			}
+		}
+
+		var replaceAliasesWithActuals = function(signature){
+			signature = JSON.parse(signature);
+			if (signature["globalAlias"]){
+				if (signature.globalWrites) {
+					signature.globalWrites.forEach(function(writeKey, it){
+						if (writeKey in signature.globalAlias)
+							signature.globalWrites[it] = signature.globalAlias[writeKey];
+					});
+				}
+			}
+			return signature;
+
 		}
 
 		m = fala({
@@ -538,79 +538,47 @@ var traceFilter = function (content, options) {
 
 
 			if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration') {
-				var attrs = { nodeId: makeId('function', options.path, node.loc), localVars: node.localVariables, globalVars: node.globalVariables };
+				var attrs = { localVars: node.localVariables, globalAlias: node.globalVariables, globalReads: node.globalReads, globalWrites : node.globalWrites  };
+				var args = JSON.stringify(attrs);
 
-				if (!options.execution_cache_toggle) {
-					// convert the arguments to strings
-					var args = JSON.stringify(attrs);
-					var entryArgs = args.slice(0, args.length - 1) + ', arguments: ' + options.tracer_name + '.Array.prototype.slice.apply(arguments), this: this }';
-					var exitArgs = args;
+				// if (node.id) {
+				// 	functionToMetadata[node.id.name] = args;
+				// }
+				// else {
+				// 	var index = makeId('function', options.path, node.loc);
+				// 	if (node.parent.type == "VariableDeclarator")
+				// 		index = node.parent.id.name;
+				// 	else if (node.parent.type == "AssignmentExpression") {
+				// 		var identifier = getIdentifierFromMemberExpression(node.parent.left);
+				// 		index = identifier ? identifier.name: index;
+				// 	}
+				// 	functionToMetadata[index] = args;
+				// }
 
-					if (options.trace_function_entry) {
-						// insert the traces for when the function is called and when it exits
-						var traceBegin = options.tracer_name + '.traceEnter(' + entryArgs + ');';
-						var traceError = options.tracer_name + '.traceExceptionThrown(' + exitArgs + ', e); throw e;';
-						var traceEnd = ';' + options.tracer_name + '.traceExit(' + exitArgs + ');';
-
-						// add line break after oldBody in case it ends in a //-comment
-						// update(node.body, '{ ', traceBegin, ' try { ', sourceNodes(node.body), '\n } catch (e) { ', traceError, ' } finally { ', traceEnd, ' } }');
-					}
-				} else {
-					var attrs = { nodeId: makeId('function', options.path, node.loc),localVars: node.localVariables, globalAlias: node.globalVariables, globalReads: node.globalReads, globalWrites : node.globalWrites  };
-					var args = JSON.stringify(attrs);
-					var traceBegin = "if (" + options.tracer_name + ".compareAndCache(" + args + ")) return;"
-					var traceEnd = options.tracer_name + ".dumpCache(" + args + ");";
-
-					update(node.body, '{', traceBegin, 'try { ', sourceNodes(node.body), '\n} catch (e) {console.log("ERROR while replaying cache")} finally {', traceEnd, '}}');
-					if (node.id)
-						functionToMetadata[node.id.name] = args;
-					else 
-						functionToMetadata[makeId('function', options.path, node.loc)] = args;
+				var index = makeId('function', options.path, node.loc);
+				functionToMetadata[index] = args;
+				var functionName;
+				if (node.id) functionName = node.id.name;
+				else {
+					if (node.parent.type == "VariableDeclarator")
+						functionName = node.parent.id.name;
+					else if (node.parent.type == "AssignmentExpression") {
+						functionName = node.parent.left.source();
+					}				
 				}
 
-				if (node.type === 'FunctionExpression' && options.trace_function_creation) {
-					console.log("[TRACER.js][743] tracing anonyomous functions");
-					if (node.parent.type !== 'Property' || node.parent.kind === 'init') {
-						update(node, options.tracer_name, '.traceFunCreate(', sourceNodes(node), ', ', JSON.stringify(functionSources[attrs.nodeId]), ')');
-					}
+				if (functionName){
+					if (!(functionNameToLocation[functionName]))
+						functionNameToLocation[functionName] = [];
+					functionNameToLocation[functionName].push(node.loc);
 				}
-			} else if (node.type === 'CallExpression' && !options.execution_cache_toggle) {
-				if (options.trace_function_calls) {
-					var id = makeId("callsite", loc.path, loc);
 
-					if (node.callee.source() !== "require") {
-						if (node.callee.type === 'MemberExpression') {
-							if (node.callee.computed) {
-								update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: ', sourceNodes(node.callee.property), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
-							} else {
-								update(node.callee, ' ', options.tracer_name, '.traceFunCall({ this: ', sourceNodes(node.callee.object), ', property: "', sourceNodes(node.callee.property), '", nodeId: ', JSON.stringify(id), ', vars: {} })');
-							}
-						} else {
-							update(node.callee, ' ', options.tracer_name, '.traceFunCall({ func: ', sourceNodes(node.callee), ', nodeId: ', JSON.stringify(id), ', vars: {} })');
-						}
-					}
-				}
-			} else if (node.type == "ExpressionStatement"){
-				
-			} else if (/Statement$/.test(node.type) && !options.execution_cache_toggle) {
-				var semiColonStatements = ["BreakStatement", "ContinueStatement", "ExpressionStatement", "ReturnStatement", "ThrowStatement"];
-				if (node.type === "ReturnStatement" && node.argument) {
-					if (options.trace_function_entry) {
-						var sNodes = sourceNodes(node).slice(6);
-						var semicolon = sNodes.slice(-1)[0] === ";";
-						if (semicolon) sNodes = sNodes.slice(0, -1);
-						update(node, "return ", options.tracer_name, ".traceReturnValue(", sNodes, ")", (semicolon ? ";" : ""), "\n");
-					}
-				} else if (node.type === 'IfStatement') {
-					if (options.trace_branches) {
-						// TODO
-					}
-				} else if (semiColonStatements.indexOf(node.type) !== -1) {
-					if (!/;$/.test(node.source())) {
-						update(node, sourceNodes(node), ";");
-					}
-				}
-				update(node, sourceNodes(node));
+			
+			} else if (node.type == "IfStatement") {
+					var readArray = [];
+					readArray = handleReads(node.test);
+					// console.log("extracted reads from if condition: " + JSON.stringify(readArray));
+					addGlobalReads(readArray);
 			} else if ( (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator')) {
 				if (node.type == "VariableDeclarator"){
 					if (node.parent.source().includes("let ")) {
@@ -639,60 +607,30 @@ var traceFilter = function (content, options) {
 					var readArray = [];
 					readArray = handleReads(node.right);
 					addGlobalReads(readArray);
-					// console.log("Read array is : " + readArray);
-					// update(node, node.left.source() , node.operator , options.tracer_name , ".setValue(" , node.right.source() , 
-					// 	", \'" , escapeRegExp(node.left.source()) , "\', typeof(" , node.left.source() , ')== "undefined" ? null :' 
-					// 	, node.left.source() , ",[" , readArray , "])" );
-					// update(node,node.left.source(),node.operator, options.tracer_name,'.setValue(',node.right.source(),',','\'',escapeRegExp(node.left.source()),
-					// 	'\'',', typeof(',node.left.source(),') == "undefined" ? null : ',node.left.source(),',[',readArray,'],',')');
-					// update(node, node.left.source(), node.operator, options.tracer_name, '.setValue(', node.right.source(),',',node.left,')');
 
 				} else if (IsLocalVariable(node.right) > 0){
-					//the left node is local, however the right node is global, 
-					//therefore left becomes an alias to a global
-					// or a local is 
-					// therefore no longer local
-					// also, now track the global variable being aliased
-					// console.log("ENtered condition where left: " + node.left.source() + "is local but right is global: " + node.right.source());
-					// removeLocalVariable(node.left);
 					addGlobalVariable(node.left, node.right);
 				} else {
 					addLocalVariable(node.left);
 				}
-			} else if (node.type === 'SwitchStatement' && !options.execution_cache_toggle) {
-				if (options.trace_switches) {
-					for (var i in node.cases) {
-						var c = node.cases[i];
-						if (c.consequent.length > 0) {
-							// it's impossible to get the source minus the "case 0:" at the beginning,
-							// so calculate the offset of the first statement of the consequence, then slice off the front
-							var relStart = {
-								line: c.consequent[0].loc.start.line - c.loc.start.line,
-								column: c.consequent[0].loc.start.column - c.loc.start.column
-							};
-							var source = c.source();
-							var lines = c.source().split("\n").slice(relStart.line);
-							lines[0] = lines[0].slice(relStart.column);
-							var sourceWithoutCase = lines.join('\n');
-
-							var attrs = { path: c.loc.path, start: c.loc.start, end: c.loc.end };
-							console.log({
-								attrs: attrs,
-								originalSource: sourceWithoutCase
-							});
-						}
-					}
-				}
-			} else if (node.type === 'ForStatement' || node.type === 'ForInStatement') {
-				if (options.trace_loops) {
-					node.body;
-				}
-			} else if (node.type === 'WhileStatement' || node.type === 'DoWhileStatement') {
-				if (options.trace_loops) {
-					node.body;
-				}
-			}
+			} 
 		});
+
+
+		var buildArgs = function (args) {
+			if (args) {
+				var modifiedArgArray = [];
+				args.forEach(function(arg){
+					modifiedArgArray.push("\'" + escapeRegExp(arg) + "\'");
+					modifiedArgArray.push("typeof " +  arg + "=='undefined'?null:" + arg );
+				});
+
+				return modifiedArgArray;
+			}
+		}
+
+		// console.log("functions with signatures after first pass: " + Object.keys(functionToMetadata).length);
+		// console.log("function name to location map: " + JSON.stringify(functionNameToLocation));
 		// Second pass of the entire code to pass children's signature upwards
 		m = fala({
 			source: content,
@@ -724,16 +662,48 @@ var traceFilter = function (content, options) {
 				}
 			}
 			else if (node.type == "CallExpression") {
-				if (node.callee.name in functionToMetadata){
-					propogateSignature(node, functionToMetadata[node.callee.name]);
+				/*
+				There are three types of call expressions to be taken care of while propagating signature:
+					- regular expression which was defined in this script, propagate
+					- regular expression which was not defined in this script ( ie a native function), therefore no propagation for this one
+					- non regular expression, ie a function expression and call expression at the same time, propagate
+					- regular expression which was defined multiple times, therefore look through all the definitions and then decide. 
+				*/
+				// console.log("propogateSignature for " + node.source() + " with location " + JSON.stringify(node.loc)) ;
+				var metadata;
+				var immediatelyInvoked = false;
+				if (node.callee.type == "FunctionExpression") immediatelyInvoked = true;
+				if (functionNameToLocation[node.callee.source()]){
+					if (functionNameToLocation[node.callee.source()].length == 1)
+						metadata = makeId('function', options.path, functionNameToLocation[node.callee.source()][0]);
+					else {
+						functionNameToLocation[node.callee.name].forEach(function(loc){
+							if (containsRange(node.parent.loc.start, node.parent.loc.end, loc.start, loc.end))
+									metadata = makeId('function', options.path, loc);
+						});
+					}
 				}
+				// console.log("metadata is " + metadata + " propogating: " + functionToMetadata[metadata]);
+				if (metadata)
+					propogateSignature(node, functionToMetadata[metadata]);
+				else if (immediatelyInvoked) propogateSignature(node, functionToMetadata[makeId('function', options.path, node.loc)])
+
 			} else if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
-				if (node.id)
-					var args = functionToMetadata[node.id.name];
-				else var args = functionToMetadata[makeId('function', options.path, node.loc)];
-				var traceBegin = "if (" + options.tracer_name + ".compareAndCache(" + args + ")) return;"
-				var traceEnd = options.tracer_name + ".dumpCache(" + args + ");";
-				update(node.body, '{', traceBegin, 'try { ', sourceNodes(node.body), '\n} catch (e) {console.log("ERROR while replaying cache" + e + e.stack)} finally {', traceEnd, '}}');
+				// console.log(JSON.stringify(functionToMetadata));
+				var index = makeId('function', options.path, node.loc);
+				var args = functionToMetadata[index];
+				args = replaceAliasesWithActuals(args);
+
+				// break into separate arguments
+				var separateWrites = buildArgs(args.globalWrites);
+				var separateReads = buildArgs(args.globalReads);
+				var separateAlias = args.globalAlias;
+				var localVars = args.localVars;
+				var _traceBegin = "if (" + options.tracer_name + ".compareAndCache(";// + args + ")) return;"
+				var _traceEnd = options.tracer_name + ".dumpCache(";// + args + ");";
+				update(node.body, '{', _traceBegin, JSON.stringify(index) ,', arguments,[' ,  separateReads , '],',JSON.stringify(args),')) return;',
+				 'try { ', sourceNodes(node.body), '\n} catch (e) {console.log("ERROR while replaying cache" + e + e.stack)} finally {', _traceEnd,
+				  JSON.stringify(index) ,',[' , separateWrites , ']); }}');
 			}
 		});
 
