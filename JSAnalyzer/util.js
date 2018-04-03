@@ -68,11 +68,35 @@ var containsRange = function (start1, end1, start2, end2) {
     return contains(start1, end1, start2) && contains(start1, end1, end2);
 }
 
+var customMergeDeep = function (signature1, signature2) {
+    // console.log("calling custom deep merge with keys: " + Object.keys(signature1));
+    for (let key in signature1){
+        // console.log("iterating through the key: " + key + Object.keys(signature1));;
+        if (signature1[key] && signature1[key].constructor == Array) {
+            if (signature2[key]) {
+                for (let elem in signature2[key]) {
+                    signature1[key].push(signature2[key][elem]);
+                }
+            }
+        } else if (signature1[key] && signature1[key].constructor == Object){
+            if (signature2[key]) {
+                for (let elem in signature2[key]) {
+                    signature1[key][elem] = signature2[key][elem];
+                }
+            }
+        }
+    }
+}
+
+
+var zip= rows=>rows[0].map((_,c)=>rows.map(row=>row[c]));
+
 
 module.exports = {
     getArgs: getArgs,
     getIdentifierFromAssignmentExpression: getIdentifierFromAssignmentExpression,
     getIdentifierFromMemberExpression: getIdentifierFromMemberExpression,
     escapeRegExp: escapeRegExp,
-    containsRange: containsRange
+    containsRange: containsRange,
+    customMergeDeep: customMergeDeep
 }

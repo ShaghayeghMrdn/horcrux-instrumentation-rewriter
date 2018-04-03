@@ -133,86 +133,92 @@ var traceFilter = function (content, options) {
 	options = mergeInto(options, defaultOptions);
 
 	var processed = content;
-	var functionSources = {};
-
-	var addCallees = function(node) {
-	    parent = node.parent;
-	    while (parent != undefined){
-	    
-		    if ( parent != undefined &&  (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression")){
-		     if (parent.listOfCallees == undefined)
-		     	parent.listOfCallees = [];   
-		    }
-
-		}		
-	}
-
-	if (!options.execution_cache_toggle ) {
-		var prologue = "";
-		prologue += template(/*tracer-stub.js{*/fs.readFileSync(__dirname + '/lib/tracer-stub.js', 'utf8')/*}tracer-stub.js*/, { name: options.tracer_name });
-		if (options.source_map) prologue += "/*mapshere*/";
-		prologue += options.tracer_name + '.add(' + JSON.stringify(options.path) + ', ' + extractTracePoints(content, options.path) + ');\n\n';
-	}
 
 	try {
 		var fala, update, sourceNodes, functionToMetadata = {}, functionNameToLocation = {}; // Dictionary: key is function name, value is an array containing all the locations it was defined. 
 
 		var ASTNodes = []; // List of all the nodes in the abstract syntax tree
 		var functionToCallees = {};
+		var fala = function () {
+			var m = falafel.apply(this, arguments);
+			return {
+				map: function () { return '' },
+				toString: function () { return m.toString() },
+			};
+		};
+		var update = function (node) {
+			node.update(Array.prototype.slice.call(arguments, 1).join(''));
+		};
+		var sourceNodes = function (node) {
+			return node.source();
+		};
 
-		if (options.source_map) {
-			fala = falafelMap;
-			update = function (node) {
-				node.update.apply(node, Array.prototype.slice.call(arguments, 1));
-			};
-			sourceNodes = function (node) {
-				return node.sourceNodes();
-			};
-		} else {
-			var fala = function () {
-				var m = falafel.apply(this, arguments);
-				return {
-					map: function () { return '' },
-					toString: function () { return m.toString() },
-				};
-			};
-			var update = function (node) {
-				node.update(Array.prototype.slice.call(arguments, 1).join(''));
-			};
-			var sourceNodes = function (node) {
-				return node.source();
-			};
-		}
+		var addCalleesToCaller = function(node){
 
-		var customMergeDeep = function (signature1, signature2) {
+			// This scenario will be handled in the second pass itself, as this function is declared and invoked at the same time. 
+			if (node.callee.type == "FunctionExpression")
+				return
 
-			for (let key in signature1){
-				// console.log("iterating through the key: " + key + Object.keys(signature1));;
-				if (signature1[key] && signature1[key].constructor == Array) {
-					if (signature2[key]) {
-						for (let elem in signature2[key]) {
-							signature1[key].push(signature2[key][elem]);
-						}
-					}
-				} else if (signature1[key] && signature1[key].constructor == Object){
-					if (signature2[key]) {
-						for (let elem in signature2[key]) {
-							signature1[key][elem] = signature2[key][elem];
-						}
-					}
-				}
-			}
-		}
-
-		var propogateSignature = function(node, signature) {
-			// console.log("propogating: " + signature);
 			parent = node.parent;
 			while (parent != undefined ) {
 				if ((parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression")){
-					// console.log("calling merge deep from outside");
-					customMergeDeep(functionToMetadata[makeId('function', options.path, parent.loc)], signature);
+					var functionName;
+					if (parent.id) functionName = parent.id.name;
+					else {
+						if (parent.parent.type == "VariableDeclarator")
+							functionName = parent.parent.id.name;
+						else if (parent.parent.type == "AssignmentExpression") {
+							functionName = parent.parent.left.source();
+						}				
+					}
+					if (functionName){
+						if (functionToCallees[functionName] == undefined)
+							functionToCallees[functionName] = [];
+						if (functionToCallees[functionName].indexOf(node.callee.source()) < 0)
+							functionToCallees[functionName].push(node.callee.source());
+					}
+					return;
 				}
 				parent = parent.parent;
+			}
+		}
+
+		// Handle propagation for those callees with multiple declaration sites TODO
+		var propogateSignature = function (node) {
+			if (node == undefined || node == null) return;
+
+			var functionName;
+			if (node.id) functionName = node.id.name;
+			else {
+				if (node.parent.type == "VariableDeclarator")
+					functionName = node.parent.id.name;
+				else if (node.parent.type == "AssignmentExpression") {
+					functionName = node.parent.left.source();
+				}				
+			}
+			// console.log("Function to callees:------------------");
+			// Object.keys(functionToCallees).forEach(function(parent){
+			// 	console.log("key: " + parent);
+			// 	console.log("value: " + functionToCallees[parent]);
+			// })
+			_propogateSignature(functionName, node);
+		}
+
+		var _propogateSignature = function(functionName, node) {
+			if (functionName && functionToCallees[functionName]){
+				functionToCallees[functionName].forEach(function(callee){
+					if (functionName != callee && !( functionToCallees[callee] && functionToCallees[callee].indexOf(functionName) >= 0) ) {
+						var metadata;
+						if (functionNameToLocation[callee]){
+							metadata = makeId('function', options.path, functionNameToLocation[callee][0]);
+						}
+						// console.log("metadata is " + metadata + " propogating: " + functionToMetadata[metadata]);
+						if (metadata) {
+							util.customMergeDeep(functionToMetadata[makeId('function', options.path, node.loc)],functionToMetadata[metadata])
+						}
+						_propogateSignature(callee, node);
+					}
+				})
 			}
 		}
 
@@ -237,11 +243,6 @@ var traceFilter = function (content, options) {
 
 		}
 
-		var cleanupHoistedVariables = function(node) {
-			removeLocalVariables(node);
-		}
-
-
 		var buildArgs = function (args) {
 			if (args) {
 				var modifiedArgArray = [];
@@ -253,8 +254,6 @@ var traceFilter = function (content, options) {
 				return modifiedArgArray;
 			}
 		}
-
-		var zip= rows=>rows[0].map((_,c)=>rows.map(row=>row[c]));
 
 		var printFriendlyAlias = function(obj) {
 			var output = {};
@@ -276,13 +275,11 @@ var traceFilter = function (content, options) {
 				start: node.loc.start,
 				end: node.loc.end
 			};
-
 			// Add every node to the list
 			ASTNodes.push(node);
 
 			if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration') {
 				var args = { localVars: node.localVariables, globalAlias: node.globalAlias, globalReads: node.globalReads, globalWrites : node.globalWrites  };
-
 				var index = makeId('function', options.path, node.loc);
 				functionToMetadata[index] = args;
 				var functionName;
@@ -338,10 +335,14 @@ var traceFilter = function (content, options) {
 				} else {
 					scope.addLocalVariable(node.left);
 				}
-			} 
+			} else if (node.type == "CallExpression") {
+
+				addCalleesToCaller(node);
+			}
 		});
 
 		ASTNodes.forEach(function(node) {
+			// console.log("parsing node: " + node.source());
 			if (node.type === "Program") {
 				if (!options.execution_cache_toggle) {
 					var info = { nodeId: makeId("toplevel", options.path, node.loc) };
@@ -391,7 +392,7 @@ var traceFilter = function (content, options) {
 					readArray = signature.handleReads(node.right);
 					scope.addGlobalReads(readArray);
 
-				} else if (IsLocalVariable(node.right) > 0){
+				} else if (scope.IsLocalVariable(node.right) > 0){
 					scope.addGlobalAlias(node.left, node.right);
 				} else {
 					scope.addLocalVariable(node.left);
@@ -404,33 +405,28 @@ var traceFilter = function (content, options) {
 					- non regular expression, ie a function expression and call expression at the same time, propagate
 					- regular expression which was defined multiple times, therefore look through all the definitions and then decide. 
 				*/
-				// console.log("propogateSignature for " + node.source() + " with location " + JSON.stringify(node.loc)) ;
-				var metadata;
-				var immediatelyInvoked = false;
-				if (node.callee.type == "FunctionExpression") immediatelyInvoked = true;
-				if (functionNameToLocation[node.callee.source()]){
-					if (functionNameToLocation[node.callee.source()].length == 1)
-						metadata = makeId('function', options.path, functionNameToLocation[node.callee.source()][0]);
-					else {
-						functionNameToLocation[node.callee.name].forEach(function(loc){
-							if (util.containsRange(node.parent.loc.start, node.parent.loc.end, loc.start, loc.end))
-									metadata = makeId('function', options.path, loc);
-						});
+				if (node.callee.type == "FunctionExpression") {
+					parent = node.parent;
+					while (parent != undefined){
+						if (parent.type == "FunctionExpression" || parent.type == "FunctionDeclaration"){
+							util.customMergeDeep(functionToMetadata[makeId('function', options.path, parent.loc)],functionToMetadata[node.callee.loc])
+							return;
+						}
+						parent = parent.parent;
 					}
 				}
-				// console.log("metadata is " + metadata + " propogating: " + functionToMetadata[metadata]);
-				if (metadata)
-					propogateSignature(node, functionToMetadata[metadata]);
-				else if (immediatelyInvoked) propogateSignature(node, functionToMetadata[makeId('function', options.path, node.loc)])
 
 			} else if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
-				// console.log(JSON.stringify(functionToMetadata));
+
 				var index = makeId('function', options.path, node.loc);
 				var args = functionToMetadata[index];
-
-				// cleanupHoistedVariables(node);
 				args = replaceAliasesWithActuals(args);
 
+				//cumulate signature from the entire subgraph
+				propogateSignature(node);
+				
+
+				var serializedArgs = {};
 				// break into separate arguments
 				var separateReads = [];
 				var separateWrites = [];
@@ -438,14 +434,25 @@ var traceFilter = function (content, options) {
 				if (args.globalReads) separateReads = buildArgs(args.globalReads.map(function(e){return e.source()}));
 
 				//Stringify the args object
-				if (args.globalWrites) args.globalWrites = args.globalWrites.map(function(e){return e.source()});
-				if (args.globalReads) args.globalReads = args.globalReads.map(function(e){return e.source()});
-				if (args.localVars) args.localVars = args.localVars.map(function(e){return e.source()});
-				if (args.globalAlias) args.globalAlias = printFriendlyAlias(args.globalAlias);
+				if (args.globalWrites) serializedArgs.globalWrites = args.globalWrites.map(function(e){return e.source()});
+				if (args.globalReads) serializedArgs.globalReads = args.globalReads.map(function(e){return e.source()});
+				if (args.localVars) {
+					try {
+					serializedArgs.localVars = args.localVars.map(function(elem){return elem.source()});
+					} catch(e) {console.log("happened inside function + " + node.source() + "\n" + " ");
+						args.localVars.forEach(function(lvar){
+							console.log("[error] " + Object.keys(lvar) + " " + lvar);
+							if (Object.keys(lvar).length == 57) console.log(lvar[0]);
+						});
+						args.localVars = {};
+					}
+				}
+
+				if (args.globalAlias) serializedArgs.globalAlias = printFriendlyAlias(args.globalAlias);
 				// if (args.globalAlias) args.globalAlias = zip([Object.keys(args.globalAlias.map(function(e){return e.source()})), Object.values(args.globalAlias).map(function(e){return e.source()})]);
 				var _traceBegin = "if (" + options.tracer_name + ".compareAndCache(";// + args + ")) return;"
 				var _traceEnd = options.tracer_name + ".dumpCache(";// + args + ");";
-				update(node.body, '{', _traceBegin, JSON.stringify(index) ,', arguments,[' ,  separateReads , '],',JSON.stringify(args),')) return;',
+				update(node.body, '{', _traceBegin, JSON.stringify(index) ,', arguments,[' ,  separateReads , '],',JSON.stringify(serializedArgs),')) return;',
 				 'try { ', sourceNodes(node.body), '\n} catch (e) {console.log("ERROR while replaying cache" + e + e.stack)} finally {', _traceEnd,
 				  JSON.stringify(index) ,',[' , separateWrites , ']); }}');
 			}

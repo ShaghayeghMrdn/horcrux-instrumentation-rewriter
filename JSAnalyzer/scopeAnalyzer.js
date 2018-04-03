@@ -59,11 +59,19 @@ var addLocalVariable = function (node) {
         if (parent.localVariables == undefined){
             parent.localVariables = []
         }
-        if (node.id && parent.localVariables.map(function(e){return e.source()}).indexOf(node.id.name) < 0) parent.localVariables.push(node.id);
-        else if (parent.localVariables.map(function(e){return e.source()}).indexOf(node.source()) < 0) parent.localVariables.push(node);
+        if (node.id){
+            if (parent.localVariables.map(function(e){return e.source()}).indexOf(node.id.name) < 0) 
+            parent.localVariables.push(node.id);
+        } else {
+            if (parent.localVariables.map(function(e){return e.source()}).indexOf(node.source()) < 0) 
+                parent.localVariables.push(node);
+        }
         
         // remove variable from the signature
         removeLocalVariables(parent);
+
+        // console.log("[]adding local variable " + node.source() + " with keys:  " + Object.keys(node) + JSON.stringify(parent.loc));
+        // console.log("local args looks like: " + parent.localVariables.map(function(e){return e.source()}));
     }
 
 }
@@ -128,7 +136,7 @@ var addGlobalAlias = function (node, otherArgs) {
         }
         try { localIndex = parent.localVariables.map(function(e){return e.source()}).indexOf(node.source());
         if (localIndex > -1) parent.localVariables.splice(localIndex, 1);
-        } catch(err) {}
+        } catch(err) {console.log("catch some error while aliasing: " + err)}
     }
 }
 
@@ -162,7 +170,10 @@ var _addGlobalReads = function(node) {
             if (parent.globalReads == undefined){
                 parent.globalReads = [];
             }
-            if (node.id && parent.globalReads.map(function(e){return e.source()}).indexOf(node.id.name) < 0) parent.globalReads.push(node.id);
+            if (node.id ) {
+                if (parent.globalReads.map(function(e){return e.source()}).indexOf(node.id.name) < 0) 
+                    parent.globalReads.push(node.id);
+            }
             else if (parent.globalReads.map(function(e){return e.source()}).indexOf(node.source()) < 0) parent.globalReads.push(node);
             return;
         }   
