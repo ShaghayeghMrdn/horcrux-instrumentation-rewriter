@@ -85,16 +85,16 @@ var handleReads = function(node) {
         readArray.push(node);
     } else if (node.type == "ArrayExpression") {
         node.elements.forEach(function (elem) {
-            if (elem.type == "Identifier")
                 readArray.push(elem);
         });
+    } else if (node.type == "CallExpression") {
+        readArray.push(node);
     }
     
     if (readArray == null) return [];
-    // console.log("Read array: " + JSON.stringify(readArray));
     var globalReads = [];
     readArray.forEach(function(read){
-        if (scope.IsLocalVariable(read) > 0) {
+        if (scope.IsLocalVariable(read) > 0  ) {
             globalReads.push(read);
         }
 

@@ -69,50 +69,38 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 if (typeof {name} === 'undefined') {
 {name} = new (function () {
     var e2eTesting = true;
-    if (!e2eTesting) {
-        window.addEventListener("load" ,function() {
-            var MAXRESULT = 1000000;
+    var functions = new Set();
+    var invocations = {};
+    var cacheStats = {};
+    var nativeObjectsStore = {};
+    var customLocalStorage = {}; // Use this in place of the localstorage API for faster access. 
+    cacheStats.cacheHit = {};
 
-            var tracer = {name};
+    // window.addEventListener("load", function(){
+    //     // Add the custom local storage object to the indexed db
 
-            functions = {};
-            var uniqueFunctions = [];
-            var callsites = {}
-            var ids = [];
-            var ids_callsites = [];
-            var nodesHandle = tracer.trackNodes();
-            tracer.newNodes(nodesHandle).forEach(function (n) {
-                if (n.type === 'function') {
-                    functions[n.id] = n;
-                    ids.push(n.id);
-                } else if (n.type == 'callsite'){
-                    callsites[n.id] = n;
-                    ids_callsites.push(n.id);   
-                }
-            });
 
-            var logHandle = tracer.trackLogs({ids: ids});
-            invocations = tracer.logDelta(logHandle, MAXRESULT);
-
-            console.log("Number of functions: " + Object.keys(functions).length);
-            console.log("Number of invocations: " + invocations.length);
-
-            var modifiedFunctionCounter = 0
-            var uniqueFunctions = [];
-            window.importantIDToInvocations = {};
-            invocations.forEach(function(entry){
-
-                if (entry.globalDelta != undefined && Object.keys(entry.globalDelta["After"]).length > 0){
-                    importantIDToInvocations[entry.id] = entry;
-                }
-            });
-            console.log("Total number of important invocations executed " + Object.keys(importantIDToInvocations).length);
-        });
-    }
+    // });
 
 	this.setGlobal = function (gthis) {
 		globalThis = gthis;
 	}
+
+    this.getFunctions = function () {
+        return functions;
+    }
+
+    this.getInvocations = function() {
+        return invocations;
+    }
+
+    this.getCacheStats = function () {
+        return cacheStats;
+    }
+
+    this.getCustomCache = function() {
+        return customLocalStorage;
+    }
 
     var isCyclic = function (obj) {
       var seenObjects = [];
@@ -136,60 +124,120 @@ if (typeof {name} === 'undefined') {
       return detect(obj);
     }
 
-    this.loadFromCache = function(cacheObject) {
-
+    this.logWrite = function(functionIdentifier, rhs, variableName ){
+        customLocalStorage[functionIdentifier]["writes"][variableName] = rhs;
+        return rhs;
     }
 
-    this.compareAndCache = function(nodeId, params, globalReads, info) {
-        var cacheObjectReads = JSON.parse(localStorage.getItem(nodeId + "-reads"));
-        if (cacheObjectReads){
-            Object.keys(cacheObjectReads).forEach(function(read){
-                if (!(JSON.stringify(eval(read)) == JSON.stringify(cacheObjectReads[read])))
-                    console.log("cache exists but didn't match")
-                    return false;
-            });             
+    this.logRead = function(functionIdentifier, readArray){
+        customLocalStorage[functionIdentifier]["read"][readArray[0]] = readArray[1];
+        return readArray[2];
+    }
 
-            var cacheObjectWrites = JSON.parse(localStorage.getItem(nodeId + "-writes"));
-            console.log("Cache hit for function: " + nodeId);
-            if (cacheObjectWrites) {
-                Object.keys(cacheObjectWrites).forEach(function(write){
-                    var evalString = write + "= " + JSON.stringify(cacheObjectWrites[write]);
-                    // console.log("going to evaluate " + evalString);
-                    eval(evalString);
-                });
-            }
-            return true;
+    this.logReturnValue = function(functionIdentifier, returnValue) {
+        customLocalStorage[functionIdentifier]["returnValue"] = returnValue;
+        return returnValue;
+    }
+
+
+    this.cacheAndReplay = function(nodeId, params, globalReads, info){
+        if (!customLocalStorage[nodeId]) {
+            customLocalStorage[nodeId] = {};
+            customLocalStorage[nodeId]["writes"] = {};
+            customLocalStorage[nodeId]["reads"] = {};
+            customLocalStorage[nodeId]["arguments"] = {};
+            customLocalStorage[nodeId]["arguments"]["before"] = params;
         }
-
-        // If cache doesn't exist, then update cache, however if it does, no version control:
-        console.log("Cache doesn't yet exist for : " + nodeId);
-        var serializedObject = {};
         if (globalReads.length) {
             globalReads.forEach(function(read, it){
                 if (it%2==0)
-                    serializedObject[read] = globalReads[it+1]; 
-            });
+                    customLocalStorage[nodeId]["reads"][read] = globalReads[it+1]; 
+            });           
         }
-
-        // Dump the arguments as well:
-        if (Object.keys(params).length){
-            Object.keys(params).forEach(function(key){
-                serializedObject[key] = params[key];
-            });
-        }
-
-        localStorage.setItem(nodeId + "-reads", JSON.stringify(serializedObject));
-        return false;
     }
 
-    var buildCacheObject = function(nodeId, globalWrites) {
+    this.dumpArguments = function(nodeId, params) {
+        if (Object.keys(params).length != 0)
+            customLocalStorage[nodeId]["arguments"]["after"] = params;
+    }
+
+    this.compareAndCache = function(nodeId, params, globalReads, info) {
+        customLocalStorage[nodeId] = {};
+        customLocalStorage[nodeId]["writes"] = {};
+        return false;
+        try {
+            if (!(nodeId in invocations))
+                invocations[nodeId] = 0;
+            invocations[nodeId]++;
+            functions.add(nodeId);
+            var cacheObjectReads = this.parse.call(this, localStorage.getItem(nodeId + "-reads") || null);
+            var gthis = this;
+            if (cacheObjectReads){
+                Object.keys(cacheObjectReads).forEach(function(read){
+                    if (read == "params") {
+                        try {
+                            if (!(gthis.stringify.call(gthis, params) == cacheObjectReads[read])) {
+                                // console.log("arguments match failed for " + nodeId + " "  + JSON.stringify(params)  + cacheObjectReads[read] );
+                                return false;
+                            } 
+                        } catch (e) {
+                            // console.log("[WARNING] stringifying circular object: " + nodeId);
+                            return false;
+                        }
+                    }
+                    else if (!(gthis.stringify.call(gthis,eval(read)) == gthis.stringify.call(gthis,cacheObjectReads[read]))) {
+                        // console.log("cache exists but didn't match for function: " + nodeId + " different read:" + JSON.stringify(arguments));
+                        return false;
+                    }
+
+                }); 
+                var cacheObjectWrites = this.parse.call(this,localStorage.getItem(nodeId + "-writes") || null);
+                var returnValue = true;
+                // console.log("Cache hit for function: " + nodeId);
+                if (!(nodeId in cacheStats.cacheHit))
+                    cacheStats.cacheHit[nodeId] = 0;
+
+                cacheStats.cacheHit[nodeId]++;
+                if (cacheObjectWrites) {
+                    Object.keys(cacheObjectWrites).forEach(function(write){
+                        if (!write.includes("returnValue")) eval(write + "= " + gthis.stringify.call(gthis,cacheObjectWrites[write]));
+                        else returnValue = cacheObjectWrites[write];
+                    });
+                }
+                return false;
+            }
+
+            // If cache doesn't exist, then update cache, however if it does, no version control:
+            // console.log("Cache doesn't yet exist for : " + nodeId);
+            var serializedObject = {};
+            if (globalReads.length) {
+                globalReads.forEach(function(read, it){
+                    if (it%2==0 && !isNative(globalReads[it+1]))
+                        serializedObject[read] = globalReads[it+1]; 
+                });
+            }
+
+            serializedObject["params"] = this.stringify.call(this,params);
+            // console.log("setting read cache value for " + nodeId + " " + this.stringify(serializedObject));
+            localStorage.setItem(nodeId + "-reads", this.stringify.call(this,serializedObject));
+            return false;
+        } catch (e) { 
+            // console.log("[WARNING][COMPARECACHE] warning raised while comparing the cache" + e + e.stack); 
+            return false;
+        }
+    }
+
+    var buildCacheObject = function(nodeId, globalWrites, returnValue) {
         // console.log(local"building cache for " + info.nodeId)
         try {
+            // console.log("the return value is: " + returnValue);
             var serializedObject = {};
-
+            if (returnValue)  {
+                serializedObject["returnValue"] = returnValue;
+            }
             if (globalWrites.length) {
                 globalWrites.forEach(function(write, it){
-                    if (it%2==0)
+                    if (it%2==0 && !isNative(globalWrites[it+1]))
                         serializedObject[write] = globalWrites[it+1]; 
                     // console.log(info.nodeId + "the cache object looks like: " + JSON.stringify(serializedObject));
                 });
@@ -197,51 +245,87 @@ if (typeof {name} === 'undefined') {
             // console.log("Cache looks like "  + JSON.stringify(serializedObject));
             return serializedObject;
         } catch (e) {
-            console.log("[WARNING] Building cache object "  + e + e.stack);
+            // console.log("[WARNING] Building cache object "  + e + e.stack);
             return {};
         }
     }
 
-    this.dumpCache = function(nodeId, globalWrites) {
-        // return;
-
-        var cacheValue = JSON.stringify(buildCacheObject(nodeId, globalWrites));
-        console.log("Dupming cache for " + nodeId + " with value " + cacheValue);
-        localStorage.setItem(nodeId + "-writes", cacheValue);
+    this.dumpCache = function(nodeId, globalWrites, returnValue) {
+        return;
+        try {
+            var _cacheValue = buildCacheObject(nodeId, globalWrites, returnValue);
+            var cacheValue =  this.stringify.call(this, _cacheValue);
+            // console.log("Dupming cache for " + nodeId + " with length " + cacheValue.length);
+            localStorage.setItem(nodeId + "-writes", cacheValue);
+        } catch (dumpErr) {
+            // do nothing as of now. 
+        }
     }
 
     var escapeRegExp = function(str) {
-        return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|\']/g, "\\$&");
+        return str.replace(/[\"]/g, "\\$&");
     }
 
-    this.setValue = function (val,variableName, variable, reads=[]) {
-        // console.log(arguments[0].toString(), arguments);
-        try {
-            var top = invocationStack[invocationStack.length - 1];
-            if (!top) {
-                // console.log("Error while tracking the global write | Probably it is outside any function");
-            } else {
-                if (typeof(variable) != undefined) {
-                    // console.log("Top is: " + JSON.stringify(top.globalDelta));
-                    // console.log("variable is " + variable );
-                    top.globalDelta["Before"][variableName] = variable;
-                    top.globalDelta["After"][variableName] = val;
+    var isNative = function(fn) {
+        return (/\{\s*\[native code\]\s*\}/).test('' + fn);
+    }
 
-                    // top.globalDelta["Reads"] = top.globalDelta["Reads"].concat(readArray);
-                    reads.forEach(function(read, it){
-                        if (it % 2 == 0){
-                            top.globalDelta["Reads"][reads[it+1]] = read;
-                        }
-                    });
-                }
+    this.stringify = function (obj) {
+
+        return JSON.stringify(obj, function (key, value) {
+          var fnBody;
+          if (value instanceof Function || typeof value == 'function') {
+
+            if ((/\{\s*\[native code\]\s*\}/).test(value.toString()))
+                nativeObjectsStore[key] = value;
+            fnBody = value.toString();
+
+            if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { //this is ES6 Arrow Function
+              return '_NuFrRa_' + fnBody;
             }
-            // console.log("Returning : " + val);
-            return val;
-        } catch (err) {
-            console.log("[INFO][SET VALUE]: " + err + err.stack);
-            return val;
-        } 
-    }
+            return fnBody;
+          }
+          if (value instanceof RegExp) {
+            return '_PxEgEr_' + value;
+          }
+          return value;
+        });
+    };
+
+    this.parse = function (str, date2obj) {
+
+    var iso8061 = date2obj ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/ : false;
+
+    return JSON.parse(str, function (key, value) {
+        var prefix;
+
+        if (typeof value != 'string') {
+        return value;
+        }
+        if (value.length < 8) {
+        return value;
+        }
+
+        prefix = value.substring(0, 8);
+
+        if (iso8061 && value.match(iso8061)) {
+            return new Date(value);
+        }
+        if (prefix === 'function') {
+            if ((/\{\s*\[native code\]\s*\}/).test(value))
+                return nativeObjectsStore[key]
+            return eval('(' + value + ')');
+        }
+        if (prefix === '_PxEgEr_') {
+            return eval(value.slice(8));
+        }
+        if (prefix === '_NuFrRa_') {
+            return eval(value.slice(8));
+        }
+
+        return value;
+        });
+    };
 
 	this.Array = Array;
 });

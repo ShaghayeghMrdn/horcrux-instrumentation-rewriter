@@ -71,10 +71,19 @@ function snippetfromGoogleSimple(){
 
 function simpleSignaturePropogation(){
     var src ='\
-        var global1,global2, global3=0; \
+        var global1,global2, global3; \
         function top1 () {\
-            global1 = 2 + global3;\
-            top2();\
+            var alias = global3;\
+            alias.a = 1;\
+            global1 = 2 + alias.a;\
+            var inner = function(){ \
+                b.n = {};\
+            };\
+            var global1;\
+            var b = alias;\
+            document.getElementById("a").setAttribute("ayush"); \
+            top2(c,d);\
+            return {1:2};\
         }\
         function top2(){\
             global2 = 2;\
@@ -88,9 +97,50 @@ function simpleSignaturePropogation(){
     instrumentAndExecute(src, true);
 }
 
+function simpleDOMWriteTest(){
+    var src = '\
+    outsideGlobal = 3;\
+    function manipulateDOM() { \
+        var div = document.querySelector("div");\
+        var attr = div.getAttribute("property"); \
+        var x = readGlobal.a.b()[3];\
+        writeGlobal = x + readANotherGlobal.d.c[i];\
+        var someLocal = whichMethod(1);\
+        var local2 = global3 + 3;\
+        if (a=1) { \
+            a=2 \
+        } \
+        document.setAttribute(attr);\
+        domeFunction(a,b,c);\
+        return a=1, b=2,c;\
+        return a[b]\
+    }\
+\
+    '
+
+    instrumentAndExecute(src, true);
+}
+
+function simpleWikiSnippetTest() {
+    var src =`
+   function b(b) {
+                        var c;
+                        do
+                            if (c = p ? b.lang : b.getAttribute("xml:lang") || b.getAttribute("lang"))
+                                return c = c.toLowerCase(),
+                                c === a || 0 === c.indexOf(a + "-");
+                        while ((b = b.parentNode) && 1 === b.nodeType);
+                        return !1
+                    }
+    `
+    instrumentAndExecute(src, true);
+}
+
 function main(){
     // instrumnetBasicTest();
-    simpleSignaturePropogation();
+    // simpleSignaturePropogation();
+    simpleDOMWriteTest();
+    // simpleWikiSnippetTest();
 }
 
 

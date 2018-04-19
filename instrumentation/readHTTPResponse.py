@@ -104,9 +104,9 @@ for root, folder, files in os.walk(sys.argv[1]):
                 print "Simply copying the file without modification.. "
                 copy(os.path.join(root,file), os.path.join(sys.argv[2], output_directory))
             else:
-                # pid = os.fork()
-                # if pid == 0:
-                    # TEMP_FILE = str(os.getpid())
+                pid = os.fork()
+                if pid == 0:
+                    TEMP_FILE = str(os.getpid())
                     for header in http_response.response.header:
                         if header.key == "Content-Encoding":
                             # print "GZIIPED FILE is " , file
@@ -190,14 +190,14 @@ for root, folder, files in os.walk(sys.argv[1]):
                     outputFile.close()
                     tmpFile.close()
 
-                    # subprocess.Popen("rm {}".format(TEMP_FILE), shell=True)
+                    subprocess.Popen("rm {}".format(TEMP_FILE), shell=True)
 
-                #     os._exit(0)
-                # childPids.append(pid)
+                    os._exit(0)
+                childPids.append(pid)
 
         except IOError as e:
             print sys.argv[1] + ": Could not open file ", e
 
-# for pid in childPids:
-#     os.waitpid(pid,0)
+for pid in childPids:
+    os.waitpid(pid,0)
 

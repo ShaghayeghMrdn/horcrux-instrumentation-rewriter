@@ -8,6 +8,41 @@ var getArgs = function (node) {
     return args;
 }
 
+
+var logReadsHelper = function(read) {
+    var outputArray = [];
+    var base = getIdentifierFromGenericExpression(read) || read;
+    outputArray.push("`" + escapeRegExp(base.source()) + "`");
+    outputArray.push(base.source());
+    outputArray.push(read.source());
+    return outputArray;
+}
+
+var getFunctionIdentifier = function(node) {
+    if (node == null) return null;
+    parent = node.parent;
+    while (parent != undefined){
+        if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression") {
+            return parent.loc;
+        }  
+        parent = parent.parent;
+    }
+    return null;
+}
+
+var getIdentifierFromGenericExpression = function (node) {
+    if (node == null) return null;
+    else if (node.type == "Identifier") {
+        return node;
+    }
+    else if (node.type == "MemberExpression") return getIdentifierFromGenericExpression(node.object);
+    else if (node.type == "AssignmentExpression") {
+            return getIdentifierFromGenericExpression(node.right);
+    }
+    else if (node.type == "CallExpression") return getIdentifierFromGenericExpression(node.callee);
+
+
+}
 /* fetches the identifier from the node
  by recursively referencing the object in case of member expression
  or returns null if no identifier is found
@@ -23,6 +58,17 @@ var getIdentifierFromMemberExpression = function (node) {
     return null;
 }
 
+var getBaseIdentifierFromMemberExpression = function (node) {
+    var r = getIdentifierFromGenericExpression(node);
+    if (!r) return node;
+    var parent = r.parent;
+    while (!parent.computed) {
+        r = parent;
+        parent = parent.parent;
+    }
+    return r;
+}
+
 var getIdentifierFromAssignmentExpression = function (node) {
     // console.log("Finding Identifier from AssignmentExpression " + node.source());
     if (node.type == "Identifier"){
@@ -34,10 +80,13 @@ var getIdentifierFromAssignmentExpression = function (node) {
     return null;
 }
 
-var escapeRegExp = function(str) {
+var escapeRegExp2 = function(str) {
     return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|\']/g, "\\$&");
 }
 
+var escapeRegExp = function(str) {
+    return str.replace(/[\`]/g, "\\$&");
+}
 
 var overWriteToString = function () {
     var s = [];
@@ -94,8 +143,12 @@ var zip= rows=>rows[0].map((_,c)=>rows.map(row=>row[c]));
 
 module.exports = {
     getArgs: getArgs,
+    logReadsHelper: logReadsHelper,
     getIdentifierFromAssignmentExpression: getIdentifierFromAssignmentExpression,
     getIdentifierFromMemberExpression: getIdentifierFromMemberExpression,
+    getIdentifierFromGenericExpression: getIdentifierFromGenericExpression,
+    getBaseIdentifierFromMemberExpression: getBaseIdentifierFromMemberExpression,
+    getFunctionIdentifier: getFunctionIdentifier,
     escapeRegExp: escapeRegExp,
     containsRange: containsRange,
     customMergeDeep: customMergeDeep

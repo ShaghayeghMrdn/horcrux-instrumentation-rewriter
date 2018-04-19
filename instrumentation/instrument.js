@@ -64,7 +64,7 @@ function instrumentHTML(src, fondueOptions) {
     }
     // console.log("The doctype was:" + doctype)
     // assemble!
-    src = doctype + "<script>\n" + fondue.instrumentationPrefix(fondueOptions) + "\n</script>\n" + src;
+    src = doctype + "\n<script>\n" + fondue.instrumentationPrefix(fondueOptions) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     return src;
 }
@@ -91,7 +91,7 @@ function mergeInto(options, defaultOptions) {
 }
 
 //Required for the fondue library, to determine how to instrument
-var fondueOptions = mergeInto({}, {include_prefix: false, path: program.name, e2eTesting: false, execution_cache_toggle: parseInt(program.cacheToggle) });
+var fondueOptions = mergeInto({}, { include_prefix: false, path: program.name, e2eTesting: false, execution_cache_toggle: parseInt(program.cacheToggle) });
 
 src = fs.readFileSync(program.input,"utf-8")
 
