@@ -3,7 +3,7 @@
 var util = require('./util.js');
 var properties = require ("properties");
 var propertyObj = {};
-const PATH_TO_PROPERTIES = "/Users/ayushgoel/Google_Drive/GradSchool/Research/webPerformance/WebPeformance/JSAnalyzer/DOMHelper.ini";
+const PATH_TO_PROPERTIES = __dirname + "/DOMHelper.ini";
 properties.parse(PATH_TO_PROPERTIES, {path: true, sections: true}, function(err, obj){ propertyObj = obj ;})
 
 
@@ -43,8 +43,9 @@ var removeLocalVariables = function(parentNode) {
     // var alias = getAliasFromActual(node);
     if (parentNode.globalWrites){
         for (let i = parentNode.globalWrites.length-1; i >= 0; i--){
-            if (IsLocalVariable(parentNode.globalWrites[i]) <=0 )
+            if (IsLocalVariable(parentNode.globalWrites[i]) <=0 ) {
                 parentNode.globalWrites.splice(i, 1);
+            }
         }
     }
 
@@ -87,12 +88,19 @@ var addLocalVariable = function (node) {
 
 var handleDOMMethods = function(node, standAlone) {
     var localMethods = Object.keys(propertyObj.local);
-    var isLocal = 1;
+    var globalDOMMethods = Object.keys(propertyObj.global);
+    var isLocal;
     localMethods.forEach(function(localmethod){
         if (!standAlone) {
             if (node.source().includes(localmethod)) {
-                isLocal = 0;
+                isLocal = 1;
             }
+        }
+    });
+
+    globalDOMMethods.forEach(function(DOMMethod){
+        if (!isLocal && node.callee.source().toLowerCase().includes(DOMMethod.toLowerCase())) {
+            isLocal = 0
         }
     });
     return isLocal;
@@ -117,15 +125,12 @@ var IsLocalVariable = function (node){
         identNode = util.getIdentifierFromGenericExpression(node);
     // console.log("the identifier node we got:  " + identNode.);
     if (identNode == null ) return 0;
-    if (identNode.source().includes("document")){
-        return handleDOMMethods(node, false);
-    } else {
-        // Handling call expressions which are not dom methods
-        // Right now will just return as local
-        if (node.type == "CallExpression") {
+    if (node.type == "CallExpression"){
+        var callexpression = handleDOMMethods(node, false);
+        if (callexpression == null)
             return 0;
-        }
-    }
+        else return !callexpression;
+    } 
     parent = identNode.parent;
     while (parent != undefined && parent.parent != undefined){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){

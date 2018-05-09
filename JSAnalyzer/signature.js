@@ -1,7 +1,7 @@
 var scope = require('./scopeAnalyzer.js');
 
 var handleBinaryandLogical = function(node) {
-    if (node == undefined)
+    if (node == undefined || node.type == "AssignmentExpression")
         return [];
     var reads = [];
     // console.log("Handling binary and logical:" + node.source() + "with properties: " + Object.keys(node));
@@ -16,6 +16,15 @@ var handleBinaryandLogical = function(node) {
     reads = reads.concat(handleBinaryandLogical(node.left));
     reads = reads.concat(handleBinaryandLogical(node.right));
 
+    return reads;
+}
+
+var handleAssignmentExpressions = function(node){
+    var reads = [];
+    if (node.type != "AssignmentExpression")
+        reads.push(node);
+    else 
+        reads = reads.concat(handleAssignmentExpressions(node.right))
     return reads;
 }
 
@@ -46,8 +55,8 @@ var handleMemberExpression = function(node) {
     return reads;
 }
 
-var handleReads = function(node) {
-    /*
+var _handleReads = function(node){
+        /*
     The following read types are available for the assignment expression RHS:
     - Identifier
     - Literal (ignored)
@@ -79,8 +88,8 @@ var handleReads = function(node) {
             readArray.push(node.argument);
     } else if (node.type == "ConditionalExpression") {
         readArray = handleBinaryandLogical(node.test);
-        if (node.consequent.type == "Identifier") readArray.push(node.consequent);
-        if (node.alternate.type == "Identifier") readArray.push(node.alternate);
+        readArray = readArray.concat(_handleReads(node.consequent));
+        readArray = readArray.concat(_handleReads(node.alternate));
     } else if (node.type == "MemberExpression") {
         readArray.push(node);
     } else if (node.type == "ArrayExpression") {
@@ -89,8 +98,18 @@ var handleReads = function(node) {
         });
     } else if (node.type == "CallExpression") {
         readArray.push(node);
+    } else if (node.type == "AssignmentExpression"){
+        // readArray = handleAssignmentExpressions(node);
     }
-    
+    return readArray; 
+}
+
+
+var handleReads = function(node) {
+    // console.log("handling for reads: " +  node.source() + " " + node.type);
+
+    var readArray = _handleReads(node);
+    // console.log(readArray);
     if (readArray == null) return [];
     var globalReads = [];
     readArray.forEach(function(read){

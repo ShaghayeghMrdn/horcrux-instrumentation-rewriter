@@ -8,6 +8,7 @@ import subprocess
 import sys
 from copy import deepcopy
 from Naked.toolshed.shell import execute_js
+import json
 
 TEMP_FILE = "tmp"
 
@@ -61,13 +62,46 @@ def unchunk(body):
 
     return new_body
 
+def scriptsToInstrument(stats):
+    scriptNames = ['/'.join(i.split('/')[3:]) for i in stats.keys()]
+    scriptNames = [i.split('www.')[-1] for i in scriptNames]
+    scriptsPerUrl = {}
+    for site in stats:
+        nScripts = len(stats[site])
+        iScripts = [i[0] for i in stats[site][1:nScripts/7]]
+        iScripts =  [i.split('/')[-1] for i in iScripts]
+        bName = '/'.join(site.split('/')[3:])
+        bName = bName.split('www.')[-1] 
+        scriptsPerUrl[bName] = iScripts
+    return scriptsPerUrl
+
+def checkStatsForUrl(input, stats):
+    scriptNames = ['/'.join(i.split('/')[3:]) for i in stats.keys()]
+    scriptNames = [i.split('www.')[-1] for i in scriptNames]
+
+    url = '/'.join(input.split('/')[2:])[:-1]
+    url = url.split('www.')[-1]
+    if url in scriptNames:
+        return True
+    else:
+        # print url, scriptNames
+        return False
+
 # create the output directory
 output_directory = sys.argv[1].split('/')[-2]
 subprocess.Popen("mkdir -p {}".format(os.path.join(sys.argv[2], output_directory)), shell=True)
 
+# reading Profile stats
+profileStats = json.loads(open("timeStats",'r').read())
+scriptsPerUrl = scriptsToInstrument(profileStats)
+
 for root, folder, files in os.walk(sys.argv[1]):
     print "This directory has ", len(files), " number of files"
-
+    scriptsToInstrument = [];
+    if (checkStatsForUrl(root,profileStats)):
+        url = '/'.join(root.split('/')[2:])[:-1]
+        url = url.split('www.')[-1]
+        scriptsToInstrument = scriptsPerUrl[url]
     for file in files:
         try:
             file_counter += 1
@@ -95,6 +129,7 @@ for root, folder, files in os.walk(sys.argv[1]):
 
             # print http_response.request.first_line
             filename = http_response.request.first_line.split()[1].split('/')[-1]
+
             if len(filename) > 20:
                 filename = filename[-20:]
             if len(filename) == 0:
@@ -104,6 +139,19 @@ for root, folder, files in os.walk(sys.argv[1]):
                 print "Simply copying the file without modification.. "
                 copy(os.path.join(root,file), os.path.join(sys.argv[2], output_directory))
             else:
+                print "The filename is: " , http_response.request.first_line
+                if len(scriptsToInstrument):
+                    scriptName = http_response.request.first_line.split(' ')[1].split('/')[-1]
+                    if scriptName not in scriptsToInstrument and fileType == "js":
+                        print "This script {} doesn't exist in the list of scripts {}".format(scriptName, scriptsToInstrument)
+                        copy(os.path.join(root,file), os.path.join(sys.argv[2], output_directory))
+                        continue
+                    else:
+                        print "SCRIPT FOUND", scriptName
+                else:
+                    print "There is no list of scripts to instrument ", scriptsToInstrument
+                    break
+
                 pid = os.fork()
                 if pid == 0:
                     TEMP_FILE = str(os.getpid())

@@ -1,13 +1,4 @@
-/*
-The following code was inserted automatically by fondue to collect information
-about the execution of all the JavaScript on this page or in this program.
 
-If you're using Brackets, this is caused by the Theseus extension, which you
-can disable by unchecking File > Enable Theseus.
-
-https://github.com/adobe-research/fondue
-https://github.com/adobe-research/theseus
-*/
 
 /*
  * Copyright (c) 2012 Massachusetts Institute of Technology, Adobe Systems
@@ -59,7 +50,7 @@ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
 DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
 FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+DAMAGES (INCLUDING, BUT NOT LIMITED T, PROCUREMENT OF SUBSTITUTE GOODS OR
 SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
@@ -75,12 +66,42 @@ if (typeof {name} === 'undefined') {
     var nativeObjectsStore = {};
     var customLocalStorage = {}; // Use this in place of the localstorage API for faster access. 
     cacheStats.cacheHit = {};
+    var counter = 0;
+    var currentMutationContext = null;
+    var mutations = new Map();
 
-    // window.addEventListener("load", function(){
-    //     // Add the custom local storage object to the indexed db
+
+    window.addEventListener("load", function(){
+
+        buildCacheObject(customLocalStorage);
+        localStorage.setItem("executionCount",1);
+        observer.disconnect();
+    });
+
+    var targetNode = document;
+    var config = {attributes: true, childList: true, characterData: true, subtree: true, attributeOldValue: true, characterDataOldValue: true};
+    var callback = function(mutationsList) {
+        if (currentMutationContext) {
+            if (!mutations.get(currentMutationContext))
+                mutations.set(currentMutationContext, []);
+            var lMutations = mutations.get(currentMutationContext);
+            lMutations.push.apply(lMutations, mutationsList);
+
+            currentMutationContext = null;
+        }
+    };
+
+    var observer = new MutationObserver(callback);
+    observer.observe(document, config);
 
 
-    // });
+    this.getMutations = function() {
+        return mutations;
+    }
+    
+    this.setMutationContext = function(command, nodeId) {
+        currentMutationContext = nodeId;
+    }
 
 	this.setGlobal = function (gthis) {
 		globalThis = gthis;
@@ -102,35 +123,99 @@ if (typeof {name} === 'undefined') {
         return customLocalStorage;
     }
 
-    var isCyclic = function (obj) {
-      var seenObjects = [];
-
-      function detect (obj) {
-        if (obj && typeof obj === 'object') {
-          if (seenObjects.indexOf(obj) !== -1) {
-            return true;
-          }
-          seenObjects.push(obj);
-          for (var key in obj) {
-            if (obj.hasOwnProperty(key) && detect(obj[key])) {
-              console.log(obj, 'cycle at ' + key + "seenObjects: " + JSON.stringify(seenObjects));
-              return true;
-            }
-          }
-        }
-        return false;
-      }
-
-      return detect(obj);
+    this.setCustomCache = function(customCache) {
+        this.customLocalStorage = customCache;
     }
 
+    var buildCacheObject = function(obj){
+        var acyclicObj = {};
+        Object.keys(obj).forEach(function(nodeId){
+            acyclicObj[nodeId] = {};
+            Object.keys(obj[nodeId]).forEach(function(md){
+                try {
+                    acyclicObj[nodeId][md] = stringify(obj[nodeId][md]);
+                } catch (err) {
+
+                }
+
+            });
+
+            // Stringify the dom mutations 
+            var muts = mutations.get(nodeId);
+            try { 
+                localStorage.setItem(nodeId, JSON.stringify(acyclicObj[nodeId]));
+            } catch (err) {
+                // TODO wrong practice empty catch block
+            }
+        });
+
+        return acyclicObj;
+    }
+
+    var extractCacheObject = function(){
+        var cacheObject = {};
+
+        Object.keys(localStorage).forEach(function(nodeId){ 
+            try {
+                var value = JSON.parse(localStorage.getItem(nodeId));
+                cacheObject[nodeId] = {};
+                Object.keys(value).forEach(function(md){
+                    try {
+                     cacheObject[nodeId][md] = parse(value[md]);
+                    } catch (err) {}
+                });
+            } catch (err) {}
+        });
+
+        return cacheObject;
+    }
+
+    var isCyclic = function (obj) {
+      var keys = [];
+      var stack = [];
+      var stackSet = new Set();
+      var detected = false;
+
+      function detect(obj, key) {
+        if (typeof obj != 'object') { return; }
+
+        if (stackSet.has(obj)) { // it's cyclic! Print the object and its locations.
+          var oldindex = stack.indexOf(obj);
+          var l1 = keys.join('.') + '.' + key;
+          var l2 = keys.slice(0, oldindex + 1).join('.');
+          // console.log('CIRCULAR: ' + l1 + ' = ' + l2 + ' = ' + obj);
+          // console.log(obj);
+          detected = true;
+          return;
+        }
+
+        keys.push(key);
+        stack.push(obj);
+        stackSet.add(obj);
+        for (var k in obj) { //dive on the object's children
+          if (obj.hasOwnProperty(k)) { detect(obj[k], k); }
+        }
+
+        keys.pop();
+        stack.pop();
+        stackSet.delete(obj);
+        return;
+      }
+
+      detect(obj, 'obj');
+      return detected;
+    }
+
+
     this.logWrite = function(functionIdentifier, rhs, variableName ){
-        customLocalStorage[functionIdentifier]["writes"][variableName] = rhs;
+        if (variableName)
+            customLocalStorage[functionIdentifier]["writes"][variableName] = rhs;
+        else { console.log(" write without a variable name");}
         return rhs;
     }
 
     this.logRead = function(functionIdentifier, readArray){
-        customLocalStorage[functionIdentifier]["read"][readArray[0]] = readArray[1];
+        customLocalStorage[functionIdentifier]["reads"][readArray[0]] = readArray[1];
         return readArray[2];
     }
 
@@ -144,20 +229,40 @@ if (typeof {name} === 'undefined') {
         if (!customLocalStorage[nodeId]) {
             customLocalStorage[nodeId] = {};
             customLocalStorage[nodeId]["writes"] = {};
+            customLocalStorage[nodeId]["writes"]["calls"] = [];
             customLocalStorage[nodeId]["reads"] = {};
-            customLocalStorage[nodeId]["arguments"] = {};
-            customLocalStorage[nodeId]["arguments"]["before"] = params;
+            if (params.length != 0) {
+                customLocalStorage[nodeId]["arguments"] = {};
+                customLocalStorage[nodeId]["arguments"]["before"] = params;
+            }
+        } else {
+            // return false;
+            console.log("Cache hit for function " + nodeId);
+            var returnValue = customLocalStorage[nodeId]["returnValue"] ? customLocalStorage[nodeId]["returnValue"] : true;
+            if (params && customLocalStorage[nodeId]["arguments"]){
+                Object.keys(params).forEach(function(ind){
+                    params[ind] = customLocalStorage[nodeId]["arguments"]["after"][ind];
+                });
+            }
+
+            Object.keys(customLocalStorage[nodeId]["writes"]).forEach(function(write){
+                var evalString = write + " = " + stringify(customLocalStorage[nodeId][write])
+                eval(evalString);
+            });
+
+            return returnValue;
         }
-        if (globalReads.length) {
-            globalReads.forEach(function(read, it){
-                if (it%2==0)
-                    customLocalStorage[nodeId]["reads"][read] = globalReads[it+1]; 
-            });           
-        }
+        // if (globalReads.length) {
+        //     globalReads.forEach(function(read, it){
+        //         if (it%2==0)
+        //             customLocalStorage[nodeId]["reads"][read] = globalReads[it+1]; 
+        //     });           
+        // }
+        return false;
     }
 
     this.dumpArguments = function(nodeId, params) {
-        if (Object.keys(params).length != 0)
+        if (customLocalStorage[nodeId]["arguments"])
             customLocalStorage[nodeId]["arguments"]["after"] = params;
     }
 
@@ -227,28 +332,28 @@ if (typeof {name} === 'undefined') {
         }
     }
 
-    var buildCacheObject = function(nodeId, globalWrites, returnValue) {
-        // console.log(local"building cache for " + info.nodeId)
-        try {
-            // console.log("the return value is: " + returnValue);
-            var serializedObject = {};
-            if (returnValue)  {
-                serializedObject["returnValue"] = returnValue;
-            }
-            if (globalWrites.length) {
-                globalWrites.forEach(function(write, it){
-                    if (it%2==0 && !isNative(globalWrites[it+1]))
-                        serializedObject[write] = globalWrites[it+1]; 
-                    // console.log(info.nodeId + "the cache object looks like: " + JSON.stringify(serializedObject));
-                });
-            }
-            // console.log("Cache looks like "  + JSON.stringify(serializedObject));
-            return serializedObject;
-        } catch (e) {
-            // console.log("[WARNING] Building cache object "  + e + e.stack);
-            return {};
-        }
-    }
+    // var buildCacheObject = function(nodeId, globalWrites, returnValue) {
+    //     // console.log(local"building cache for " + info.nodeId)
+    //     try {
+    //         // console.log("the return value is: " + returnValue);
+    //         var serializedObject = {};
+    //         if (returnValue)  {
+    //             serializedObject["returnValue"] = returnValue;
+    //         }
+    //         if (globalWrites.length) {
+    //             globalWrites.forEach(function(write, it){
+    //                 if (it%2==0 && !isNative(globalWrites[it+1]))
+    //                     serializedObject[write] = globalWrites[it+1]; 
+    //                 // console.log(info.nodeId + "the cache object looks like: " + JSON.stringify(serializedObject));
+    //             });
+    //         }
+    //         // console.log("Cache looks like "  + JSON.stringify(serializedObject));
+    //         return serializedObject;
+    //     } catch (e) {
+    //         // console.log("[WARNING] Building cache object "  + e + e.stack);
+    //         return {};
+    //     }
+    // }
 
     this.dumpCache = function(nodeId, globalWrites, returnValue) {
         return;
@@ -270,14 +375,22 @@ if (typeof {name} === 'undefined') {
         return (/\{\s*\[native code\]\s*\}/).test('' + fn);
     }
 
-    this.stringify = function (obj) {
+    var stringify = function (obj) {
 
         return JSON.stringify(obj, function (key, value) {
+            var DUMMYOBJ = {}
+          // if (value == document || value == window ) 
+          //   return DUMMYOBJ;
+          // if (value && value.self == value)
+          //   return DUMMYOBJ;
+
           var fnBody;
           if (value instanceof Function || typeof value == 'function') {
 
-            if ((/\{\s*\[native code\]\s*\}/).test(value.toString()))
+            if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
                 nativeObjectsStore[key] = value;
+                return {};
+            }
             fnBody = value.toString();
 
             if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { //this is ES6 Arrow Function
@@ -292,7 +405,7 @@ if (typeof {name} === 'undefined') {
         });
     };
 
-    this.parse = function (str, date2obj) {
+    var parse = function (str, date2obj) {
 
     var iso8061 = date2obj ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/ : false;
 
@@ -312,8 +425,8 @@ if (typeof {name} === 'undefined') {
             return new Date(value);
         }
         if (prefix === 'function') {
-            if ((/\{\s*\[native code\]\s*\}/).test(value))
-                return nativeObjectsStore[key]
+            // if ((/\{\s*\[native code\]\s*\}/).test(value))
+            //     return nativeObjectsStore[key]
             return eval('(' + value + ')');
         }
         if (prefix === '_PxEgEr_') {
@@ -328,6 +441,195 @@ if (typeof {name} === 'undefined') {
     };
 
 	this.Array = Array;
+
+    var isReplay = localStorage.getItem("executionCount");
+    if (isReplay){
+        customLocalStorage = extractCacheObject();
+        console.log("Restored custom local storage");
+    }
+
+    toJSON = function(node) {
+        node = node || this;
+        var obj = {
+        nodeType: node.nodeType
+        };
+        if (node.tagName) {
+        obj.tagName = node.tagName.toLowerCase();
+        } else
+        if (node.nodeName) {
+        obj.nodeName = node.nodeName;
+        }
+        if (node.nodeValue) {
+        obj.nodeValue = node.nodeValue;
+        }
+        var attrs = node.attributes;
+        if (attrs) {
+        var length = attrs.length;
+        var arr = obj.attributes = new Array(length);
+        for (var i = 0; i < length; i++) {
+          attr = attrs[i];
+          arr[i] = [attr.nodeName, attr.nodeValue];
+        }
+        }
+        var childNodes = node.childNodes;
+        if (childNodes) {
+        length = childNodes.length;
+        arr = obj.childNodes = new Array(length);
+        for (i = 0; i < length; i++) {
+          arr[i] = toJSON(childNodes[i]);
+        }
+        }
+        return obj;
+    }
+
+    toDOM = function(obj) {
+        if (typeof obj == 'string') {
+        obj = JSON.parse(obj);
+        }
+        var node, nodeType = obj.nodeType;
+        switch (nodeType) {
+        case 1: //ELEMENT_NODE
+          node = document.createElement(obj.tagName);
+          var attributes = obj.attributes || [];
+          for (var i = 0, len = attributes.length; i < len; i++) {
+            var attr = attributes[i];
+            node.setAttribute(attr[0], attr[1]);
+          }
+          break;
+        case 3: //TEXT_NODE
+          node = document.createTextNode(obj.nodeValue);
+          break;
+        case 8: //COMMENT_NODE
+          node = document.createComment(obj.nodeValue);
+          break;
+        case 9: //DOCUMENT_NODE
+          node = document.implementation.createDocument();
+          break;
+        case 10: //DOCUMENT_TYPE_NODE
+          node = document.implementation.createDocumentType(obj.nodeName);
+          break;
+        case 11: //DOCUMENT_FRAGMENT_NODE
+          node = document.createDocumentFragment();
+          break;
+        default:
+          return node;
+        }
+        if (nodeType == 1 || nodeType == 11) {
+        var childNodes = obj.childNodes || [];
+        for (i = 0, len = childNodes.length; i < len; i++) {
+          node.appendChild(toDOM(childNodes[i]));
+        }
+        }
+        return node;
+    }
+
+    if (typeof JSON.decycle !== "function") {
+        JSON.decycle = function decycle(object, replacer) {
+            "use strict";
+
+
+            var objects = new WeakMap();     // object to path mappings
+
+            return (function derez(value, path) {
+
+
+                var old_path;   // The path of an earlier occurance of value
+                var nu;         // The new object or array
+
+    // If a replacer function was provided, then call it to get a replacement value.
+
+                if (replacer !== undefined) {
+                    value = replacer(value);
+                }
+
+                if (
+                    typeof value === "object" && value !== null &&
+                    !(value instanceof Boolean) &&
+                    !(value instanceof Date) &&
+                    !(value instanceof Number) &&
+                    !(value instanceof RegExp) &&
+                    !(value instanceof String)
+                ) {
+
+    // If the value is an object or array, look to see if we have already
+    // encountered it. If so, return a {"$ref":PATH} object. This uses an
+    // ES6 WeakMap.
+
+                    old_path = objects.get(value);
+                    if (old_path !== undefined) {
+                        return {$ref: old_path};
+                    }
+
+    // Otherwise, accumulate the unique value and its path.
+
+                    objects.set(value, path);
+
+    // If it is an array, replicate the array.
+
+                    if (Array.isArray(value)) {
+                        nu = [];
+                        value.forEach(function (element, i) {
+                            nu[i] = derez(element, path + "[" + i + "]");
+                        });
+                    } else {
+
+    // If it is an object, replicate the object.
+
+                        nu = {};
+                        Object.keys(value).forEach(function (name) {
+                            nu[name] = derez(
+                                value[name],
+                                path + "[" + JSON.stringify(name) + "]"
+                            );
+                        });
+                    }
+                    return nu;
+                }
+                return value;
+            }(object, "$"));
+        };
+    }
+
+
+    if (typeof JSON.retrocycle !== "function") {
+        JSON.retrocycle = function retrocycle($) {
+            "use strict";
+
+            var px = /^\$(?:\[(?:\d+|"(?:[^\\"\u0000-\u001f]|\\([\\"\/bfnrt]|u[0-9a-zA-Z]{4}))*")\])*$/;
+
+            (function rez(value) {
+
+
+                if (value && typeof value === "object") {
+                    if (Array.isArray(value)) {
+                        value.forEach(function (element, i) {
+                            if (typeof element === "object" && element !== null) {
+                                var path = element.$ref;
+                                if (typeof path === "string" && px.test(path)) {
+                                    value[i] = eval(path);
+                                } else {
+                                    rez(element);
+                                }
+                            }
+                        });
+                    } else {
+                        Object.keys(value).forEach(function (name) {
+                            var item = value[name];
+                            if (typeof item === "object" && item !== null) {
+                                var path = item.$ref;
+                                if (typeof path === "string" && px.test(path)) {
+                                    value[name] = eval(path);
+                                } else {
+                                    rez(item);
+                                }
+                            }
+                        });
+                    }
+                }
+            }($));
+            return $;
+        };
+    }
 });
 }
 (function () { {name}.setGlobal(this); })();
