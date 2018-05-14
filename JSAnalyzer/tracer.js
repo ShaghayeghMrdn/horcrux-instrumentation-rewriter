@@ -68,7 +68,9 @@ if (typeof {name} === 'undefined') {
     cacheStats.cacheHit = {};
     var counter = 0;
     var currentMutationContext = null;
+    var shadowStack = [];
     var mutations = new Map();
+    var calleeMap = {};
 
 
     window.addEventListener("load", function(){
@@ -94,6 +96,9 @@ if (typeof {name} === 'undefined') {
     var observer = new MutationObserver(callback);
     observer.observe(document, config);
 
+    this.getCalleeMap = function() {
+        return calleeMap;
+    }
 
     this.getMutations = function() {
         return mutations;
@@ -127,6 +132,20 @@ if (typeof {name} === 'undefined') {
         this.customLocalStorage = customCache;
     }
 
+    var accumulateCache = function(nodeId) {
+        var aggrCache = {};
+        var lCallees = calleeMap[nodeId];
+
+        var traverseChildren = function(nodeId) {
+            var lCallees = calleeMap[nodeId];
+            if (lCallees) {
+                lCallees.forEach(function(callee){
+                    
+                });
+            }
+        }
+    }
+
     var buildCacheObject = function(obj){
         var acyclicObj = {};
         Object.keys(obj).forEach(function(nodeId){
@@ -140,8 +159,6 @@ if (typeof {name} === 'undefined') {
 
             });
 
-            // Stringify the dom mutations 
-            var muts = mutations.get(nodeId);
             try { 
                 localStorage.setItem(nodeId, JSON.stringify(acyclicObj[nodeId]));
             } catch (err) {
@@ -150,6 +167,11 @@ if (typeof {name} === 'undefined') {
         });
 
         return acyclicObj;
+    }
+
+    var stringifyMutation = function(mut) {
+        var stringMut = {};
+
     }
 
     var extractCacheObject = function(){
@@ -225,7 +247,14 @@ if (typeof {name} === 'undefined') {
     }
 
 
-    this.cacheAndReplay = function(nodeId, params, globalReads, info){
+    this.cacheAndReplay = function(nodeId, params, info){
+        if (shadowStack.length) {
+            var top = shadowStack[shadowStack.length - 1 ];
+            if (!calleeMap[top])
+                calleeMap[top] = [];
+            calleeMap[top].push(nodeId);
+        }
+        shadowStack.push(nodeId);
         if (!customLocalStorage[nodeId]) {
             customLocalStorage[nodeId] = {};
             customLocalStorage[nodeId]["writes"] = {};
@@ -236,7 +265,6 @@ if (typeof {name} === 'undefined') {
                 customLocalStorage[nodeId]["arguments"]["before"] = params;
             }
         } else {
-            // return false;
             console.log("Cache hit for function " + nodeId);
             var returnValue = customLocalStorage[nodeId]["returnValue"] ? customLocalStorage[nodeId]["returnValue"] : true;
             if (params && customLocalStorage[nodeId]["arguments"]){
@@ -264,6 +292,7 @@ if (typeof {name} === 'undefined') {
     this.dumpArguments = function(nodeId, params) {
         if (customLocalStorage[nodeId]["arguments"])
             customLocalStorage[nodeId]["arguments"]["after"] = params;
+        shadowStack.pop();
     }
 
     this.compareAndCache = function(nodeId, params, globalReads, info) {

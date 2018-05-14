@@ -143,6 +143,7 @@ var traceFilter = function (content, options) {
 
 	try {
 		var fala, update, sourceNodes, functionNameToLocation = {}; // Dictionary: key is function name, value is an array containing all the locations it was defined. 
+		var uncacheableFunctions =[];
 
 		var ASTNodes = []; // List of all the nodes in the abstract syntax tree
 		var functionToCallees = {};
@@ -508,7 +509,13 @@ var traceFilter = function (content, options) {
 					globalDOMMethods.forEach(function(DOMMethod){
 						if (!isLocal && node.callee.source().toLowerCase().includes(DOMMethod.toLowerCase())) {
 							scope.addGlobalWrites(node);
-						}
+							var _functionId = util.getFunctionIdentifier(node);
+							if (_functionId) {
+								var functionId = makeId('function', options.path, _functionId);
+								if (uncacheableFunctions.indexOf(functionId) < 0)
+									uncacheableFunctions.push(functionId);
+								}
+							}
 					});
 				}
 			} 
@@ -556,6 +563,7 @@ var traceFilter = function (content, options) {
 						if (_functionId) {
 							var readArray = signature.handleReads(node.init);
 							var functionId = makeId('function', options.path, _functionId);
+							if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 							readArray.forEach(function(read){
 								var newRead = util.logReadsHelper(read);
 								update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '])');
@@ -580,6 +588,7 @@ var traceFilter = function (content, options) {
 				if (_functionId) {
 					var readArray = signature.handleReads(node.right);
 					var functionId = makeId('function', options.path, _functionId);
+					if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 					readArray.forEach(function(read){
 						var newRead = util.logReadsHelper(read);
 						update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '])');
@@ -595,6 +604,7 @@ var traceFilter = function (content, options) {
 					var _functionId = util.getFunctionIdentifier(node);
 					if (_functionId) {
 						var functionId = makeId('function', options.path, _functionId);
+						if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 						checkAndReplaceAlias(node.left);
 						update(node,node.left.source(),node.operator, options.tracer_name,'.logWrite(',JSON.stringify(functionId),',',
 							node.right.source(),',',
@@ -618,6 +628,7 @@ var traceFilter = function (content, options) {
 					var _functionId = util.getFunctionIdentifier(node);
 					if (_functionId) {
 						var functionId = makeId('function', options.path, _functionId);
+						if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 						readArray.forEach(function(read){
 							var newRead = util.logReadsHelper(read);
 							update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '])');
@@ -637,6 +648,7 @@ var traceFilter = function (content, options) {
 					var _functionId = util.getFunctionIdentifier(node);
 					if (_functionId) {
 						var functionId = makeId('function', options.path, _functionId);
+						if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 						globalReads.forEach(function(read){
 							var newRead = util.logReadsHelper(read);
 							update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '])');
@@ -649,6 +661,7 @@ var traceFilter = function (content, options) {
 				var globalDOMMethods = Object.keys(propertyObj.global);
 				var localDOMMethods = Object.keys(propertyObj.local);
 				var isLocal = false;
+
 
 				if (node.parent.type == "SequenceExpression" || node.parent.type == "ExpressionStatement") {
 
@@ -663,7 +676,9 @@ var traceFilter = function (content, options) {
 							var _functionId = util.getFunctionIdentifier(node);
 							if (_functionId) {
 								var functionId = makeId('function', options.path, _functionId);
-								update(node, options.tracer_name,'.setMutationContext(', node.source(),',', JSON.stringify(functionId), ')');
+								if (uncacheableFunctions.indexOf(functionId) == -1)
+									uncacheableFunctions.push(functionId);
+								// update(node, options.tracer_name,'.setMutationContext(', node.source(),',', JSON.stringify(functionId), ')');
 							}
 						}
 					});
@@ -672,6 +687,7 @@ var traceFilter = function (content, options) {
 				var _functionId = util.getFunctionIdentifier(node);
 				if (_functionId) {
 					var functionId = makeId('function', options.path, _functionId);
+					if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 					if (node.argument.type == "SequenceExpression" ) {
 						var returnValue = node.argument.expressions[node.argument.expressions.length - 1];
 						var preReturns = node.argument.expressions.slice(0,-1).map(function(e){return e.source()}).join();
@@ -684,9 +700,12 @@ var traceFilter = function (content, options) {
 
 			} else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression") && options.caching) {
 				replaceAliasesWithActuals(node);
-				//cumulate signature from the entire subgraph
-				// propogateSignature(node);
+				
+				// console.log(uncacheableFunctions);
 				var index = makeId('function', options.path, node.loc);
+				var isCacheable = true;
+				if (uncacheableFunctions.indexOf(index) >= 0)
+					return;
 				var args = node;
 				var serializedArgs = {};
 				// break into separate arguments
