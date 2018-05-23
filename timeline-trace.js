@@ -3,6 +3,7 @@ var readline = require('readline');
 var Chrome = require('chrome-remote-interface');
 var chromeLauncher = require('chrome-launcher');
 var async = require('async');
+var {spawnSync} = require('child_process');
 
 var TRACE_CATEGORIES = ["-*", "devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.frame", "toplevel", "blink.console", "disabled-by-default-devtools.timeline.stack", "disabled-by-default-devtools.screenshot", "disabled-by-default-v8.cpu_profile", "disabled-by-default-v8.cpu_profiler", "disabled-by-default-v8.cpu_profiler.hires"];
 
@@ -31,28 +32,80 @@ program
     .option('-h, --heap','Enable heap profiling')
     .option('-n, --network', 'Enable network profiling')
     .option('-t, --trace', 'Enable timeline tracing')
+    .option('-j, --js-profiling', 'Enable jsprofiling of webpages')
     .parse(process.argv)
 
-function getChromeTrace(url,launcher){
+const CDP = require('chrome-remote-interface');
 
+function getChromeTrace2(url) {
+
+
+CDP(async (client) => {
+    try {
+        const {Page, Tracing} = client;
+        // enable Page domain events
+        await Page.enable();
+        // trace a page load
+        const events = [];
+        Tracing.dataCollected(({value}) => {
+            events.push(...value);
+        });
+        await Tracing.start();
+        await Page.navigate({url: url});
+        await Page.loadEventFired();
+        await Tracing.end();
+        await Tracing.tracingComplete();
+        // save the tracing data
+        console.log(events.length)
+        fs.writeFileSync('/tmp/timeline.json', JSON.stringify(events));
+    } catch (err) {
+        console.error(err);
+    } finally {
+        await client.close();
+    }
+}).on('error', (err) => {
+    console.error(err);
+});
+}
+function getChromeTrace(url,launcher){
     Chrome(function (chrome) {
         with (chrome) {
             Page.enable();
             Network.enable();
             Runtime.enable();
-            Debugger.enable();
-            HeapProfiler.enable();
+            // Debugger.enable();
+            // HeapProfiler.enable();
+            Profiler.enable();
             // Disable cache (wonder if this works better than the browser...) 
             // Answer: it seems to work better from the eye ball test
             Network.setCacheDisabled({cacheDisabled: true});
-
+            // Profiler.setSamplingInterval({interval: 1000});
             // extractPageInformation(Runtime, "beforeLoad");
 
             if (program.trace){
-                Tracing.start({
-                    "categories":   TRACE_CATEGORIES.join(','),
-                    "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
+                Tracing.start(function(){
+                    console.log("Started tracing");
+
+                if (program.jsProfiling) {
+                    Profiler.start().then(() => {
+                        console.log("started page navigation")
+                        Page.navigate({'url': url});
+                    });
+                } else {
+                    console.log("started page navigation")
+                    Page.navigate({'url': url});
+                }
                 });
+            } else {
+                if (program.jsProfiling) {
+                    Profiler.start().then(() => {
+                        console.log("started page navigation")
+                        Page.navigate({'url': url});
+                    });
+                } else {
+                    console.log("started page navigation")
+                    Page.navigate({'url': url});
+                }
             }
 
             if (program.network){
@@ -65,27 +118,47 @@ function getChromeTrace(url,launcher){
                 HeapProfiler.startTrackingHeapObjects();
             }
 
-            Page.navigate({'url': url});
-
             var file = program.output + "/" + url.substring(7,) + '/';
-            mkdirp(file)
-            Page.loadEventFired(function () {
+            var jsPath = program.output + "/CPU/" + url.substring(7,) + '/'; 
+            if (program.jsProfiling) mkdirp(jsPath)
+
+            Page.loadEventFired().then(function () {
+                console.log("Load event fired");
                 if (program.heap) HeapProfiler.takeHeapSnapshot();
                 if (program.trace) Tracing.end();
                 extractPageLoadTime(Runtime);
-                extractPageInformation(Runtime, "afterLoad", file, chrome, url);
-                fetchEntireDOM(Runtime, file, chrome)
+                // launcher.kill()
+                // extractPageInformation(Runtime, "afterLoad", file, chrome, url);
+                // fetchEntireDOM(Runtime, file, chrome)
                 if (program.heap) HeapProfiler.stopTrackingHeapObjects();
+                if (program.jsProfiling) {
+                    Profiler.stop().then(data => {
+                        // console.log("stopped profiling " + JSON.stringify(data));
+                        fs.writeFileSync(jsPath + 'jsProfile', JSON.stringify(data.profile));
+                        // fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
+                        console.log("Done writing the file");
+                        chrome.close();
+                        if (program.device == "mac") 
+                            spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
+                    });
+                }
             });
 
+            Tracing.dataCollected(({value}) => {
+                rawEvents.push(...value);
+            });
 
-            Tracing.tracingComplete(function () {
+            Tracing.tracingComplete().then(function () {
                 mkdirp(file , function(err) {
                     if (err) console.log("Error file creating directory",err)
                     else {
-                         fs.writeFileSync(file + 'Timeline.trace', JSON.stringify(rawEvents, null, 2));
+                        // console.log(rawEvents.length);
+                         fs.writeFileSync(file + 'Timeline.trace', JSON.stringify(rawEvents));
                          console.log('Trace file: ' + file + Date.now());
+                         fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
                          // console.log("javascript execution impact: " + windowDiff);
+                         chrome.close();
+                         spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
                     }
                 })
 
@@ -94,10 +167,6 @@ function getChromeTrace(url,launcher){
                 // return;
             });
 
-            Tracing.dataCollected(function(data){
-                var events = data.value;
-                rawEvents = rawEvents.concat(events);
-            });
         }
         }).on('error', function (e) {
             console.error('Cannot connect to Chrome' + url, e);
@@ -155,13 +224,14 @@ function NetworkEventHandlers(Network, file){
 }
 
 function extractPageLoadTime(Runtime){
-    Runtime.evaluate({expression: 'performance.timing.navigationStart'}, (err, result) => {
+    Runtime.evaluate({expression: 'performance.timing.navigationStart'}).then( (result, err) => {
             pageLoadTime["startTime"] = result["result"]["value"]
         });
-    Runtime.evaluate({expression: 'performance.timing.loadEventEnd'}, (err, result) => {
+    Runtime.evaluate({expression: 'performance.timing.loadEventEnd'}).then( (result, err) => {
             pageLoadTime["endTime"] = result["result"]["value"]
+            pageLoadTime["loadTime"] = pageLoadTime["endTime"] - pageLoadTime["startTime"];
         });
-    Runtime.evaluate({expression: 'performance.timing.domContentLoadedEventEnd'},(err, result) => {
+    Runtime.evaluate({expression: 'performance.timing.domContentLoadedEventEnd'}).then((result, err) => {
             pageLoadTime["domContentLoaded"] = result["result"]["value"]
         });
 }
@@ -214,29 +284,32 @@ function dumpChromePid(pid){
 
 function launchChrome(url){
     console.log("Tracing url:" + url)
-    if (program.device == "mac") {
-        chromeLauncher.launch({
-        port: 9222,
-        chromeFlags: [
-            '--headless',
-            '--enable-logging',
-            '--v=1',
-            // '--v8-cache-options=off',
-            // '--v8-cache-strategies-for-cache-storage=off',
-            '--disable-extensions',
-            '--no-first-run',
-            '--enable-devtools-experiments', 
-            '--remote-debugging-port=9222',
-            "--user-data-dir=TMPDIR/chrome-profiling",
-            '--no-default-browser-check'
-            ]
-        }).then((launcher) => {
-            dumpChromePid(launcher.pid)
-            getChromeTrace(url, launcher)
-        });
-    } else {
-        getChromeTrace(url)
-    }
+    // if (program.device == "mac") {
+    //     console.log("Firing chrome");
+    //     chromeLauncher.launch({
+    //     port: 9222,
+    //     chromeFlags: [
+    //         // '--headless',
+    //         // '--enable-logging',
+    //         // '--v=1',
+    //         // '--v8-cache-options=off',
+    //         // '--v8-cache-strategies-for-cache-storage=off',
+    //         '--disable-extensions',
+    //         // '--no-first-run',
+    //         // '--enable-devtools-experiments', 
+    //         '--remote-debugging-port=9222',
+    //         "--user-data-dir=TMPDIR/chrome-profiling"
+    //         // '--no-default-browser-check'
+    //         ]
+    //     }).then(chrome => {
+    //         dumpChromePid(chrome.pid)
+    //         getChromeTrace(url, chrome)
+    //     });
+    // } else {
+    //     getChromeTrace(url)
+    // }
+
+    getChromeTrace(url)
 }
 
 // urlList.on('line', (line) => {

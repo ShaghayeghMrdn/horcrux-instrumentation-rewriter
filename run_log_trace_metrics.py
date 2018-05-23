@@ -25,9 +25,8 @@ CSV_OUTPUT_FILE_activity = "activity.csv"
 
 def extractWebsiteName(path):
     print path
-    print "/".join(path.split('/')[3:-1])
-    print[] 
-    return path.split('/')[4],"/".join(path.split('/')[4:-1])
+    # print "/".join(path.split('/')[3:-1])
+    return path.split('/')[3],"/".join(path.split('/')[4:])
 
 
 def dictFromFile(filename):
@@ -48,12 +47,11 @@ def getTimingInformation(timeFile):
         timeDict = eval(timeDictString)
         print timeDict
         try: 
-            plt = timeDict["endTime"] - timeDict["startTime"]
-            upt = timeDict["domContentLoaded"] - timeDict["startTime"]
+            plt = timeDict["loadTime"]
         except KeyError as e:
             print "Error extract timing information, returning none"
-            return 0,0
-        return plt, upt
+            return 0
+        return plt
 
 def dumpCSVFromDict(dict, fout):
     csvData = pd.DataFrame(dict)
@@ -70,20 +68,21 @@ if __name__ == '__main__':
 
     for root, folder, file in os.walk(args.trace):
         if len(file) >= 2 and file[0] != "chrome.pid":
-            print root, file
+            # print root, file
             file.sort()
-            with open(os.path.join(root, file[1]), 'r') as traceFile:
+            print file
+            with open(os.path.join(root, file[0]), 'r') as traceFile:
                 try:
-                    json.load(traceFile)
+                    # json.load(traceFile)
                     namesplit = traceFile.name.split("/")
                     execute_js("log-trace-metrics.js",
                                "-p " + traceFile.name + " -o " +
-                               os.path.join(args.output, traceFile.name))
-                    subprocess.Popen("cp " + os.path.join(root, file[2]) + " " + os.path.join(args.output, traceFile.name), shell=True)
+                               os.path.join(args.output, traceFile.name.split('/')[-2]))
+                    subprocess.Popen("cp " + os.path.join(root, file[1]) + " " + os.path.join(args.output, traceFile.name.split('/')[-2]), shell=True)
 
                 except ValueError, e:
                     print "Invalid json file " + os.path.join(
-                        root, file[2]) + " hencing skipping"
+                        root, file[0]) + " hencing skipping"
 
     print "Done parsing trace..\nGenerating csv file now..\n"
 
@@ -92,7 +91,6 @@ if __name__ == '__main__':
     computationDistributionCat["plt"] = {}
     computationDistributionCat["index"] = {}
     computationDistributionAct["index"] = {}
-    computationDistributionCat["upt"] = {}
 
     #Creating csv file to generate plots
     for root, folder, files in os.walk(args.output + "/" + args.trace):
@@ -100,13 +98,13 @@ if __name__ == '__main__':
         print root, files
         if len(files) > 2 and files[2] == "page_load_time":
             categoryDict = dictFromFile(os.path.join(root, files[1]))
+            print categoryDict
             activityDict = dictFromFile(os.path.join(root, files[0]))
             index,website = extractWebsiteName(root)
-            print "index extraced", index
-            plt, upt = getTimingInformation(os.path.join(root, files[2]))
+            print "index extraced", index, website
+            plt = getTimingInformation(os.path.join(root, files[2]))
             
             computationDistributionCat["plt"][website] = plt
-            computationDistributionCat["upt"][website] = upt
             computationDistributionCat["index"][website] = index
             computationDistributionAct["index"][website] = index
             for category, time in categoryDict.items():
