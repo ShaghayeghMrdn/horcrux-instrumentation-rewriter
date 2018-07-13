@@ -37,36 +37,7 @@ program
 
 const CDP = require('chrome-remote-interface');
 
-function getChromeTrace2(url) {
 
-
-CDP(async (client) => {
-    try {
-        const {Page, Tracing} = client;
-        // enable Page domain events
-        await Page.enable();
-        // trace a page load
-        const events = [];
-        Tracing.dataCollected(({value}) => {
-            events.push(...value);
-        });
-        await Tracing.start();
-        await Page.navigate({url: url});
-        await Page.loadEventFired();
-        await Tracing.end();
-        await Tracing.tracingComplete();
-        // save the tracing data
-        console.log(events.length)
-        fs.writeFileSync('/tmp/timeline.json', JSON.stringify(events));
-    } catch (err) {
-        console.error(err);
-    } finally {
-        await client.close();
-    }
-}).on('error', (err) => {
-    console.error(err);
-});
-}
 function getChromeTrace(url,launcher){
     Chrome(function (chrome) {
         with (chrome) {
@@ -83,19 +54,18 @@ function getChromeTrace(url,launcher){
             // extractPageInformation(Runtime, "beforeLoad");
 
             if (program.trace){
-                Tracing.start(function(){
-                    console.log("Started tracing");
 
-                if (program.jsProfiling) {
-                    Profiler.start().then(() => {
-                        console.log("started page navigation")
-                        Page.navigate({'url': url});
-                    });
-                } else {
-                    console.log("started page navigation")
-                    Page.navigate({'url': url});
-                }
+                 Tracing.dataCollected(function(data){
+                    var events = data.value;
+                    rawEvents = rawEvents.concat(events);
                 });
+
+                Tracing.start({
+                    "categories":   TRACE_CATEGORIES.join(','),
+                    // "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
+                });
+                Page.navigate({'url': url});
+
             } else {
                 if (program.jsProfiling) {
                     Profiler.start().then(() => {
@@ -107,7 +77,7 @@ function getChromeTrace(url,launcher){
                     Page.navigate({'url': url});
                 }
             }
-
+            
             if (program.network){
                 networkFile = program.output + "/" + url.substring(7,) + '/Network.trace';
                 NetworkEventHandlers(Network, networkFile)
@@ -121,6 +91,22 @@ function getChromeTrace(url,launcher){
             var file = program.output + "/" + url.substring(7,) + '/';
             var jsPath = program.output + "/CPU/" + url.substring(7,) + '/'; 
             if (program.jsProfiling) mkdirp(jsPath)
+
+            Tracing.tracingComplete().then(function () {
+                mkdirp(file , function(err) {
+                    if (err) console.log("Error file creating directory",err)
+                    else {
+                        // console.log(rawEvents.length);
+                         fs.writeFileSync(file + 'Timeline.trace', JSON.stringify(rawEvents,null,2));
+                         console.log('Trace file: ' + file + Date.now());
+                         fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
+                         // console.log("javascript execution impact: " + windowDiff);
+                         chrome.close();
+                         spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
+                    }
+                })
+            });
+
 
             Page.loadEventFired().then(function () {
                 console.log("Load event fired");
@@ -142,29 +128,8 @@ function getChromeTrace(url,launcher){
                             spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
                     });
                 }
-            });
-
-            Tracing.dataCollected(({value}) => {
-                rawEvents.push(...value);
-            });
-
-            Tracing.tracingComplete().then(function () {
-                mkdirp(file , function(err) {
-                    if (err) console.log("Error file creating directory",err)
-                    else {
-                        // console.log(rawEvents.length);
-                         fs.writeFileSync(file + 'Timeline.trace', JSON.stringify(rawEvents));
-                         console.log('Trace file: ' + file + Date.now());
-                         fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
-                         // console.log("javascript execution impact: " + windowDiff);
-                         chrome.close();
-                         spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
-                    }
-                })
-
-                // chrome.close();
-                // if (launcher) launcher.kill();
-                // return;
+                chrome.close();
+                spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
             });
 
         }
