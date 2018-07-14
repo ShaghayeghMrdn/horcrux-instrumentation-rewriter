@@ -24,6 +24,8 @@ var program = require('commander');
 
 var mkdirp = require('mkdirp');
 
+var loadCounter = 0;
+
 program
     .version("0.1.0")
     .option('-u, --url [url]', "The url to be traced")
@@ -33,6 +35,7 @@ program
     .option('-n, --network', 'Enable network profiling')
     .option('-t, --trace', 'Enable timeline tracing')
     .option('-j, --js-profiling', 'Enable jsprofiling of webpages')
+    .option('-w, --warm','enable warm cache setting')
     .parse(process.argv)
 
 const CDP = require('chrome-remote-interface');
@@ -53,30 +56,25 @@ function getChromeTrace(url,launcher){
             // Profiler.setSamplingInterval({interval: 1000});
             // extractPageInformation(Runtime, "beforeLoad");
 
-            if (program.trace){
-
-                 Tracing.dataCollected(function(data){
-                    var events = data.value;
-                    rawEvents = rawEvents.concat(events);
-                });
-
-                Tracing.start({
-                    "categories":   TRACE_CATEGORIES.join(','),
-                    // "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
-                });
-                Page.navigate({'url': url});
-
-            } else {
-                if (program.jsProfiling) {
-                    Profiler.start().then(() => {
-                        console.log("started page navigation")
-                        Page.navigate({'url': url});
-                    });
-                } else {
-                    console.log("started page navigation")
-                    Page.navigate({'url': url});
-                }
+            if (program.warm) {
+                console.log("Navigating the cold cache load");
+                Page.navigate({ 'url' : url});
             }
+
+            if (program.trace && !program.warm){
+
+                startTracing(Tracing);
+            }
+
+            if (program.jsProfiling) {
+                Profiler.start();
+            }
+
+            if (!program.warm) {
+                console.log("started page navigation")
+                Page.navigate({'url': url});
+            }
+            
             
             if (program.network){
                 networkFile = program.output + "/" + url.substring(7,) + '/Network.trace';
@@ -92,7 +90,14 @@ function getChromeTrace(url,launcher){
             var jsPath = program.output + "/CPU/" + url.substring(7,) + '/'; 
             if (program.jsProfiling) mkdirp(jsPath)
 
+             Tracing.dataCollected(function(data){
+                var events = data.value;
+                rawEvents = rawEvents.concat(events);
+            });
+
+
             Tracing.tracingComplete().then(function () {
+                console.log("tracing complete callback fired");
                 mkdirp(file , function(err) {
                     if (err) console.log("Error file creating directory",err)
                     else {
@@ -108,10 +113,19 @@ function getChromeTrace(url,launcher){
             });
 
 
-            Page.loadEventFired().then(function () {
+            Page.loadEventFired(function () {
                 console.log("Load event fired");
+                if (program.warm && loadCounter == 0) {
+                    loadCounter++;
+                    if (program.trace) startTracing(Tracing);
+                    console.log("Navigating load");
+                    Page.navigate({'url': url});
+                    return;
+                }
                 if (program.heap) HeapProfiler.takeHeapSnapshot();
-                if (program.trace) Tracing.end();
+                if (program.trace) {
+                    Tracing.end();
+                }
                 extractPageLoadTime(Runtime);
                 // launcher.kill()
                 // extractPageInformation(Runtime, "afterLoad", file, chrome, url);
@@ -128,14 +142,23 @@ function getChromeTrace(url,launcher){
                             spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
                     });
                 }
-                chrome.close();
-                spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
+                // chrome.close();
+                // spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
             });
 
         }
         }).on('error', function (e) {
             console.error('Cannot connect to Chrome' + url, e);
         });
+}
+
+function startTracing(Tracing,Page){
+    console.log("Start capturing trace");
+    Tracing.start({
+        "categories":   TRACE_CATEGORIES.join(','),
+        // "options":      "sampling-frequency=10000"  // 1000 is default and too slow.
+    });
+   
 }
 
 function fetchEntireDOM(Runtime, file, chrome){
