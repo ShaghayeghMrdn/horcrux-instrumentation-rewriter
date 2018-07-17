@@ -11,8 +11,10 @@ waitForChrome(){
 		count=`ps aux | grep chromium-browser | wc | awk '{print $1}'`
 		echo "current count is" $count
 		n_time=`date +'%s'`
-		elapsed=`expr $n_time-$curr_time`
-		if [ $elapsed > 15 ]; then
+		elapsed=`expr $n_time - $curr_time`
+		echo "Elapsed time since: ", $elapsed
+		if [ $elapsed -gt 20 ]; then
+			echo "TIMED OUT..."
 			ps aux | grep 9222 | awk '{print $2}' | xargs kill -9
 		fi
 		sleep 3;
@@ -23,18 +25,28 @@ waitForChrome(){
 
 waitForNode(){
 	count=0
-	while [[ $count != 2 ]]; do
-		count=`ps aux | grep timeline-trace.js | wc | awk '{print $1}'`
+ 	start_time=`date +'%s'`
+	while [[ $count != 1 ]]; do
+		count=`ps aux | grep chromium-browser | wc | awk '{print $1}'`
+		echo "current count", $count
+		curr_time=`date +'%s'`
+		elapsed=`expr $curr_time - $start_time`
+		if [ $elapsed -gt 20 ]; then
+			echo "TIMED OUT..."
+			ps aux | grep chromium-browser | awk '{print $2}' | xargs kill -9
+		fi
+		sleep 2;
+
 	done
 }
 
 record(){
 	echo "Recording"  $1
-	mm-webrecord $3/"$2"/ node inspectChrome.js "$1" CPU/"$2"/ &
+	mm-webrecord $3/"$2"/ node inspectChrome.js -u "$1" &
 	record_pid=$!
 	#waitForNode
-	waitForChrome
-	kill -9 $record_pid
+	waitForNode
+	#kill -9 $record_pid
 }
 
 
