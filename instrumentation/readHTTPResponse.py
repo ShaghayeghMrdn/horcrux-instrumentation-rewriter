@@ -18,7 +18,7 @@ zlib_compress = zlib.compressobj(9, zlib.DEFLATED, zlib.MAX_WBITS)
 gzip_compress = zlib.compressobj(9, zlib.DEFLATED, zlib.MAX_WBITS | 16)
 
 if len(sys.argv) != 4:
-  print "Usage:", sys.argv[0], "HTTP_RESPONSE_FILE", "OUTPUT_DIRECTORY","CACHE_TOGGLE_VALUE (0,1)"
+  print "Usage:", sys.argv[0], "HTTP_RESPONSE_FILE", "OUTPUT_DIRECTORY","OPTIMIZED INSTRUMENTATION(0,1)"
   sys.exit(-1)
 
 subprocess.Popen("mkdir -p {}".format(sys.argv[2]), shell=True)
@@ -63,24 +63,45 @@ def unchunk(body):
     return new_body
 
 def scriptsToInstrument(stats):
-    scriptNames = ['/'.join(i.split('/')[3:]) for i in stats.keys()]
-    scriptNames = [i.split('www.')[-1] for i in scriptNames]
+    scriptNames = stats.keys()
+    print scriptNames
+    # print scriptNames
     scriptsPerUrl = {}
     for site in stats:
         nScripts = len(stats[site])
-        iScripts = [i[0] for i in stats[site][1:nScripts/7]]
-        iScripts =  [i.split('/')[-1] for i in iScripts]
-        bName = '/'.join(site.split('/')[3:])
-        bName = bName.split('www.')[-1] 
-        scriptsPerUrl[bName] = iScripts
+        # print nScripts, site
+        numberOfScripts = scriptsPerThreshhold(stats, site)
+        print "{0}:{1} for 80% where total length is {2}".format(site,numberOfScripts, len(stats[site][1:]));
+        iScripts = [i[0] for i in stats[site][1:numberOfScripts+1]]
+        # print iScripts
+        # iScripts =  [i.split('/')[-1] for i in iScripts]
+        # bName = '/'.join(site.split('/')[6:])
+        # bName = bName.split('www.')[-1] 
+        scriptsPerUrl[site] = iScripts
+        # print site, len(stats[site])
     return scriptsPerUrl
 
-def checkStatsForUrl(input, stats):
-    scriptNames = ['/'.join(i.split('/')[3:]) for i in stats.keys()]
-    scriptNames = [i.split('www.')[-1] for i in scriptNames]
+def scriptsPerThreshhold(stats, index):
+    timeAr = [i[1] for i in stats[index][1:]]
+    threshholdTime = sum(timeAr)*0.8
+    t = 0
+    n = 0
+    for tup in stats[index][1:]:
+        if t< threshholdTime:
+            t += tup[1]
+            n+=1
+    return n
 
-    url = '/'.join(input.split('/')[2:])[:-1]
-    url = url.split('www.')[-1]
+def checkStatsForUrl(input, stats):
+    url = input.split('/')[-2]
+    scriptNames = stats.keys()
+    # scriptNames = [i.split('www.')[-1] for i in scriptNames]
+    # print scriptNames
+    # print input
+    # url = '/'.join(input.split('/')[5:])[:-1]
+    # url = url.split('www.')[-1]
+    # print "url is", url
+    # print scriptNames
     if url in scriptNames:
         return True
     else:
@@ -94,24 +115,28 @@ subprocess.Popen("mkdir -p {}".format(os.path.join(sys.argv[2], output_directory
 # reading Profile stats
 profileStats = json.loads(open("timeStats",'r').read())
 scriptsPerUrl = scriptsToInstrument(profileStats)
-
+# print scriptsPerUrl
+# print "asciprscriptsPerUrl", scriptsPerUrl['abcnews.go.com']
 for root, folder, files in os.walk(sys.argv[1]):
     print "This directory has ", len(files), " number of files"
     scriptsToInstrument = [];
+    url = root.split('/')[-2]
     if (checkStatsForUrl(root,profileStats)):
-        url = '/'.join(root.split('/')[2:])[:-1]
-        url = url.split('www.')[-1]
+        # print "url is", url
+        # url = url.split('www.')[-1]
         scriptsToInstrument = scriptsPerUrl[url]
+        # print scriptsToInstrument
     for file in files:
         try:
             file_counter += 1
             f = open(os.path.join(root,file), "rb")
+            print file
             http_response.ParseFromString(f.read())
             output_http_response = deepcopy(http_response)
             f.close()
 
             copyFile = True
-            fileType = None
+            fileType = "None"
             gzip = False
             gzipType = ""
 
@@ -134,13 +159,13 @@ for root, folder, files in os.walk(sys.argv[1]):
                 filename = filename[-20:]
             if len(filename) == 0:
                 filename = "anonymous"
-
+            print "The filename is: " , http_response.request.first_line + " with file type " + fileType
             if copyFile:
                 print "Simply copying the file without modification.. "
                 copy(os.path.join(root,file), os.path.join(sys.argv[2], output_directory))
             else:
                 print "The filename is: " , http_response.request.first_line
-                if len(scriptsToInstrument):
+                if len(scriptsToInstrument) and int(sys.argv[3]) and fileType != "html":
                     scriptName = http_response.request.first_line.split(' ')[1].split('/')[-1]
                     if scriptName not in scriptsToInstrument and fileType == "js":
                         print "This script {} doesn't exist in the list of scripts {}".format(scriptName, scriptsToInstrument)
@@ -148,13 +173,16 @@ for root, folder, files in os.walk(sys.argv[1]):
                         continue
                     else:
                         print "SCRIPT FOUND", scriptName
-                else:
+                elif int(sys.argv[3]) and fileType != "html":
                     print "There is no list of scripts to instrument ", scriptsToInstrument
+                    with open("errorUlrs",'a') as f:
+                        f.write(url)
                     break
 
                 pid = os.fork()
                 if pid == 0:
                     TEMP_FILE = str(os.getpid())
+                    TEMP_FILE_zip = TEMP_FILE + ".gz"
                     for header in http_response.response.header:
                         if header.key == "Content-Encoding":
                             # print "GZIIPED FILE is " , file
@@ -164,7 +192,7 @@ for root, folder, files in os.walk(sys.argv[1]):
                             # print "deleting ", ind, len(http_response.response.header), len(output_http_response.response.header)
                             # del output_http_response.response.header[ind[0]]
                             # header.value = "identity"
-                            markedToBeDeleted.append(header.key)
+                            # markedToBeDeleted.append(header.key)
 
                         elif header.key == "Transfer-Encoding" and header.value == "chunked":
                             http_response.response.body = unchunk(http_response.response.body)
@@ -188,7 +216,7 @@ for root, folder, files in os.walk(sys.argv[1]):
                             f.write(decompressed_data)
                         except zlib.error as e:
                             print "Corrupted decoding: " + file
-                            print "The corrupted encoding itself:"  + http_response.response.body
+                            # print "The corrupted encoding itself:"  + http_response.response.body
                     else: f.write(http_response.response.body)
                     f.close()
 
@@ -199,7 +227,17 @@ for root, folder, files in os.walk(sys.argv[1]):
                     while cmd.poll() is None:
                         # print "Waiting for instrumentation..."
                         continue
-                    tmpFile = open(TEMP_FILE, "rb")
+
+                    if gzip:
+                        file_with_content = TEMP_FILE_zip
+                        zipCommand = "gzip -c {} > {}".format(TEMP_FILE, TEMP_FILE_zip)
+                        cmd = subprocess.Popen(zipCommand, shell=True)
+                        while cmd.poll() is None:
+                            continue
+                    else:
+                        file_with_content = TEMP_FILE
+
+                    tmpFile = open(file_with_content, "rb")
                     modifiedContent = tmpFile.read()
                     modifiedLength = len(modifiedContent)
                     # print modifiedContent
@@ -226,9 +264,15 @@ for root, folder, files in os.walk(sys.argv[1]):
                                 output_http_response.response.header.remove(header)
                                 break
 
+                    length_header_exists = False
                     for header in output_http_response.response.header:
                         if header.key == "Content-Length":
                             header.value = bytes(modifiedLength)
+                            length_header_exists = True
+                    if not length_header_exists:
+                        length_header = output_http_response.response.header.add()
+                        length_header.key = "Content-Length"
+                        length_header.value = bytes(modifiedLength)
 
                     # print " response header looks like " , output_http_response.response.header
                     outputFile = open(os.path.join(sys.argv[2], output_directory, file), "w")
@@ -238,7 +282,7 @@ for root, folder, files in os.walk(sys.argv[1]):
                     outputFile.close()
                     tmpFile.close()
 
-                    subprocess.Popen("rm {}".format(TEMP_FILE), shell=True)
+                    subprocess.Popen("rm {} {}".format(TEMP_FILE, TEMP_FILE_zip), shell=True)
 
                     os._exit(0)
                 childPids.append(pid)
