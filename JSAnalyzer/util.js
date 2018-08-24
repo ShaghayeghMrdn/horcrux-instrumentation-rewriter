@@ -1,3 +1,7 @@
+
+
+var javascriptReservedWords = ['Array','abstract','arguments','await','boolean','break','byte','case','catch','char','class','const','continue','Date','debugger','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','synchronized','this','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array'];
+
 var getArgs = function (node) {
     var args = [];
     if (node.params.length > 0){
@@ -8,14 +12,24 @@ var getArgs = function (node) {
     return args;
 }
 
-
-var logReadsHelper = function(read) {
+/* MAJOR TODO 
+don't put the entire base variable in the logs 
+only put the exact variable being modified
+also do alias replacement and local variable replacement before 
+creating the log array*/
+var logReadsHelper = function(read, alias) {
     var outputArray = [];
-    var base = getIdentifierFromGenericExpression(read) || read;
-    outputArray.push("`" + escapeRegExp(base.source()) + "`");
-    outputArray.push(base.source());
+    outputArray.push("`" + escapeRegExp(alias) + "`");
     outputArray.push(read.source());
     return outputArray;
+}
+
+var logWritesHelper = function(node, aliasValue) {
+    /*Special handle for sequence expressions as their parenthesis get removed during source-ing. */
+    if (node.right.type == "SequenceEpxression")
+        var outputString = ",(" + node.right.source() + '),' + '\`' + aliasValue.replace(/[\`]/g, "\\$&") + '\`'; 
+    var outputString = ",(" + node.right.source() + '),' + '\`' + aliasValue.replace(/[\`]/g, "\\$&") + '\`';
+    return outputString;
 }
 
 var getFunctionIdentifier = function(node) {
@@ -41,8 +55,43 @@ var getIdentifierFromGenericExpression = function (node) {
     }
     else if (node.type == "CallExpression") return getIdentifierFromGenericExpression(node.callee);
 
-
 }
+
+var getAllIdentifiersFromMemberExpression = function(node) {
+    if (!node && node.type != "MemberExpression" && node.type != "CallExpression") return [];
+    var properties = [];
+    var recurseThroughProps = function(node){
+        if (!node) return;
+        if (node.type == "Identifier")
+            properties.push(node);
+        else if (node.type == "MemberExpression") {
+            recurseThroughProps(node.object); 
+            recurseThroughProps(node.property);
+        } else if (node.type == "CallExpression") {
+            recurseThroughProps(node.callee);
+            node.arguments.forEach(function(arg){
+                recurseThroughProps(arg);
+            })
+        }
+    }
+    recurseThroughProps(node);
+    return properties;
+}
+
+var checkForWindowObject = function(arrayOfIdentifiers){
+    if (arrayOfIdentifiers == null) return 0;
+    if (arrayOfIdentifiers.length == 0 ) return 0;
+    arrayOfIdentifiers.forEach(function(identifier){
+        if (identifier.source() == "window") return 1;
+    });
+    return 0;
+}
+
+var checkIfReservedWord = function(node){
+    if (!node) return 0;
+    return  javascriptReservedWords.includes(node.source());
+}
+
 /* fetches the identifier from the node
  by recursively referencing the object in case of member expression
  or returns null if no identifier is found
@@ -52,21 +101,11 @@ var getIdentifierFromMemberExpression = function (node) {
     if (node.type == "Identifier"){
         return node;
     }
-    if (node.type == "MemberExpression"){
+    else if (node.type == "MemberExpression"){
         return getIdentifierFromMemberExpression(node.object)
+    } else {
+        return node;
     }
-    return null;
-}
-
-var getBaseIdentifierFromMemberExpression = function (node) {
-    var r = getIdentifierFromGenericExpression(node);
-    if (!r) return node;
-    var parent = r.parent;
-    while (!parent.computed) {
-        r = parent;
-        parent = parent.parent;
-    }
-    return r;
 }
 
 var getIdentifierFromAssignmentExpression = function (node) {
@@ -144,12 +183,15 @@ var zip= rows=>rows[0].map((_,c)=>rows.map(row=>row[c]));
 module.exports = {
     getArgs: getArgs,
     logReadsHelper: logReadsHelper,
+    logWritesHelper: logWritesHelper,
+    getAllIdentifiersFromMemberExpression:getAllIdentifiersFromMemberExpression,
     getIdentifierFromAssignmentExpression: getIdentifierFromAssignmentExpression,
     getIdentifierFromMemberExpression: getIdentifierFromMemberExpression,
     getIdentifierFromGenericExpression: getIdentifierFromGenericExpression,
-    getBaseIdentifierFromMemberExpression: getBaseIdentifierFromMemberExpression,
     getFunctionIdentifier: getFunctionIdentifier,
     escapeRegExp: escapeRegExp,
     containsRange: containsRange,
-    customMergeDeep: customMergeDeep
+    customMergeDeep: customMergeDeep,
+    checkForWindowObject: checkForWindowObject,
+    checkIfReservedWord:checkIfReservedWord
 }

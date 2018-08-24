@@ -1,26 +1,26 @@
 
 
-var util = require('./util.js');
+var util = require('./util');
 var properties = require ("properties");
 var propertyObj = {};
 const PATH_TO_PROPERTIES = __dirname + "/DOMHelper.ini";
 properties.parse(PATH_TO_PROPERTIES, {path: true, sections: true}, function(err, obj){ propertyObj = obj ;})
 
 
-// var getAliasFromActual = function(node) {
-//     parent = node.parent;
-//     while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
-//         parent = parent.parent;
-//     }
-//     if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
-//      if (parent.globalAlias) {
-//          for (let elem in parent.globalAlias) {
-//              if (node.source() == parent.globalAlias[elem].source())
-//                  return elem;
-//          }
-//      }
-//     }        
-// }
+var checkAndReplaceAlias = function(node) {
+    var parent = node.parent;
+    let alias = isGlobalAlias(node, false); /* The second argument implies the globalALias no longer has values as node types because replaceAliasWithAlias was called */
+    if (alias){
+        var result;
+        var ident = util.getIdentifierFromGenericExpression(node) || node;
+        var remaining = node.source().replace(ident.source(), "");
+        if (remaining == "") {
+                return  alias;
+            } else {
+                return  alias +  remaining;
+            }
+    } else return node.source();
+}
 
 var removeLocalVariables = function(parentNode) {
     /*
@@ -117,26 +117,29 @@ var IsLocalVariable = function (node){
         return (IsLocalVariable(node.consequent) || IsLocalVariable(node.alternate))
     } else if (node.type == "ObjectExpression" || node.type == "Literal" || 
         node.type == "NewExpression" || node.type == "BinaryExpression" || node.type == "LogicalExpression"
-        || node.type == "ArrayExpression" || node.type == "" || node.type == "FunctionExpression"){     // TODO handle all the dom modifications: For now the callexpression like document.getElementbyId('') will be marked as local. 
+        || node.type == "ArrayExpression" || node.type == "" || node.type == "FunctionExpression" || 
+        node.type == "ThisExpression" || node.type == "ArrowFunctionExpression" || node.type == "ClassExpression" || 
+        node.type == "TaggedTemplateExpression" || node.type == "SequenceExpression" || node.type == "FunctionExpression" ){     // TODO handle all the dom modifications: For now the callexpression like document.getElementbyId('') will be marked as local. 
         return 0;
-    } else if (node.type == "UnaryExpression")
+    } else if (node.type == "UnaryExpression" || node.type == "UpdateExpression")
         return IsLocalVariable(node.argument)
-    else if (node.type == "MemberExpression" || node.type == "AssignmentExpression" || node.type == "FunctionExpression" || node.type == "CallExpression" || node.type == "Identifier")
+    else if (node.type == "MemberExpression" || node.type == "AssignmentExpression" || node.type == "Identifier") {
         identNode = util.getIdentifierFromGenericExpression(node);
-    // console.log("the identifier node we got:  " + identNode.);
-    if (identNode == null ) return 0;
-    if (node.type == "CallExpression"){
+    }
+    else if (node.type == "CallExpression"){
         var callexpression = handleDOMMethods(node, false);
         if (callexpression == null)
             return 0;
         else return !callexpression;
     } 
+
+    if (identNode == null ) return 0;
     parent = identNode.parent;
     while (parent != undefined && parent.parent != undefined){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
             functionArguments = util.getArgs(parent);
             if (parent.localVariables == undefined) parent.localVariables = []
-            if (parent.localVariables.map(function(e){return e.source()}).includes(identNode.name) || functionArguments.includes(identNode.name)){
+            if (parent.localVariables.map(function(e){return e.source()}).includes(identNode.name) || functionArguments.includes(identNode.name) /*|| isGlobalAlias(identNode)*/) { /* Removed checking if the variable exists inside params or not as params also considered global*/
                 return 0;
             }
         }
@@ -144,8 +147,12 @@ var IsLocalVariable = function (node){
     }
     return 1;
 }
-
-var isGlobalAlias = function(node) {
+/* The second argument specifies whether the values in the 
+global alias dictionary are still of the type node 
+or if the replaceAliasWithAlias function was called and 
+therefore is of the type string now */
+var isGlobalAlias = function(node, valueIsNode) {
+    // console.log("checking if "  + node.source() + "is alias");
     var identNode;
     if (node == null || typeof(node) == "undefined") return 0;
     else if (node.type == "ConditionalExpression"){
@@ -174,8 +181,18 @@ var isGlobalAlias = function(node) {
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
             if (!parent.globalAlias) return 0;
             else {
-                if (identNode.source() in parent.globalAlias) return parent.globalAlias[identNode.source()];
+
+                /*Iterate through the end of the expression, in case any intermediary expression is an alias
+                  instead of the base identifier being an expression 
+                */
+                // while (identNode != undefined) {
+                    if (identNode.source() in parent.globalAlias && valueIsNode) return parent.globalAlias[identNode.source()].source();
+                    else if (identNode.source() in parent.globalAlias) return parent.globalAlias[identNode.source()];
+
+                    // identNode = identNode.parent;
+                // }
             }
+         return 0;
         }
         parent = parent.parent;
     }
@@ -229,7 +246,7 @@ var addGlobalWrites = function(node) {
                 parent.globalWrites = [];
             }
             // if (node.id && parent.globalWrites.map(function(e){return e.source()}).indexOf(node.id.name) < 0) parent.globalWrites.push(node.id);
-            if (parent.globalWrites.map(function(e){return e.source()}).indexOf(node.source()) < 0)
+            if (parent.globalWrites.indexOf(node.source()) < 0)
                 parent.globalWrites.push(node);
             return;
         }   
@@ -238,6 +255,7 @@ var addGlobalWrites = function(node) {
 }
 
 var addGlobalReads = function(nodeArray) {
+    // console.log(nodeArray);
     nodeArray.forEach(function(node){
         _addGlobalReads(node);
     });
@@ -254,15 +272,16 @@ var _addGlobalReads = function(node) {
                 parent.globalReads = [];
             }
             if (node.id ) {
-                if (parent.globalReads.map(function(e){return e.source()}).indexOf(node.id.name) < 0 && 
+                if ((parent.globalReads.map(function(e){return e.source()}).indexOf(node.id.name) < 0) && 
                     !(parent.globalWrites && parent.globalWrites.map(function(e){return e.source()}).indexOf(node.id.name) >= 0) && 
                     !(parent.globalAlias && Object.values(parent.globalAlias).map(function(e){return e.source();}).indexOf(node.id.name) >= 0)) 
                     parent.globalReads.push(node.id);
             }
-            else if (parent.globalReads.map(function(e){return e.source()}).indexOf(node.source()) < 0 && 
+            else if ((parent.globalReads.map(function(e){return e.source()}).indexOf(node.source()) < 0 ) &&
                 !(parent.globalWrites && parent.globalWrites.map(function(e){return e.source()}).indexOf(node.source()) >= 0) &&
                 !(parent.globalAlias && Object.values(parent.globalAlias).map(function(e){return e.source();}).indexOf(node.source()) >= 0)) 
                 parent.globalReads.push(node);
+            // console.log(parent.globalReads)
             return;
         }   
         parent = parent.parent;
@@ -278,6 +297,7 @@ module.exports = {
     addLocalVariable: addLocalVariable,
     addGlobalAlias: addGlobalAlias,
     removeLocalVariables, removeLocalVariables,
-    IsLocalVariable: IsLocalVariable
+    IsLocalVariable: IsLocalVariable,
+    checkAndReplaceAlias:checkAndReplaceAlias
 
 }

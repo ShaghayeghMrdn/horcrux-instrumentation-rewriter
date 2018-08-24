@@ -69,32 +69,94 @@ if (typeof {name} === 'undefined') {
     var counter = 0;
     var currentMutationContext = null;
     var shadowStack = [];
+    var _shadowStackHead;
+    window.sigStack = {};
     var mutations = new Map();
     var calleeMap = {};
+    var functionTimerS = {};
+    var functionTimerE = {};
 
 
-    window.addEventListener("load", function(){
+    // window.addEventListener("load", function(){
 
-        buildCacheObject(customLocalStorage);
-        localStorage.setItem("executionCount",1);
-        observer.disconnect();
-    });
+    //     //Builds the cache object to be dumped in local persistent storage
+    //     // buildCacheObject(customLocalStorage);
+    //     localStorage.setItem("executionCount",1);
+    //     observer.disconnect();
+    // });
 
-    var targetNode = document;
-    var config = {attributes: true, childList: true, characterData: true, subtree: true, attributeOldValue: true, characterDataOldValue: true};
-    var callback = function(mutationsList) {
-        if (currentMutationContext) {
-            if (!mutations.get(currentMutationContext))
-                mutations.set(currentMutationContext, []);
-            var lMutations = mutations.get(currentMutationContext);
-            lMutations.push.apply(lMutations, mutationsList);
+    // var targetNode = document;
+    // var config = {attributes: true, childList: true, characterData: true, subtree: true, attributeOldValue: true, characterDataOldValue: true};
+    // var callback = function(mutationsList) {
+    //     if (currentMutationContext) {
+    //         if (!mutations.get(currentMutationContext))
+    //             mutations.set(currentMutationContext, []);
+    //         var lMutations = mutations.get(currentMutationContext);
+    //         lMutations.push.apply(lMutations, mutationsList);
 
-            currentMutationContext = null;
+    //         currentMutationContext = null;
+    //     }
+    // };
+
+    // var observer = new MutationObserver(callback);
+    // observer.observe(document, config);
+
+    /* Proxy object handler */
+    window.proxyReadCount =0; window.proxyWriteCount = 0;
+
+    var _handleSymbolKey = function(target, key){
+        if (!Reflect.get(target, key)){
+            switch (key.toString()){
+                case 'Symbol(Symbol.toPrimitive)':
+                    if (+target) return +target;
+                    if (''+target) return ''+target;
+            }
         }
-    };
+    }
 
-    var observer = new MutationObserver(callback);
-    observer.observe(document, config);
+    var _handleNonConfigurableProperties = function(target, key){
+        var method = Reflect.get(target, key);
+        if (typeof method == "function") {
+            method = method.bind(target);
+            Object.setPrototypeOf(method, target);
+            return method;
+        } else return method;
+    }
+
+    var handler = {
+      get(target, key, receiver) {
+        if (target[key] && (typeof target[key] === 'object' || typeof target[key] === "function") && key != "body") {
+          var desc = Object.getOwnPropertyDescriptor(target, key);
+          if (desc && ! desc.configurable && !desc.writable) return _handleNonConfigurableProperties(target,key);
+          window.proxyReadCount++;
+          var method = Reflect.get(target, key);
+          if (typeof method == "function") {
+            // return function (...args) {
+            //     return method.apply(target, args)
+            // }
+            var _method = method.bind(target);
+            Object.setPrototypeOf(_method, method);
+            return _method;
+          }
+         else return new Proxy(method, handler);
+        } else {
+          return Reflect.get(target, key);
+        }
+      },
+      set (target, key, value, receiver) {
+        window.proxyWriteCount++;
+        return Reflect.set(target, key, value);
+      }
+    }
+
+    window.{proxyName} = new Proxy(window, handler);
+
+
+    this.getShadowStack = function(clear){
+        if (clear)
+            _shadowStackHead = null;
+        return shadowStack;
+    }
 
     this.getCalleeMap = function() {
         return calleeMap;
@@ -146,99 +208,32 @@ if (typeof {name} === 'undefined') {
         }
     }
 
-    var buildCacheObject = function(obj){
-        var acyclicObj = {};
-        Object.keys(obj).forEach(function(nodeId){
-            acyclicObj[nodeId] = {};
-            Object.keys(obj[nodeId]).forEach(function(md){
-                try {
-                    acyclicObj[nodeId][md] = stringify(obj[nodeId][md]);
-                } catch (err) {
-
-                }
-
-            });
-
-            try { 
-                localStorage.setItem(nodeId, JSON.stringify(acyclicObj[nodeId]));
-            } catch (err) {
-                // TODO wrong practice empty catch block
-            }
-        });
-
-        return acyclicObj;
-    }
-
-    var stringifyMutation = function(mut) {
-        var stringMut = {};
-
-    }
-
-    var extractCacheObject = function(){
-        var cacheObject = {};
-
-        Object.keys(localStorage).forEach(function(nodeId){ 
-            try {
-                var value = JSON.parse(localStorage.getItem(nodeId));
-                cacheObject[nodeId] = {};
-                Object.keys(value).forEach(function(md){
-                    try {
-                     cacheObject[nodeId][md] = parse(value[md]);
-                    } catch (err) {}
-                });
-            } catch (err) {}
-        });
-
-        return cacheObject;
-    }
-
-    var isCyclic = function (obj) {
-      var keys = [];
-      var stack = [];
-      var stackSet = new Set();
-      var detected = false;
-
-      function detect(obj, key) {
-        if (typeof obj != 'object') { return; }
-
-        if (stackSet.has(obj)) { // it's cyclic! Print the object and its locations.
-          var oldindex = stack.indexOf(obj);
-          var l1 = keys.join('.') + '.' + key;
-          var l2 = keys.slice(0, oldindex + 1).join('.');
-          // console.log('CIRCULAR: ' + l1 + ' = ' + l2 + ' = ' + obj);
-          // console.log(obj);
-          detected = true;
-          return;
-        }
-
-        keys.push(key);
-        stack.push(obj);
-        stackSet.add(obj);
-        for (var k in obj) { //dive on the object's children
-          if (obj.hasOwnProperty(k)) { detect(obj[k], k); }
-        }
-
-        keys.pop();
-        stack.pop();
-        stackSet.delete(obj);
-        return;
-      }
-
-      detect(obj, 'obj');
-      return detected;
-    }
-
-
-    this.logWrite = function(functionIdentifier, rhs, variableName ){
-        if (variableName)
-            customLocalStorage[functionIdentifier]["writes"][variableName] = rhs;
-        else { console.log(" write without a variable name");}
+    this.logWrite = function(functionIdentifier, rhs, variableName, listOfProperties ){
+        var key = variableName;
+        if (listOfProperties.length > 0)
+            key = _patchLogString(variableName, listOfProperties);
+        customLocalStorage[functionIdentifier]["writes"][key] = rhs;
         return rhs;
     }
 
-    this.logRead = function(functionIdentifier, readArray){
-        customLocalStorage[functionIdentifier]["reads"][readArray[0]] = readArray[1];
-        return readArray[2];
+    var _patchLogString = function(input, varArray){
+        var count = 0;
+        var output = input.replace(/(\[).(\])/g, function(match, g1, g2, offset, string){
+            var replaceString = varArray[count]
+            if (typeof varArray[count] == "symbol")
+                replaceString = varArray[count].toString();
+            count++;
+            return g1 + replaceString + g2;
+        });
+        return output
+    }
+
+    this.logRead = function(functionIdentifier, readArray, listOfProperties){
+        var key = readArray[0]
+        if (listOfProperties.length > 0)
+            key = _patchLogString(readArray[0],listOfProperties)
+        customLocalStorage[functionIdentifier]["reads"][key] = readArray[1];
+        return readArray[1];
     }
 
     this.logReturnValue = function(functionIdentifier, returnValue) {
@@ -248,24 +243,25 @@ if (typeof {name} === 'undefined') {
 
 
     this.cacheAndReplay = function(nodeId, params, info){
-        if (shadowStack.length) {
-            var top = shadowStack[shadowStack.length - 1 ];
-            if (!calleeMap[top])
-                calleeMap[top] = [];
-            calleeMap[top].push(nodeId);
-        }
+        // if (shadowStack.length) {
+        //     var top = shadowStack[shadowStack.length - 1 ];
+        //     if (!calleeMap[top])
+        //         calleeMap[top] = [];
+        //     calleeMap[top].push(nodeId);
+        // }
         shadowStack.push(nodeId);
+        _shadowStackHead = nodeId;
         if (!customLocalStorage[nodeId]) {
             customLocalStorage[nodeId] = {};
             customLocalStorage[nodeId]["writes"] = {};
-            customLocalStorage[nodeId]["writes"]["calls"] = [];
             customLocalStorage[nodeId]["reads"] = {};
-            if (params.length != 0) {
-                customLocalStorage[nodeId]["arguments"] = {};
-                customLocalStorage[nodeId]["arguments"]["before"] = params;
-            }
+            // if (params.length != 0) {
+            //     customLocalStorage[nodeId]["arguments"] = {};
+            //     customLocalStorage[nodeId]["arguments"]["before"] = params;
+            // }
         } else {
-            console.log("Cache hit for function " + nodeId);
+            return false;
+            // console.log("Cache hit for function " + nodeId);
             var returnValue = customLocalStorage[nodeId]["returnValue"] ? customLocalStorage[nodeId]["returnValue"] : true;
             if (params && customLocalStorage[nodeId]["arguments"]){
                 Object.keys(params).forEach(function(ind){
@@ -278,7 +274,7 @@ if (typeof {name} === 'undefined') {
                 eval(evalString);
             });
 
-            return returnValue;
+            // return returnValue;
         }
         // if (globalReads.length) {
         //     globalReads.forEach(function(read, it){
@@ -290,9 +286,13 @@ if (typeof {name} === 'undefined') {
     }
 
     this.dumpArguments = function(nodeId, params) {
+        // functionTimerE[nodeId] = performance.now();
+        // window.sigStack[nodeId].push(functionTimerE[nodeId] - functionTimerS[nodeId]);
+        // return;
         if (customLocalStorage[nodeId]["arguments"])
             customLocalStorage[nodeId]["arguments"]["after"] = params;
         shadowStack.pop();
+
     }
 
     this.compareAndCache = function(nodeId, params, globalReads, info) {
@@ -473,7 +473,7 @@ if (typeof {name} === 'undefined') {
 
     var isReplay = localStorage.getItem("executionCount");
     if (isReplay){
-        customLocalStorage = extractCacheObject();
+        // customLocalStorage = extractCacheObject();
         console.log("Restored custom local storage");
     }
 

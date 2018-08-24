@@ -45,15 +45,17 @@ function instrumentationPrefix(options) {
 		nodejs: false,
 		maxInvocationsPerTick: 28192,
 	});
-
 	// the inline comments below are markers for building the browser version of fondue
 	var tracerSource = /*tracer.js{*/fs.readFileSync(__dirname + '/tracer.js', 'utf8')/*}tracer.js*/;
+	if (!options.proxyName)
+		options.proxyName = options.name +"PROXY";
 	return template(tracerSource, {
 		name: options.name,
 		version: JSON.stringify(require('./package.json').version),
 		nodejs: options.nodejs,
 		maxInvocationsPerTick: options.maxInvocationsPerTick,
 		e2eTesting: options.e2eTesting,
+		proxyName: options.proxyName
 	});
 }
 
@@ -80,23 +82,16 @@ function instrument(src, options) {
 		shebang = m[1];
 		src = src.slice(shebang.length);
 	}
-
+	options.proxyName = options.tracer_name +"PROXY";
 	if (options.include_prefix) {
 		prefix += instrumentationPrefix(options);
+		options.prefix = prefix;
 	}
 
 	if (src.indexOf("/*theseus" + " instrument: false */") !== -1) {
 		output = shebang + prefix + src;
 	} else {
-		var m = traceFilter(src, {
-			prefix: prefix,
-			path: options.path,
-			tracer_name: options.tracer_name,
-			sourceFilename: options.sourceFilename,
-			generatedFilename: options.generatedFilename,
-			execution_cache_toggle: options.execution_cache_toggle,
-			caching: options.caching,
-		});
+		var m = traceFilter(src, options);
 		output = {
 			map: m.map,
 			toString: function () {
@@ -120,6 +115,7 @@ var makeId = function (type, path, loc) {
 };
 
 var traceFilter = function (content, options) {
+	// console.log(options)
 	if (content.trim() === '') {
 		return content;
 	}
@@ -146,6 +142,7 @@ var traceFilter = function (content, options) {
 		var uncacheableFunctions =[];
 
 		var ASTNodes = []; // List of all the nodes in the abstract syntax tree
+		var ASTSourceMap = new Map();
 		var functionToCallees = {};
 		var fala = function () {
 			var m = falafel.apply(this, arguments);
@@ -234,117 +231,6 @@ var traceFilter = function (content, options) {
 			}
 		}
 
-		var replaceAliasesWithActuals = function(node) {
-			node.globalWrites = _replaceAliasesWithActuals(node, node.globalWrites, true);
-			node.globalReads =  _replaceAliasesWithActuals(node, node.globalReads, false);
-		}
-
-		var _replaceAliasesWithActuals = function(node, source, nop) {
-			if (source == undefined) return;
-			var indicesMatched = [];
-			var arrayWithSources = [];
-			source.forEach(function(entry,it){
-				var isExpression = false;
-				var isMemberAndComputed = false;
-				if (entry.type == "CallExpression") isExpression = true;
-				if (entry.type == "MemberExpression" && (entry.property.type == "Identifier" && entry.computed) ) isMemberAndComputed = true;
-				var against = node;
-				while (against.parent != undefined ) {
-					if (against.globalAlias){
-						if (isMemberAndComputed) entry = util.getBaseIdentifierFromMemberExpression(entry);
-						var identifier = util.getIdentifierFromGenericExpression(entry) || entry;
-						var remaining = entry.source().replace(identifier.source(),"");
-						if (identifier.source() in against.globalAlias){
-							indicesMatched.push(it);
-							if (remaining == ""){
-								arrayWithSources.push(against.globalAlias[identifier.source()]);
-								if (isExpression && nop) arrayWithSources.push("NOP");
-							}
-							else {
-								arrayWithSources.push(against.globalAlias[identifier.source()] + remaining);
-								if (isExpression && nop) arrayWithSources.push("NOP");
-							}
-						}
-					}
-					against = against.parent;
-				}
-			});
-			source.forEach(function(entry, it){
-				if (indicesMatched.indexOf(it) < 0){
-					if (entry.type == "MemberExpression" && (entry.property.type == "Identifier" && entry.computed) )
-						entry = util.getBaseIdentifierFromMemberExpression(entry);
-					arrayWithSources.push(entry.source());
-					if (entry.type == "CallExpression" && nop) arrayWithSources.push("NOP");
-				}
-			})
-			return arrayWithSources;
-		}
-
-		var replaceAliasWithinAlias = function(node) {
-			if (node.globalAlias == undefined) return;
-			var indicesMatched = [];
-			var sourceVersion = {};
-			Object.entries(node.globalAlias).forEach(function(pair){
-				var identifier = util.getIdentifierFromGenericExpression(pair[1]) || pair[1];
-				var remaining =  pair[1].source().replace(identifier.source(),"");
-				if (Object.keys(node.globalAlias).indexOf(identifier.source()) > -1 ){
-					indicesMatched.push(pair[0]);
-					if (remaining == "") {
-						sourceVersion[pair[0]] = node.globalAlias[identifier.source()].source();
-
-					}
-					else {
-						sourceVersion[pair[0]] = node.globalAlias[identifier.source()].source() + remaining;
-					}
-				}
-			});
-			Object.keys(node.globalAlias).forEach(function(key) {
-				if (indicesMatched.indexOf(key) < 0) {
-					sourceVersion[key] = node.globalAlias[key].source();
-				}
-			})
-			return sourceVersion;
-		}
-
-		var checkAndReplaceAlias = function(node) {
-			var parent = node.parent;
-			var ident = util.getIdentifierFromGenericExpression(node) || node;
-			var remaining = node.source().replace(ident.source(), "");
-			while (parent != undefined) {
-				if (parent.type == "FunctionExpression" || parent.type == "FunctionDeclaration"){
-					if (parent.globalAlias && Object.keys(parent.globalAlias).indexOf(ident.source()) > -1 ) {
-						if (remaining == "") {
-							update(node, parent.globalAlias[ident.source()]);
-						} else {
-							update(node, parent.globalAlias[ident.source()], remaining);
-						}
-					}
-				}
-				parent = parent.parent;
-			}
-		}
-
-		var buildArgs = function (args, check) {
-			if (args) {
-				var modifiedArgArray = [];
-				var localCounter = 0;
-				args.forEach(function(arg, it){
-					if (arg != "" && !arg.includes("NOP")) {
-						if (args[it + 1] != "NOP") {
-							modifiedArgArray.push("`" + util.escapeRegExp(arg) + "`");
-							if (check) modifiedArgArray.push("typeof " +  arg + "=='undefined'?null:" + arg );
-							else modifiedArgArray.push(arg);
-						} else {
-							modifiedArgArray.push("\"NOP" + localCounter++ + "\"");
-							modifiedArgArray.push("`" + util.escapeRegExp(arg) + "`");
-						}
-					}
-				});
-
-				return modifiedArgArray;
-			}
-		}
-
 		var printFriendlyAlias = function(obj) {
 			var output = {};
 			for (let key in obj){
@@ -352,21 +238,6 @@ var traceFilter = function (content, options) {
 			}
 
 			return output;
-		}
-
-		var traceReturnValue = function(node) {
-			var parent = node.parent;
-			while (parent != undefined) {
-				if ( parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression" ) {
-					if (node.argument.type == "SequenceExpression") {
-						parent.returnValue = node.argument.expressions[node.argument.expressions.length - 1];
-					} else {
-						parent.returnValue = node.argument;
-					}
-					return;
-				}
-				parent = parent.parent;
-			}
 		}
 
 		var markFunctionUnCacheable = function (node) {
@@ -395,6 +266,7 @@ var traceFilter = function (content, options) {
 			};
 			// Add every node to the list
 			ASTNodes.push(node);
+			ASTSourceMap.set(node, node.source());
 
 			if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration') {
 				if (options.timing) {
@@ -418,12 +290,25 @@ var traceFilter = function (content, options) {
 					}				
 				}
 
-				if (functionName){
-					if (!(functionNameToLocation[functionName]))
-						functionNameToLocation[functionName] = [];
-					functionNameToLocation[functionName].push(node.loc);
-				}	
+				/*
+				function name to location is used during signature propogation 
+				and there can be commented out as long as the code
+				for enabling signature propagation is commented out.
+				*/
+				// if (functionName){
+				// 	if (!(functionNameToLocation[functionName]))
+				// 		functionNameToLocation[functionName] = [];
+				// 	console.log(functionNameToLocation[functionName])
+				// 	functionNameToLocation[functionName].push(node.loc);
+				// }	
 
+			} else if (node.type == "ForInStatement" || node.type == "ForOfStatement"){
+				if (node.left.type == "Identifier")
+					scope.addLocalVariable(node.left);
+
+			} else if (node.type == "TryStatement") {
+				if (node.handlers[0] && node.handlers[0].param)
+					scope.addLocalVariable(node.handlers[0].param);
 			} else if (node.type == "IfStatement") {
 					var readArray = [];
 					readArray = signature.handleReads(node.test);
@@ -432,15 +317,21 @@ var traceFilter = function (content, options) {
 
 			} else if ( (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator')) {
 				if (node.type == "VariableDeclarator"){
-					if (node.parent.source().includes("let ")) {
-						scope.addLocalVariable(node);
-					}
-					else if (node.init) {
+					/* You can alias globals using let as well */
+					// if (node.parent.source().includes("let ")) {
+					// 	scope.addLocalVariable(node);
+					// }
+					if (node.init) {
 						if (scope.IsLocalVariable(node.init) == 0) {
 							scope.addLocalVariable(node);
 						} else {
-							if (node.init.type == "Identifier" || node.init.type == "MemberExpression") scope._addGlobalReads(node.init);
-							scope.addGlobalAlias(node,node.init);
+							/* If the right hand side is a window, don't create alias only when dealing with proxies*/
+							// if (!options.useProxy || (options.useProxy && node.init.source() != "window")) 
+								/*When we are using proxies, we will add these to localvariables instead of global aliases
+									and while checking for global analysis, these variables will be eliminated under is local variable check
+								*/
+								scope.addLocalVariable(node);
+								//scope.addGlobalAlias(node,node.init);
 						}
 						scope.addGlobalReads(signature.handleReads(node.init));
 					} else {
@@ -456,17 +347,20 @@ var traceFilter = function (content, options) {
 
 				// dont' handle those assignment expressions which are a child of conditional expressions as they 
 				// may or may not get executed
-				if (childrenOfConditionalExpression(node)) {
-					//do no-op
-				}
-				else if (scope.IsLocalVariable(node.left) > 0){
+				// TODO Handle even these assignment expressions 
+				// if (childrenOfConditionalExpression(node)) {
+				// 	//do no-op
+				// }
+				if (scope.IsLocalVariable(node.left) > 0){
 					// addGlobalVariable(node.left);
 					scope.addGlobalWrites(node.left);
 
 				} else if (scope.IsLocalVariable(node.right) > 0){
-					if (node.right.type == "Identifier" || node.right.type == "MemberExpression")
-						scope._addGlobalReads(node.right);
-					scope.addGlobalAlias(node.left, node.right);
+					// if (node.right.type == "Identifier" || node.right.type == "MemberExpression")
+					// if (!options.useProxy || (options.useProxy && node.right.source() != "window")) 
+						/* Just read the comment on line number 320 above */
+						// scope.addGlobalAlias(node.left, node.right);
+						scope.addLocalVariable(node.left);
 				} else {
 					scope.addLocalVariable(node.left);
 				}
@@ -489,7 +383,7 @@ var traceFilter = function (content, options) {
 				// 	scope.addGlobalWrites(read);
 				// });
 
-				addCalleesToCaller(node);
+				// addCalleesToCaller(node);
 
 				/*
 				Handle DOM standalone expressions which have expression statement as their parent
@@ -512,8 +406,10 @@ var traceFilter = function (content, options) {
 							var _functionId = util.getFunctionIdentifier(node);
 							if (_functionId) {
 								var functionId = makeId('function', options.path, _functionId);
-								if (uncacheableFunctions.indexOf(functionId) < 0)
-									uncacheableFunctions.push(functionId);
+								if (uncacheableFunctions.indexOf(functionId) < 0){
+
+									// uncacheableFunctions.push(functionId);
+									}
 								}
 							}
 					});
@@ -521,108 +417,94 @@ var traceFilter = function (content, options) {
 			} 
 		});
 
+		/* In this second iteration of the AST we will freeze the debug info 
+				ie all the global writes, reads and aliases 
+		*/
 		ASTNodes.forEach(function(node) {
-			// console.log("parsing node: " + node.source());
 
-			if (node.type == "CallExpression") {
-				/*
-				There are three types of call expressions to be taken care of while propagating signature:
-					- regular expression which was defined in this script, propagate
-					- regular expression which was not defined in this script ( ie a native function), therefore no propagation for this one
-					- non regular expression, ie a function expression and call expression at the same time, propagate
-					- regular expression which was defined multiple times, therefore look through all the definitions and then decide. 
-				*/
-				// if (node.callee.type == "FunctionExpression") {
-				// 	parent = node.parent;
-				// 	while (parent != undefined){
-				// 		if (parent.type == "FunctionExpression" || parent.type == "FunctionDeclaration"){
-				// 			util.customMergeDeep(functionToMetadata[makeId('function', options.path, parent.loc)],functionToMetadata[node.callee.loc])
-				// 			return;
-				// 		}
-				// 		parent = parent.parent;
-				// 	}
-				// }
-
-			} else if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
-				// Handle hoisting
-				scope.removeLocalVariables(node);
-				node.globalAlias = replaceAliasWithinAlias(node);
+			if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
+				if (node.globalReads) node.globalReads = node.globalReads.map(function(e){ return e.source();});
+				if (node.globalWrites) node.globalWrites = node.globalWrites.map(function(e){ return e.source();});
+				if (node.globalAlias) node.globalAlias = printFriendlyAlias(node.globalAlias);
 			}
 		});
 
+		/*
+			The 3rd and final iteration over the AST to actually instrument
+			logging code
+		*/
 		ASTNodes.forEach(function(node) {
 			// console.log("current node: " + node.source() + " " + node.type);
 			if (node.type === "Program") { 
 				update(node, options.prefix,
 					sourceNodes(node))
-			} 
-			else if ( (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator') && options.caching) {
+			} else if ( (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator')) {
 				if (node.type == "VariableDeclarator"){
+					/* You can alias globals using let as well */
+					// if (node.parent.source().includes("let ")) {
+					// 	scope.addLocalVariable(node);
+					// }
 					if (node.init) {
-						var _functionId = util.getFunctionIdentifier(node);
-						if (_functionId) {
-							var readArray = signature.handleReads(node.init);
-							var functionId = makeId('function', options.path, _functionId);
-							if (uncacheableFunctions.indexOf(functionId) >= 0) return;
+						var readArray = signature.handleReads(node.init);
+						if (options.useProxy) {
 							readArray.forEach(function(read){
-								var newRead = util.logReadsHelper(read);
-								update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '])');
-							});
+								if (util.checkIfReservedWord(read)) return;
+								if (read.source() == "window")
+									update(read, options.proxyName)
+								else
+									update(read, options.proxyName, '.', read.source());
+							})
 						}
-						if (scope.IsLocalVariable(node.init) == 0) {
-
-						} else {
-						}
-					} else {
-						scope.addLocalVariable(node);
-					}
+					} 
 
 			    }
 			    // update(node, sourceNodes(node));
 			
 			// Handles any global variable being assigned any value
 			// or a local variable becoming an alias of a global variable
-			} 
-			else if (node.type == "AssignmentExpression" && options.caching){
+			} else if (node.type == "AssignmentExpression" || node.type == "LogicalExpression" || node.type == "BinaryExpression"){
 				var _functionId = util.getFunctionIdentifier(node);
 				if (_functionId) {
 					var readArray = signature.handleReads(node.right);
 					var functionId = makeId('function', options.path, _functionId);
 					if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 					readArray.forEach(function(read){
-						var newRead = util.logReadsHelper(read);
-						update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '])');
+						var newRead = util.logReadsHelper(read, scope.checkAndReplaceAlias(read));
+						// console.log(read.source());
+						if (options.caching)
+							update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '],[', util.getAllIdentifiersFromMemberExpression(read),'])');
+						if (options.useProxy) {
+							if (util.checkIfReservedWord(read)) return;
+							if (read.source() == "window")
+									update(read, options.proxyName)
+								else
+									update(read, options.proxyName, '.', read.source());
+						}
+					});
+
+					var readArray = signature.handleReads(node.left);
+					readArray.forEach(function(read){
+						if (util.checkIfReservedWord(read)) return;
+						if (read.source() == "window")
+							update(read, options.proxyName)
+						else
+							update(read, options.proxyName, '.', read.source());
 					});
 				}
 				// dont' handle those assignment expressions which are a child of conditional expressions as they 
 				// may or may not get executed
-				if (childrenOfConditionalExpression(node)) {
-					//do no-op
-				}
-				else if (scope.IsLocalVariable(node.left) > 0){
-
-					var _functionId = util.getFunctionIdentifier(node);
-					if (_functionId) {
-						var functionId = makeId('function', options.path, _functionId);
-						if (uncacheableFunctions.indexOf(functionId) >= 0) return;
-						checkAndReplaceAlias(node.left);
-						update(node,node.left.source(),node.operator, options.tracer_name,'.logWrite(',JSON.stringify(functionId),',',
-							node.right.source(),',',
-							'\`',node.left.source().replace(/[\`]/g, "\\$&"),'\`',')');
+				if (scope.IsLocalVariable(node.left) > 0){
+					var newWrite = util.logWritesHelper(node, scope.checkAndReplaceAlias(node.left));
+					if (options.caching)
+						update(node,node.left.source(),node.operator, options.tracer_name,'.logWrite(',JSON.stringify(functionId),newWrite,',[', util.getAllIdentifiersFromMemberExpression(node.left),'])');
+					if (options.useProxy) {
+			
 					}
 				} else if (scope.IsLocalVariable(node.right) > 0){
-					// var _functionId = util.getFunctionIdentifier(node);
-					// if (_functionId) {
-					// 	if (node.right.type == "Identifier" || node.right.type == "MemberExpression") {
-					// 		var functionId = makeId('function', options.path, _functionId);
-					// 		var newRead = util.logReadsHelper(node.right);
-					// 		update(node.right, options.tracer_name,'.logRead(',JSON.stringify(functionId),',[', newRead, ']);');
-					// 		return;
-					// 	} else {console.log("LOOKS LIKE AN ALIAS BUT RHS IS TYPE: " + node.right.type);}
-					// }
+					
 				}
 
-			} else if (node.type == "IfStatement" && options.caching) {
+			} else if (node.type == "IfStatement") {
 					var readArray = [];
 					readArray = signature.handleReads(node.test);
 					var _functionId = util.getFunctionIdentifier(node);
@@ -630,14 +512,30 @@ var traceFilter = function (content, options) {
 						var functionId = makeId('function', options.path, _functionId);
 						if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 						readArray.forEach(function(read){
-							var newRead = util.logReadsHelper(read);
-							update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '])');
+							var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
+							if (options.caching)
+								update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '],[', util.getAllIdentifiersFromMemberExpression(read),'])');
+							if (options.useProxy){
+								if (util.checkIfReservedWord(read)) return;
+								if (read.source() == "window")
+									update(read, options.proxyName)
+								else
+									update(read, options.proxyName, '.', read.source());
+							}
+								
 						});
+							
 					}
 					// scope.addGlobalReads(readArray);
 
 
-			} else if (node.type == "CallExpression" && options.caching) {
+			} else if (node.type == "CallExpression") {
+
+				// check if the define expression from requireJS is used or not
+				if (node.callee.source() == "define") {
+					update(node, ASTSourceMap.get(node));
+					return;
+				}
 				
 				// Check if the arguments passed are global or not
 				if (node.arguments) {
@@ -650,8 +548,16 @@ var traceFilter = function (content, options) {
 						var functionId = makeId('function', options.path, _functionId);
 						if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 						globalReads.forEach(function(read){
-							var newRead = util.logReadsHelper(read);
-							update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '])');
+							var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
+							if (options.caching)
+								update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '],[', util.getAllIdentifiersFromMemberExpression(read),'])');
+							if (options.useProxy){
+								if (util.checkIfReservedWord(read)) return;
+								if (read.source() == "window")
+									update(read, options.proxyName)
+								else
+									update(read, options.proxyName, '.', read.source());
+							}
 						});
 					}
 					// add global arguments to read set
@@ -676,8 +582,9 @@ var traceFilter = function (content, options) {
 							var _functionId = util.getFunctionIdentifier(node);
 							if (_functionId) {
 								var functionId = makeId('function', options.path, _functionId);
-								if (uncacheableFunctions.indexOf(functionId) == -1)
-									uncacheableFunctions.push(functionId);
+								if (uncacheableFunctions.indexOf(functionId) == -1) {
+									// uncacheableFunctions.push(functionId);
+								}
 								// update(node, options.tracer_name,'.setMutationContext(', node.source(),',', JSON.stringify(functionId), ')');
 							}
 						}
@@ -691,21 +598,23 @@ var traceFilter = function (content, options) {
 					if (node.argument.type == "SequenceExpression" ) {
 						var returnValue = node.argument.expressions[node.argument.expressions.length - 1];
 						var preReturns = node.argument.expressions.slice(0,-1).map(function(e){return e.source()}).join();
-						update(node, 'return ',preReturns ,',', options.tracer_name, 
+						if (options.caching)
+							update(node, 'return ',preReturns ,',', options.tracer_name, 
 							'.logReturnValue(', JSON.stringify(functionId), ',',returnValue.source() ,');');
 					} else {
-						update(node, "return ", options.tracer_name, '.logReturnValue(', JSON.stringify(functionId), ',', node.argument.source(),");");
+						if (options.caching)
+							update(node, "return ", options.tracer_name, '.logReturnValue(', JSON.stringify(functionId), ',', node.argument.source(),");");
 					}
 				} else {console.log("ERROR analyses says return is outside function" + node.source())}
 
-			} else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression") && options.caching) {
-				replaceAliasesWithActuals(node);
+			} else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
 				
-				// console.log(uncacheableFunctions);
 				var index = makeId('function', options.path, node.loc);
 				var isCacheable = true;
-				if (uncacheableFunctions.indexOf(index) >= 0)
-					return;
+				if (uncacheableFunctions.indexOf(index) >= 0){
+					// console.log("***NEED TO FIX UNCACHEABLE FUNCTIONS****");
+					// return;
+				}
 				var args = node;
 				var serializedArgs = {};
 				// break into separate arguments
@@ -725,18 +634,19 @@ var traceFilter = function (content, options) {
 				// serializedArgs = {};
 				var _traceBegin = "" + options.tracer_name + ".cacheAndReplay(";// + args + ")) return;"
 				var _traceEnd = options.tracer_name + ".dumpCache(";// + args + ");";
-				// update(node.body, '{', _traceBegin, JSON.stringify(index),') } catch (err) {}\n try { ', sourceNodes(node.body),'\n } catch (err) {} }')
-				update(node.body, '{', 'let ret; if (ret = ', _traceBegin, JSON.stringify(index) ,', arguments,',
-				 JSON.stringify(serializedArgs),')) \n{ if (ret == true) return; else return ret; };\n',
-				 'try { ', sourceNodes(node.body), '\n} /*catch (e  instanceof EvalError) {console.log("ERROR while replaying cache " + ',JSON.stringify(index),
-				 ' + e + e.stack)}*/  finally { ', options.tracer_name ,'.dumpArguments(', JSON.stringify(index), ', arguments )}}');
+				update(node.body, '{', 'if ( __tracerRet = ', _traceBegin, JSON.stringify(index) ,', arguments,',
+				 JSON.stringify(serializedArgs),')) \n return __tracerRet; \n',
+				 sourceNodes(node.body),'}');
+
+				//This is only to add performance api calls to the functions. 
+				// update(node.body, '{', 'try { \n performance.now();\n', sourceNodes(node.body), '\n} finally {performance.now();}}',)
 			}
 		});
 
 	processed = m;
 
 	} catch (e) {
-		console.error('exception during parsing', options.path, e.stack, content);
+		console.error('exception during parsing', options.path, e.stack);
 		// mostly exception imples that it is a json file. 
 		return content;
 	}

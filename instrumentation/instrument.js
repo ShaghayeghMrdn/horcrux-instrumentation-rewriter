@@ -91,7 +91,7 @@ function mergeInto(options, defaultOptions) {
 }
 
 //Required for the fondue library, to determine how to instrument
-var fondueOptions = mergeInto({}, {caching: true,  include_prefix: false, path: program.name, e2eTesting: false, execution_cache_toggle: parseInt(program.cacheToggle) });
+var fondueOptions = mergeInto({}, {useProxy: true, caching: false,  include_prefix: false, path: program.name, e2eTesting: false, execution_cache_toggle: parseInt(program.cacheToggle) });
 
 src = fs.readFileSync(program.input,"utf-8")
 

@@ -113,15 +113,16 @@ output_directory = sys.argv[1].split('/')[-2]
 subprocess.Popen("mkdir -p {}".format(os.path.join(sys.argv[2], output_directory)), shell=True)
 
 # reading Profile stats
-profileStats = json.loads(open("timeStats",'r').read())
-scriptsPerUrl = scriptsToInstrument(profileStats)
+if int(sys.argv[3]):
+    profileStats = json.loads(open("timeStats",'r').read())
+    scriptsPerUrl = scriptsToInstrument(profileStats)
 # print scriptsPerUrl
 # print "asciprscriptsPerUrl", scriptsPerUrl['abcnews.go.com']
 for root, folder, files in os.walk(sys.argv[1]):
     print "This directory has ", len(files), " number of files"
     scriptsToInstrument = [];
     url = root.split('/')[-2]
-    if (checkStatsForUrl(root,profileStats)):
+    if (int(sys.argv[3]) and checkStatsForUrl(root,profileStats)):
         # print "url is", url
         # url = url.split('www.')[-1]
         scriptsToInstrument = scriptsPerUrl[url]
@@ -130,7 +131,7 @@ for root, folder, files in os.walk(sys.argv[1]):
         try:
             file_counter += 1
             f = open(os.path.join(root,file), "rb")
-            print file
+            # print file
             http_response.ParseFromString(f.read())
             output_http_response = deepcopy(http_response)
             f.close()
@@ -159,12 +160,12 @@ for root, folder, files in os.walk(sys.argv[1]):
                 filename = filename[-20:]
             if len(filename) == 0:
                 filename = "anonymous"
-            print "The filename is: " , http_response.request.first_line + " with file type " + fileType
+            # print "The filename is: " , http_response.request.first_line + " with file type " + fileType
             if copyFile:
                 print "Simply copying the file without modification.. "
                 copy(os.path.join(root,file), os.path.join(sys.argv[2], output_directory))
             else:
-                print "The filename is: " , http_response.request.first_line
+                # print "The filename is: " , http_response.request.first_line
                 if len(scriptsToInstrument) and int(sys.argv[3]) and fileType != "html":
                     scriptName = http_response.request.first_line.split(' ')[1].split('/')[-1]
                     if scriptName not in scriptsToInstrument and fileType == "js":
@@ -180,6 +181,7 @@ for root, folder, files in os.walk(sys.argv[1]):
                     break
 
                 pid = os.fork()
+                childPids.append(pid)
                 if pid == 0:
                     TEMP_FILE = str(os.getpid())
                     TEMP_FILE_zip = TEMP_FILE + ".gz"
@@ -283,13 +285,12 @@ for root, folder, files in os.walk(sys.argv[1]):
                     tmpFile.close()
 
                     subprocess.Popen("rm {} {}".format(TEMP_FILE, TEMP_FILE_zip), shell=True)
-
                     os._exit(0)
-                childPids.append(pid)
 
         except IOError as e:
             print sys.argv[1] + ": Could not open file ", e
 
 for pid in childPids:
     os.waitpid(pid,0)
+print "All the child processes died..\n Main thread terminating"
 

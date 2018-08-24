@@ -1,60 +1,5 @@
 var scope = require('./scopeAnalyzer.js');
 
-var handleBinaryandLogical = function(node) {
-    if (node == undefined || node.type == "AssignmentExpression")
-        return [];
-    var reads = [];
-    // console.log("Handling binary and logical:" + node.source() + "with properties: " + Object.keys(node));
-    if (node.type == "Identifier" || node.type == "MemberExpression") {
-        reads.push(node)
-        return reads
-    } else if (node.type == "ObjectExpression") {
-        reads = handleObjectExpressions(node);
-        return reads;
-    }
-
-    reads = reads.concat(handleBinaryandLogical(node.left));
-    reads = reads.concat(handleBinaryandLogical(node.right));
-
-    return reads;
-}
-
-var handleAssignmentExpressions = function(node){
-    var reads = [];
-    if (node.type != "AssignmentExpression")
-        reads.push(node);
-    else 
-        reads = reads.concat(handleAssignmentExpressions(node.right))
-    return reads;
-}
-
-var handleObjectExpressions = function(node) {
-    var reads = [];
-
-    node.properties.forEach(function(elem){
-        if (elem.value.type == "Identifier")
-            reads.push(elem.value)
-    });
-
-    return reads;
-}
-
-var handleMemberExpression = function(node) {
-    var reads = [];
-
-    if (node.property.type == "Identifier")
-        reads.push(node.property);
-
-    if (node.object.type == "Identifier") {
-        reads.push(node.object);
-        return reads;
-    } else if (node.object.type == "MemberExpression") {
-        reads = reads.concat(handleMemberExpression(node.object));
-        return reads;
-    }
-    return reads;
-}
-
 var _handleReads = function(node){
         /*
     The following read types are available for the assignment expression RHS:
@@ -68,39 +13,62 @@ var _handleReads = function(node){
     - New expression
     - Array expression
     - Memberexpression
+      Function Expression
+      New Expression
+      updateExpression
 
-    First let's slice out all the variables read.
-    Then pass these through the local/global analysis 
-
-    */
-
-    // console.log("Called read array handler" + node.source());
+   */
     var readArray = [];
-    if (node.type == "Identifier")
-        readArray.push(node)
-    else if (node.type == "BinaryExpression" || node.type == "LogicalExpression") {
-        readArray = handleBinaryandLogical(node)
+
+    var readRecursively = function(node){
+        // console.log("checking for " + node.source() + "with type " + node.type)
+        if (node == null || node.type == "Literal")
+            return;
+        if (node.type == "Identifier") {
+            readArray.push(node)
+            return;
+        } /*else if (node.type == "BinaryExpression" || node.type == "LogicalExpression") {
+            readRecursively(node.left);
+            readRecursively(node.right);
+        }*/ else if (node.type == "MemberExpression") {
+            readRecursively(node.object);
+            if (node.computed)
+                readRecursively(node.property);
+        } else if (node.type == "UnaryExpression" || node.type == "UpdateExpression") {
+                readRecursively(node.argument);
+        } else if (node.type == "ConditionalExpression") {
+            readRecursively(node.test);
+            readRecursively(node.consequent);
+            readRecursively(node.alternate);
+        } else if (node.type == "ObjectExpression") {
+            node.properties.forEach(function(elem){
+                readRecursively(elem);
+            });
+            // readArray.push(node);
+        } else if (node.type == "ArrayExpression") {
+            node.elements.forEach(function (elem) {
+                readRecursively(elem);
+            });
+            //Excluding call expression check here because it is already accounted for the in the main loop index.js
+        } else if (/*node.type == "CallExpression" ||*/ node.type == "NewExpression") {
+            node.arguments.forEach(function(arg){
+                readRecursively(arg);
+            });
+        } else if (node.type == "FunctionExpression") {
+            node.params.forEach(function(arg){
+                readRecursively(arg);
+            })
+        } else if (node.type == "AssignmentExpression"){
+            /* DOn't need to handle this case, as the right hand side assignment expression will handle it's own reads during the assignment expression node type callback*/
+            // readArray = handleAssignmentExpressions(node);
+        } else if (node.type == "SequenceExpression"){
+            node.expressions.forEach(function(exp){
+                readRecursively(exp);
+            })
+        }
     }
-    else if (node.type == "ObjectExpression")
-        readArray = handleObjectExpressions(node)
-    else if (node.type == "UnaryExpression") {
-        if (node.argument.type == "Identifier")
-            readArray.push(node.argument);
-    } else if (node.type == "ConditionalExpression") {
-        readArray = handleBinaryandLogical(node.test);
-        readArray = readArray.concat(_handleReads(node.consequent));
-        readArray = readArray.concat(_handleReads(node.alternate));
-    } else if (node.type == "MemberExpression") {
-        readArray.push(node);
-    } else if (node.type == "ArrayExpression") {
-        node.elements.forEach(function (elem) {
-                readArray.push(elem);
-        });
-    } else if (node.type == "CallExpression") {
-        readArray.push(node);
-    } else if (node.type == "AssignmentExpression"){
-        // readArray = handleAssignmentExpressions(node);
-    }
+
+    readRecursively(node);
     return readArray; 
 }
 
@@ -109,6 +77,7 @@ var handleReads = function(node) {
     // console.log("handling for reads: " +  node.source() + " " + node.type);
 
     var readArray = _handleReads(node);
+    // console.log("readArray returned" + readArray.map(function(e){ return e.source()}));
     // console.log(readArray);
     if (readArray == null) return [];
     var globalReads = [];
