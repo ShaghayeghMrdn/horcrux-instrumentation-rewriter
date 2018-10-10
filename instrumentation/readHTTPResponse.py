@@ -35,6 +35,8 @@ http_response = http_record_pb2.RequestResponse()
 
 file_counter = 0
 
+third_party_libraries = ["Bootstrap.js"]
+
 def copy(source, destination):
     subprocess.Popen("cp -r {} {}/".format(source, destination), shell=True)
 
@@ -153,6 +155,11 @@ for root, folder, files in os.walk(sys.argv[1]):
                         fileType = "html"
                         copyFile = False
 
+                #Fiddling with the content security policy
+                # if header.key.lower() == "content-security-policy":
+                #     print header.value
+                #     header.value = bytes("")
+
             # print http_response.request.first_line
             filename = http_response.request.first_line.split()[1].split('/')[-1]
 
@@ -161,8 +168,9 @@ for root, folder, files in os.walk(sys.argv[1]):
             if len(filename) == 0:
                 filename = "anonymous"
             # print "The filename is: " , http_response.request.first_line + " with file type " + fileType
-            if copyFile:
+            if copyFile or any(lib.lower() in http_response.request.first_line.lower() for lib in third_party_libraries):
                 print "Simply copying the file without modification.. "
+                # print http_response.request.first_line
                 copy(os.path.join(root,file), os.path.join(sys.argv[2], output_directory))
             else:
                 # print "The filename is: " , http_response.request.first_line
@@ -232,7 +240,10 @@ for root, folder, files in os.walk(sys.argv[1]):
 
                     if gzip:
                         file_with_content = TEMP_FILE_zip
-                        zipCommand = "gzip -c {} > {}".format(TEMP_FILE, TEMP_FILE_zip)
+                        if gzipType.lower() != "br":
+                            zipUtil = "gzip"
+                        else: zipUtil = "brotli"
+                        zipCommand = "{} -c {} > {}".format(zipUtil, TEMP_FILE, TEMP_FILE_zip)
                         cmd = subprocess.Popen(zipCommand, shell=True)
                         while cmd.poll() is None:
                             continue

@@ -5,6 +5,7 @@ var fondue = require("../JSAnalyzer/index.js")
 var fs =require("fs")
 var path = require("path")
 var program = require('commander');
+var vm = require('vm');
 
 program
     .version("0.1.0")
@@ -20,7 +21,19 @@ HTML pages
 */
 
 function instrumentHTML(src, fondueOptions) {
-    src1 = src
+
+    // test if the file is html or javascript
+    var isHtml;
+    try {
+        var script = new vm.Script(src);
+        isHtml = false;
+    } catch (e) {
+        isHtml = true;
+    }
+
+    if (!isHtml)
+        return instrumentJavaScript(src, fondueOptions);
+    
     console.log("Instrumenting a html file");
     var scriptLocs = [];
     var scriptBeginRegexp = /<\s*script[^>]*>/ig;
@@ -72,6 +85,7 @@ function instrumentHTML(src, fondueOptions) {
 
 function instrumentJavaScript(src, fondueOptions, jsInHTML) {
     console.log("Instrumenting a js file")
+    var fondueOptions = mergeInto({include_prefix: false}, fondueOptions);
     src = src.replace(/^\s+|\s+$/g, '');
     if (jsInHTML){
         // console.log("Instrumenting a snippet of js: ");

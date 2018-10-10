@@ -70,11 +70,25 @@ if (typeof {name} === 'undefined') {
     var currentMutationContext = null;
     var shadowStack = [];
     var _shadowStackHead;
-    window.sigStack = {};
+    var objectIdCounter = 1;
     var mutations = new Map();
-    var calleeMap = {};
     var functionTimerS = {};
     var functionTimerE = {};
+    var ObjectTree = {};
+    var proxyToThis = new WeakMap();
+    var methodToProxy = new WeakMap();
+    var proxyToMethod = new WeakMap();
+    var ObjectToId = new WeakMap();
+    var idToObject = new Map();
+    var processedSignature;
+    var objectToPath; 
+    var pageLoaded = false;
+    var callGraph = {};
+
+    /* Initialize the object tree with window as the root object*/
+    ObjectToId.set(window,0);
+    // console.log(ObjectToId);
+    ObjectTree[0] = {};
 
 
     // window.addEventListener("load", function(){
@@ -98,11 +112,112 @@ if (typeof {name} === 'undefined') {
     //     }
     // };
 
+    window.addEventListener("load", function(){
+        console.log("PROXY STATS");
+        console.log(window.proxyReadCount, window.proxyWriteCount);
+        pageLoaded = true;
+        window.{proxyName} = window;
+        
+        // Process the signature to construct meaningful paths
+        var sigProcessor = new SignatureProcessor(customLocalStorage, ObjectTree, idToObject, callGraph);
+        sigProcessor.process();
+        sigProcessor.postProcess();
+        sigProcessor.signaturePropogate();
+        /*
+        Setting the global variables with class fields
+        */
+        processedSignature = sigProcessor.processedSig;
+        objectToPath = sigProcessor.objectToPath;
+    })
+
     // var observer = new MutationObserver(callback);
     // observer.observe(document, config);
 
     /* Proxy object handler */
     window.proxyReadCount =0; window.proxyWriteCount = 0;
+
+    /*Re write the bind method because the default bind might be overridden. */
+
+    // Function.prototype._bind = function(thisArg){
+    //     return Function.prototype.bind.apply(this, thisArg);
+    // }
+
+    // Function.prototype._call = function(thisArg, ...args){
+    //     return Function.prototype.call.apply(thisArg, _thisArg, args);
+    // }
+    // var origCall = Function.prototype.call;
+    // Function.prototype.call = function(thisArg, ...args) {
+    //     var vThisArg;
+    //     if (thisArg && thisArg.__isProxy)
+    //         vThisArg = proxyToMethod.get(thisArg)
+    //     else vThisArg = thisArg;
+
+    //     return origCall.apply(this, [vThisArg, ...args]);
+    // }
+
+    // Function.prototype.apply = function(thisArg, args) {
+    //     var vThisArg;
+    //     if (thisArg && thisArg.__isProxy)
+    //         vThisArg = proxyToMethod.get(thisArg)
+    //     else vThisArg = thisArg;
+
+    //     this.apply(vThisArg, args);
+    // }
+
+    var appendObjectTree = function(rootId, key, childId){
+        var _edge = ObjectTree[rootId];
+        if (typeof key == "symbol")
+            var ekey = "e_" + key.toString();
+        else var ekey = "e_" + key;
+        if (_edge) {
+            if (!_edge[ekey]) {
+                _edge[ekey] = [];
+                _edge[ekey].push(childId);
+            } else _edge[ekey].push(childId);
+        }
+        else {
+            ObjectTree[rootId]  = {};
+            var edge = ObjectTree[rootId];
+            edge[ekey] = [];
+            edge[ekey].push(childId);
+        }
+    }
+
+    var loggerFunction = function(target, key, value, logType){
+        if (key == "__isProxy" || key == "top" || key == "parent" || document.readyState == "complete") return;
+        var nodeId = _shadowStackHead ? _shadowStackHead : null;
+        if (!nodeId) return;
+        var rootId;
+        var _rootId = ObjectToId.get(target);
+        if (_rootId != null)
+            rootId = _rootId;
+        else {
+            rootId = objectIdCounter;
+            idToObject.set(objectIdCounter, target);
+            ObjectToId.set(target, objectIdCounter++);
+        }
+        if (value instanceof Object) {
+            var _id = ObjectToId.get(value);
+            if (_id != null)
+                var childId = _id;
+            else {
+                var childId = objectIdCounter;
+                idToObject.set(objectIdCounter, value);
+                ObjectToId.set(value, objectIdCounter++);
+            }
+            // Only add to tree if the value is type object
+            appendObjectTree(rootId, key, childId);
+        } else {
+            if (typeof value == "symbol")
+                var childId = 'p-'  + value.toString();
+            else var childId = 'p-' + value;
+        }
+
+        if (logType == "reads")
+            customLocalStorage[nodeId]["reads"].push([rootId, key, childId]);
+        else
+            customLocalStorage[nodeId]["writes"].push([rootId, key, childId]);
+    }
 
     var _handleSymbolKey = function(target, key){
         if (!Reflect.get(target, key)){
@@ -114,42 +229,95 @@ if (typeof {name} === 'undefined') {
         }
     }
 
-    var _handleNonConfigurableProperties = function(target, key){
-        var method = Reflect.get(target, key);
-        if (typeof method == "function") {
-            method = method.bind(target);
-            Object.setPrototypeOf(method, target);
+    var handleNonConfigurableProperty = function(target, key){
+        var method = Reflect.get(target,key);
+        /*if (typeof target[key] == "function"){
+            _thisArg = target;
+            method.call = method._call;
             return method;
-        } else return method;
+        } else*/ return method;
+    } 
+
+    var handleMetaProperties = function(target, key){
+        switch(key){
+            case 'apply' :
+                return Reflect.get(target, key);
+                break;
+            case 'call':
+                return Reflect.get(target, key);
+                break;
+            case 'bind':
+                return Reflect.get(target, key);
+                break;            
+        }
     }
+
+    var isDOMInheritedProperty = function(method){
+        return (method instanceof Element || method instanceof HTMLCollection)
+    }
+
+    var outOfScopeProperties = ["location", "body", "Promise", "top", "parent"];
 
     var handler = {
       get(target, key, receiver) {
-        if (target[key] && (typeof target[key] === 'object' || typeof target[key] === "function") && key != "body") {
+        var method = Reflect.get(target,key);
+        loggerFunction(target, key, method, "reads");
+        if (key == "__isProxy") return true;
+        if (method && (typeof method === 'object' || typeof method=== "function") && !outOfScopeProperties.includes(key) && !isDOMInheritedProperty(target[key]) && !method.__isProxy) {
           var desc = Object.getOwnPropertyDescriptor(target, key);
-          if (desc && ! desc.configurable && !desc.writable) return _handleNonConfigurableProperties(target,key);
+          if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
           window.proxyReadCount++;
-          var method = Reflect.get(target, key);
-          if (typeof method == "function") {
-            // return function (...args) {
-            //     return method.apply(target, args)
-            // }
-            var _method = method.bind(target);
-            Object.setPrototypeOf(_method, method);
-            return _method;
-          }
-         else return new Proxy(method, handler);
+          // if (window.proxyReadCount % 1000000 == 0)
+          //   alert("window.Proxyreadcount is " + window.proxyReadCount);
+          // if (typeof method == "function") {
+          //   var _method = method._bind(target);
+          //   Object.setPrototypeOf(_method, method);
+          //   if (!isNative(method))
+          //       Object.assign(_method, method);
+          //   return new Proxy(_method,);
+          // }
+          if (key == "apply" || key == "call" || key == "bind") return method;
+          // console.log("Calling get of " + key + " and setting this to ");
+          // console.log(target);
+          var _proxyMethod = methodToProxy.get(method);
+          if (_proxyMethod) return _proxyMethod;
+          var proxyMethod = new Proxy(method, handler);
+          methodToProxy.set(method, proxyMethod);
+          proxyToThis.set(method, target);
+          proxyToMethod.set(proxyMethod, method);
+          return proxyMethod;
         } else {
-          return Reflect.get(target, key);
+          return method;
         }
       },
       set (target, key, value, receiver) {
+        loggerFunction(target, key, value,"writes");
         window.proxyWriteCount++;
         return Reflect.set(target, key, value);
+      },
+      apply (target, thisArg, args) {
+            /*
+                If no thisArg, call it in the context of window ( this happens by default )
+                If the thisArg is a proxy object however it has no corresponding target method, call apply on the proxy object itself.
+                If the thisArg is not a proxy object, call the method on the thisArg itself. 
+            */
+            if (!thisArg) return Reflect.apply(target, window, args);
+            else if (!thisArg.__isProxy) return Reflect.apply(target, thisArg, args);
+            // else if (proxyToMethod.get(thisArg) == null) {
+            //     //throw "No method found for proxy";
+            // }
+            return Reflect.apply(target, proxyToMethod.get(thisArg), args);
+      },
+      construct (target, args) {
+          // return new target(...args);
+          return Reflect.construct(target, args);
       }
     }
 
-    window.{proxyName} = new Proxy(window, handler);
+    var {proxy, revoke} = Proxy.revocable(window, handler);
+    window.{proxyName} = proxy;
+    // window.{proxyName} = window;
+    proxyToMethod.set(proxy, window);
 
 
     this.getShadowStack = function(clear){
@@ -158,8 +326,8 @@ if (typeof {name} === 'undefined') {
         return shadowStack;
     }
 
-    this.getCalleeMap = function() {
-        return calleeMap;
+    this.getCallGraph = function() {
+        return callGraph;
     }
 
     this.getMutations = function() {
@@ -190,8 +358,24 @@ if (typeof {name} === 'undefined') {
         return customLocalStorage;
     }
 
+    this.getProcessedSignature = function() {
+        return processedSignature;
+    }
+
     this.setCustomCache = function(customCache) {
         this.customLocalStorage = customCache;
+    }
+
+    this.getObjectTree = function(){
+        return ObjectTree;
+    }
+
+    this.getObjectToPath = function() {
+        return objectToPath;
+    }
+
+    this.getObjectToId = function(){
+        return ObjectToId;
     }
 
     var accumulateCache = function(nodeId) {
@@ -236,29 +420,41 @@ if (typeof {name} === 'undefined') {
         return readArray[1];
     }
 
-    this.logReturnValue = function(functionIdentifier, returnValue) {
+    this.logReturnValue = function(functionIdentifier, returnValue, proxyReturnValue) {
         customLocalStorage[functionIdentifier]["returnValue"] = returnValue;
         return returnValue;
     }
 
+    var logNonProxyParams = function(nodeId,params){
+        for(var i in params) {
+            try {
+                if (params[i] && !params[i].__isProxy)
+                    customLocalStorage[nodeId]["arguments"]["before"][i] = params[i];
+            } catch (e) {
+                customLocalStorage[nodeId]["arguments"]["before"][i] = params[i];
+            }
+        }
+    }
+
 
     this.cacheAndReplay = function(nodeId, params, info){
-        // if (shadowStack.length) {
-        //     var top = shadowStack[shadowStack.length - 1 ];
-        //     if (!calleeMap[top])
-        //         calleeMap[top] = [];
-        //     calleeMap[top].push(nodeId);
-        // }
+        if (_shadowStackHead)
+            callGraph[_shadowStackHead].push(nodeId)
+        if (!callGraph[nodeId])
+            callGraph[nodeId] = [];
+
         shadowStack.push(nodeId);
         _shadowStackHead = nodeId;
         if (!customLocalStorage[nodeId]) {
             customLocalStorage[nodeId] = {};
-            customLocalStorage[nodeId]["writes"] = {};
-            customLocalStorage[nodeId]["reads"] = {};
-            // if (params.length != 0) {
-            //     customLocalStorage[nodeId]["arguments"] = {};
-            //     customLocalStorage[nodeId]["arguments"]["before"] = params;
-            // }
+            customLocalStorage[nodeId]["writes"] = [];
+            customLocalStorage[nodeId]["reads"] = [];
+            if (params.length != 0) {
+                customLocalStorage[nodeId]["arguments"] = {};
+                customLocalStorage[nodeId]["arguments"]["before"] = {};
+                customLocalStorage[nodeId]["arguments"]["after"] = {};
+                logNonProxyParams(nodeId, params);
+            }
         } else {
             return false;
             // console.log("Cache hit for function " + nodeId);
@@ -283,6 +479,18 @@ if (typeof {name} === 'undefined') {
         //     });           
         // }
         return false;
+    }
+
+    this.exitFunction = function(nodeId, params){
+        shadowStack.pop();
+        if (shadowStack.length) 
+            _shadowStackHead = shadowStack[shadowStack.length - 1];
+        else _shadowStackHead = null;
+
+        if (customLocalStorage[nodeId]["arguments"]) {
+            for (var p in customLocalStorage[nodeId]["arguments"]["before"])
+                customLocalStorage[nodeId]["arguments"]["after"][p] = params[p];
+        }
     }
 
     this.dumpArguments = function(nodeId, params) {
@@ -660,5 +868,250 @@ if (typeof {name} === 'undefined') {
         };
     }
 });
+
+    class SignatureProcessor{
+
+        constructor(signature, objectTree, idToObject, callGraph){
+            this.signature = signature;
+            this.objectTree = objectTree;
+            this.processedSig = {};
+            this.objectToPath = {};
+            this.idToObject = idToObject;
+            this.callGraph = callGraph;
+        }
+
+        process(){
+            var objectToPath = this.objectToPath;
+            var objectTree = this.objectTree;
+            var signature = this.signature;
+            var processedSig = this.processedSig;
+            var idToObject = this.idToObject;
+            var reverseObjectToId = {};
+
+            var init = function(){
+                objectToPath[0] = "window";
+            }
+
+            var _removeRedundantReads = function(nodeId, writeArray){
+                var readLength = signature[nodeId].reads.length;
+                if (readLength) {
+                    while (readLength--){
+                        if ( signature[nodeId].reads[readLength][0] == writeArray[0] && signature[nodeId].reads[readLength][1] == writeArray[1] )
+                            signature[nodeId].reads.splice(readLength, 1);
+                    }
+                }
+            }
+            var removeReduntantReads = function(){
+                for (var nodeId in signature){
+                    if (signature[nodeId].writes.length) {
+                        signature[nodeId].writes.forEach(function(write){
+                            _removeRedundantReads(nodeId, write);
+                        })
+                    }
+                }
+            }
+
+            /*
+            While constructing paths instead of using the dot operator for properties
+            we use the bracket operators for two reasons
+            - If the property is a number
+            - if the property has special symbols like dot itlelf or spaces
+            */
+
+            var constructPath = function(objectId){
+                if (objectToPath[objectId]) return objectToPath[objectId];
+                var path = "";
+                for (var nodeId in objectTree){
+                    for (var edge in objectTree[nodeId]) {
+                        var _id = objectTree[nodeId][edge].indexOf(objectId);
+                        if (_id) {
+                            var parentPath = constructPath(nodeId);
+                            path = parentPath + "['" + edge.substr(2) + "']";
+                            objectToPath[objectId] = path;
+                            return path;
+                        }
+                    }
+                }
+                console.error("NO PATH FOUND FOR OBJECT ID: " + objectId);
+            }
+
+            var reverseLookup = function(objectId) {
+                if (reverseObjectToId[objectId]) return reverseObjectToId[objectId];
+
+            }
+
+            var preProcess = function(){
+                for (var nodeId in objectTree) {
+                    var parentPath = constructPath(nodeId);
+                    if (!parentPath) console.error("NO PARENT PATH FOUND WHILE PREPROCESSING " + nodeId );
+                    for (var edge in objectTree[nodeId]) {
+                        objectTree[nodeId][edge].forEach(function(objectId){
+                             if (!objectToPath[objectId]) {
+                                var path = parentPath + "['" + edge.substr(2) + "']";
+                                objectToPath[objectId] = path;
+                            }
+                        })
+                    }
+                }
+            }
+
+            var fetchValue = function(log){
+                var _id = parseInt(log);
+                if (!isNaN(_id))
+                    return idToObject.get(_id);
+                else
+                    return log.substr(2);
+            }
+
+            var processRead = function(nodeId){
+                var readSignature;
+                var readArray = signature[nodeId].reads;
+                processedSig[nodeId].reads = [];
+                readArray.forEach(function(read){
+                    var parentPath = objectToPath[read[0]];
+                    if (!parentPath) console.log("no parent path found for object id:" + JSON.stringify(read) + " " + nodeId);
+                    try {
+                        var readString;
+                        if (typeof read[1] == 'symbol')
+                            readString = read[1].toString()
+                        else readString = read[1] + '';
+                        var path = parentPath + "['" + readString + "']";
+                        readSignature = path + " = " + JSON.stringify(fetchValue(read[2]));
+                    } catch (e) {
+                        // console.log("Error while trying to stringify path: " + e + e.stack);
+                    }
+                    processedSig[nodeId].reads.push(readSignature);
+                })
+            }
+
+            var processWrite = function(nodeId){
+                var writeSignature;
+                var writeArray = signature[nodeId].writes;
+                processedSig[nodeId].writes = [];
+                writeArray.forEach(function(write){
+                    var parentPath = objectToPath[write[0]];
+                    if (!parentPath) console.log("no parent path found for object id:" + JSON.stringify(write) + " " + nodeId);
+                    var path = parentPath + "['" + write[1] + "']"; 
+                    try {
+                        writeSignature = path + " = " + JSON.stringify(fetchValue(write[2]));
+                    } catch (e) {
+                        // console.log("Error while stringifying path: " + e + e.stack);
+                    }
+                    processedSig[nodeId].writes.push(writeSignature);
+                })
+
+            }
+
+            init();
+            preProcess();
+            //cleanup signatures ie remove a read after write
+            // removeReduntantReads();
+
+            Object.keys(this.signature).forEach(function(nodeId){
+                processedSig[nodeId] = {};
+                if (signature[nodeId].reads.length)
+                    processRead(nodeId)
+                if (signature[nodeId].writes.length)
+                    processWrite(nodeId)
+                processedSig[nodeId].arguments = signature[nodeId].arguments;
+                processedSig[nodeId].returnValue = signature[nodeId].returnValue;
+            });
+
+        }
+
+        postProcess() {
+            var processedSig = this.processedSig;
+
+            var _removeRedundantReads = function(keyArray){
+                var redundantIndices = [];
+                keyArray.forEach(key => {
+                    var indices = keyArray.keys();
+                    for (var i of indices) {
+                        if (key.trim().indexOf(keyArray[i].trim()) >= 0 && keyArray[i].trim() != key.trim())
+                            redundantIndices.push(i);
+                    }
+                });
+
+                return redundantIndices;
+            }
+
+            var removeReduntantReads = function(nodeId){
+                var readArray = processedSig[nodeId].reads;
+                var keys = readArray.map(key => key.split('=')[0].trim());
+                var redundantIndices = _removeRedundantReads(keys);
+                redundantIndices.forEach(index => {
+                    readArray.splice(index, 1);
+                });
+            }
+
+            Object.keys(processedSig).forEach(function(nodeId){
+                // removeReduntantReads(nodeId);
+                var readArray = processedSig[nodeId].reads;
+                if (readArray && readArray.length) {
+                    readArray = new Set(readArray);
+                    processedSig[nodeId].reads = readArray;
+                }
+                var writeArray = processedSig[nodeId].writes;
+                if (writeArray && writeArray.length) {
+                    writeArray = new Set(writeArray);
+                    processedSig[nodeId].writes = writeArray;
+                }
+
+            });
+        }
+
+        signaturePropogate() {
+            var callGraph = this.callGraph;
+            var processedSig = this.processedSig;
+
+            var mergeArray = function(dstSig, srcSig) {
+                srcSig.forEach((sig) => {
+                    dstSig.add(sig);
+                });
+            }
+
+            var mergeInto = function(dstNode, srcNode) {
+                if (processedSig[srcNode].reads) {
+                    if (!processedSig[dstNode].reads) 
+                        processedSig[dstNode].reads = new Set();
+                    mergeArray(processedSig[dstNode].reads, processedSig[srcNode].reads);
+                }
+
+                if (processedSig[srcNode].writes) {
+                    if (!processedSig[dstNode].writes ) 
+                        processedSig[dstNode].writes = new Set();
+                    mergeArray(processedSig[dstNode].writes, processedSig[srcNode].writes);
+                }
+            }
+
+            var traverseGraph = function() {
+                Object.keys(callGraph).forEach((nodeId) => {
+                    var children = callGraph[nodeId];
+                    children.forEach((child) => {
+                        mergeInto(nodeId, child);
+                    });
+                });
+            }
+
+            traverseGraph();
+
+        }
+    }
+
 }
 (function () { {name}.setGlobal(this); })();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

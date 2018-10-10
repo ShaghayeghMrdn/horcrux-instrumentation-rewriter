@@ -139,9 +139,12 @@ var IsLocalVariable = function (node){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
             functionArguments = util.getArgs(parent);
             if (parent.localVariables == undefined) parent.localVariables = []
-            if (parent.localVariables.map(function(e){return e.source()}).includes(identNode.name) || functionArguments.includes(identNode.name) /*|| isGlobalAlias(identNode)*/) { /* Removed checking if the variable exists inside params or not as params also considered global*/
+            /* Special case to handle !function(){} type declarations which are basically function expressions */
+            if (parent.type == "FunctionExpression" && parent.id && parent.id.source() == identNode.name) return 0; 
+            if (parent.localVariables.map(function(e){return e.source()}).includes(identNode.name) /*|| isGlobalAlias(identNode)*/) { /* Removed checking if the variable exists inside params or not as params also considered global*/
                 return 0;
-            }
+            } else if (functionArguments.includes(identNode.name))
+                return -1;
         }
         parent = parent.parent;
     }

@@ -82,10 +82,12 @@ function instrument(src, options) {
 		shebang = m[1];
 		src = src.slice(shebang.length);
 	}
+	// console.log(options);
 	options.proxyName = options.tracer_name +"PROXY";
 	if (options.include_prefix) {
 		prefix += instrumentationPrefix(options);
 		options.prefix = prefix;
+		// console.log(options.prefix);
 	}
 
 	if (src.indexOf("/*theseus" + " instrument: false */") !== -1) {
@@ -311,7 +313,7 @@ var traceFilter = function (content, options) {
 					scope.addLocalVariable(node.handlers[0].param);
 			} else if (node.type == "IfStatement") {
 					var readArray = [];
-					readArray = signature.handleReads(node.test);
+					var {readArray, argReads} = signature.handleReads(node.test);
 					scope.addGlobalReads(readArray);
 
 
@@ -333,7 +335,7 @@ var traceFilter = function (content, options) {
 								scope.addLocalVariable(node);
 								//scope.addGlobalAlias(node,node.init);
 						}
-						scope.addGlobalReads(signature.handleReads(node.init));
+						scope.addGlobalReads(signature.handleReads(node.init).readArray);
 					} else {
 						scope.addLocalVariable(node);
 					}
@@ -365,14 +367,14 @@ var traceFilter = function (content, options) {
 					scope.addLocalVariable(node.left);
 				}
 
-				scope.addGlobalReads(signature.handleReads(node.right));
+				scope.addGlobalReads(signature.handleReads(node.right).readArray);
 			} else if (node.type == "CallExpression") {
 				
 				// Check if the arguments passed are global or not
 				if (node.arguments) {
 					var globalReads = [];
 					node.arguments.forEach(function(param){
-						globalReads = globalReads.concat(signature.handleReads(param));
+						globalReads = globalReads.concat(signature.handleReads(param).readArray);
 					});
 					// add global arguments to read set
 					scope.addGlobalReads(globalReads);
@@ -436,26 +438,26 @@ var traceFilter = function (content, options) {
 		ASTNodes.forEach(function(node) {
 			// console.log("current node: " + node.source() + " " + node.type);
 			if (node.type === "Program") { 
+				// console.log(node.source())
 				update(node, options.prefix,
 					sourceNodes(node))
 			} else if ( (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator')) {
 				if (node.type == "VariableDeclarator"){
-					/* You can alias globals using let as well */
-					// if (node.parent.source().includes("let ")) {
-					// 	scope.addLocalVariable(node);
-					// }
-					if (node.init) {
-						var readArray = signature.handleReads(node.init);
-						if (options.useProxy) {
-							readArray.forEach(function(read){
-								if (util.checkIfReservedWord(read)) return;
-								if (read.source() == "window")
-									update(read, options.proxyName)
-								else
-									update(read, options.proxyName, '.', read.source());
-							})
-						}
-					} 
+					var _functionId = util.getFunctionIdentifier(node);
+					if (_functionId){
+						if (node.init) {
+							var {readArray, argReads} = signature.handleReads(node.init);
+							if (options.useProxy) {
+								readArray.forEach(function(read){
+									if (util.checkIfReservedWord(read)) return;
+									if (read.source() == "window")
+										update(read, options.proxyName)
+									else
+										update(read, options.proxyName, '.', read.source());
+								})
+							}
+						} 
+					}
 
 			    }
 			    // update(node, sourceNodes(node));
@@ -465,9 +467,9 @@ var traceFilter = function (content, options) {
 			} else if (node.type == "AssignmentExpression" || node.type == "LogicalExpression" || node.type == "BinaryExpression"){
 				var _functionId = util.getFunctionIdentifier(node);
 				if (_functionId) {
-					var readArray = signature.handleReads(node.right);
-					var functionId = makeId('function', options.path, _functionId);
-					if (uncacheableFunctions.indexOf(functionId) >= 0) return;
+					var {readArray,argReads} = signature.handleReads(node.right);
+				// 	var functionId = makeId('function', options.path, _functionId);
+				// 	if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 					readArray.forEach(function(read){
 						var newRead = util.logReadsHelper(read, scope.checkAndReplaceAlias(read));
 						// console.log(read.source());
@@ -482,7 +484,7 @@ var traceFilter = function (content, options) {
 						}
 					});
 
-					var readArray = signature.handleReads(node.left);
+					var {readArray, argReads} = signature.handleReads(node.left);
 					readArray.forEach(function(read){
 						if (util.checkIfReservedWord(read)) return;
 						if (read.source() == "window")
@@ -505,12 +507,11 @@ var traceFilter = function (content, options) {
 				}
 
 			} else if (node.type == "IfStatement") {
-					var readArray = [];
-					readArray = signature.handleReads(node.test);
+					var {readArray, argReads} = signature.handleReads(node.test);
 					var _functionId = util.getFunctionIdentifier(node);
 					if (_functionId) {
-						var functionId = makeId('function', options.path, _functionId);
-						if (uncacheableFunctions.indexOf(functionId) >= 0) return;
+					// 	var functionId = makeId('function', options.path, _functionId);
+					// 	if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 						readArray.forEach(function(read){
 							var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
 							if (options.caching)
@@ -531,37 +532,66 @@ var traceFilter = function (content, options) {
 
 			} else if (node.type == "CallExpression") {
 
-				// check if the define expression from requireJS is used or not
-				if (node.callee.source() == "define") {
+				// check if the define/require/requirejs expression from requireJS is used or not
+				var ignoreCallees = ["require", "define", "requirejs"]
+				if (ignoreCallees.includes(node.callee.source())) {
+					// console.log(node.callee.source());
 					update(node, ASTSourceMap.get(node));
 					return;
 				}
-				
+
+				// // console.log(node.callee.source().includes("apply"))
+				/* Any meta function object call won't be instrumented as it is not handled by the proxy handler as of now*/
+				if (node.callee.type != "FunctionExpression" && ["bind","apply","call"].some(r=>{return node.callee.source().includes(r)})){
+					// console.log(node.callee.source() + " with type " + node.callee.type );
+					// update(node, ASTSourceMap.get(node));
+					return;
+				}
+
+				/* Is the function invocation itself a global read or not?????*/
+				var invocationIsRead = false;
+				var {readArray, argReads} = invocationIsRead ? signature.handleReads(node.callee) : {readArray: [], argReads: []};
+
+				readArray.forEach(function(read){
+					if (options.useProxy){
+						if (util.checkIfReservedWord(read)) return;
+						if (read.source() == "window") {
+							update(read, options.proxyName)
+						}
+						else{
+							update(read, options.proxyName, '.', read.source());
+						}
+					}
+				});
+
 				// Check if the arguments passed are global or not
 				if (node.arguments) {
 					var globalReads = [];
 					node.arguments.forEach(function(param){
-						globalReads = globalReads.concat(signature.handleReads(param));
+						var {readArray, argReads} = signature.handleReads(param);
+						globalReads = globalReads.concat(readArray);
 					});
 					var _functionId = util.getFunctionIdentifier(node);
-					if (_functionId) {
-						var functionId = makeId('function', options.path, _functionId);
-						if (uncacheableFunctions.indexOf(functionId) >= 0) return;
+					/* Either the call expression is inside a function or it is a self invoking call expression in the global scope*/
+					if (_functionId || node.callee.type == "FunctionExpression") {
+
 						globalReads.forEach(function(read){
 							var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
 							if (options.caching)
 								update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '],[', util.getAllIdentifiersFromMemberExpression(read),'])');
 							if (options.useProxy){
 								if (util.checkIfReservedWord(read)) return;
-								if (read.source() == "window")
-									update(read, options.proxyName)
-								else
+								if (read.source() == "window") {
+									// update(read, options.proxyName)
+								}
+								else{
+									// console.log(read.source());
+									// console.log(node.callee.source());
 									update(read, options.proxyName, '.', read.source());
+								}
 							}
 						});
 					}
-					// add global arguments to read set
-					// scope.addGlobalReads(globalReads);
 				}
 
 				var globalDOMMethods = Object.keys(propertyObj.global);
@@ -590,7 +620,7 @@ var traceFilter = function (content, options) {
 						}
 					});
 				}
-			} else if (node.type == "ReturnStatement" && node.argument && options.caching) {
+			} else if (node.type == "ReturnStatement" && node.argument) {
 				var _functionId = util.getFunctionIdentifier(node);
 				if (_functionId) {
 					var functionId = makeId('function', options.path, _functionId);
@@ -598,17 +628,23 @@ var traceFilter = function (content, options) {
 					if (node.argument.type == "SequenceExpression" ) {
 						var returnValue = node.argument.expressions[node.argument.expressions.length - 1];
 						var preReturns = node.argument.expressions.slice(0,-1).map(function(e){return e.source()}).join();
-						if (options.caching)
+						if (options.caching || options.useProxy)
 							update(node, 'return ',preReturns ,',', options.tracer_name, 
 							'.logReturnValue(', JSON.stringify(functionId), ',',returnValue.source() ,');');
+						// if (options.useProxy)
+							// update(node, 'return ',preReturns ,',', options.tracer_name, 
+							// '.logReturnValue(', JSON.stringify(functionId), ',', returnValue.source(),
+							// 	',',options.proxyName,'.',returnValue.source(),");");
 					} else {
-						if (options.caching)
+						if (options.caching || options.useProxy)
 							update(node, "return ", options.tracer_name, '.logReturnValue(', JSON.stringify(functionId), ',', node.argument.source(),");");
+						// if (options.useProxy)
+						// 	update(node, "return ", options.tracer_name, '.logReturnValue(', JSON.stringify(functionId), ',', node.argument.source(),
+						// 		',',options.proxyName,'.',node.argument.source(),");");
 					}
 				} else {console.log("ERROR analyses says return is outside function" + node.source())}
-
+			/* This function expression might be a part of the call expression as well however that will be taken care of inside the call expression check itself. */
 			} else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
-				
 				var index = makeId('function', options.path, node.loc);
 				var isCacheable = true;
 				if (uncacheableFunctions.indexOf(index) >= 0){
@@ -633,10 +669,10 @@ var traceFilter = function (content, options) {
 				serializedArgs.returnValue = returnValue;
 				// serializedArgs = {};
 				var _traceBegin = "" + options.tracer_name + ".cacheAndReplay(";// + args + ")) return;"
-				var _traceEnd = options.tracer_name + ".dumpCache(";// + args + ");";
-				update(node.body, '{', 'if ( __tracerRet = ', _traceBegin, JSON.stringify(index) ,', arguments,',
+				var _traceEnd = options.tracer_name + ".exitFunction(";// + args + ");";
+				update(node.body, '{ try {\n', ' var __tracerRet; \nif ( __tracerRet = ', _traceBegin, JSON.stringify(index) ,', arguments,',
 				 JSON.stringify(serializedArgs),')) \n return __tracerRet; \n',
-				 sourceNodes(node.body),'}');
+				 sourceNodes(node.body),'} \n finally { ', _traceEnd, JSON.stringify(index),',arguments', ');} \n }');
 
 				//This is only to add performance api calls to the functions. 
 				// update(node.body, '{', 'try { \n performance.now();\n', sourceNodes(node.body), '\n} finally {performance.now();}}',)

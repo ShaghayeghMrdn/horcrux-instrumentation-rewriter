@@ -1,6 +1,6 @@
 var scope = require('./scopeAnalyzer.js');
 
-var _handleReads = function(node){
+var extractIdentifiers = function(node){
         /*
     The following read types are available for the assignment expression RHS:
     - Identifier
@@ -76,20 +76,22 @@ var _handleReads = function(node){
 var handleReads = function(node) {
     // console.log("handling for reads: " +  node.source() + " " + node.type);
 
-    var readArray = _handleReads(node);
-    // console.log("readArray returned" + readArray.map(function(e){ return e.source()}));
+    var readArray = extractIdentifiers(node);
     // console.log(readArray);
     if (readArray == null) return [];
     var globalReads = [];
+    var argReads = []
     readArray.forEach(function(read){
-        if (scope.IsLocalVariable(read) > 0  ) {
+        var _isLocal = scope.IsLocalVariable(read)
+        if (_isLocal > 0  )
             globalReads.push(read);
-        }
-
+        else if (_isLocal < 0)
+            argReads.push(read);
     });
-    return globalReads;
+    return {readArray: globalReads, argReads: argReads};
 }
 
 module.exports = {
-    handleReads: handleReads
+    handleReads: handleReads,
+    extractIdentifiers: extractIdentifiers
 }
