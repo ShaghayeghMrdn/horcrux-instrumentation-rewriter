@@ -1,23 +1,33 @@
 # $1 -> path to the list of pages
 # $2 -> path to the recorded pages
 # $3 -> path to the output directory
+# $4 -> port for chrome
 
 replay(){
 	mkdir -p $3
-	mm-webreplay $1 node inspectChrome.js -u $2 -c -l -o $3 &
+	mm-webreplay $1 node inspectChrome.js -u $2 -l -t -j --log -o $3 -p $4 &
 	replay_pid=$!
 	#waitForNode
-	sleep 1;
-	waitForNode
-	kill -9 $replay_pid
+	waitForNode $4
+	sleep 1
+	ps aux | grep replayshell | awk '{print $2}' | xargs kill -9
+	# kill -9 $replay_pid
 }
 
 
 waitForNode(){
 	count=0
+	start_time=`date +'%s'`
 	while [[ $count != 1 ]]; do
-		count=`ps aux | grep node | wc | awk '{print $1}'` 
+		count=`ps aux | grep $1 | wc | awk '{print $1}'` 
 		echo "Current count is", $count
+		curr_time=`date +'%s'`
+		elapsed=`expr $curr_time - $start_time`
+		echo $elapsed
+		if [ $elapsed -gt 120 ]; then
+			echo "TIMED OUT..."
+			ps aux | grep $1 | awk '{print $2}' | xargs kill -9
+		fi
 		sleep 2
 	done
 }
@@ -45,6 +55,6 @@ while IFS='' read -r line || [[ -n "$line" ]]; do
 	echo "replaying url: " $line
 	url=`echo $line | cut -d'/' -f 3`
 	path="$2"/"$url"
-	replay $path $line $3/"$url";
-	sleep 3
+	replay $path $line $3/"$url" $4;
+	sleep 2
 done < "$1"
