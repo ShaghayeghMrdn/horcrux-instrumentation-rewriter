@@ -10,7 +10,11 @@ var scope = require('./scopeAnalyzer.js');
 var util = require('./util.js');
 var signature = require('./signature.js');
 var properties = require ("properties");
-
+var e2eTesting = false;
+// Used tp create simple function names for testing purposes
+var functionCounter = 0;
+// Use to store simple function names indexed by their complex counterparts
+var simpleFunctions = {};
 var propertyObj = {};
 const PATH_TO_PROPERTIES = __dirname + "/DOMHelper.ini";
 properties.parse(PATH_TO_PROPERTIES, {path: true, sections: true}, function(err, obj){ propertyObj = obj ;})
@@ -70,11 +74,14 @@ function instrumentationPrefix(options) {
  *       with more than this many invocations
  **/
 function instrument(src, options) {
+	// Since the fondue module is loaded once, re initialize the counter for every new src file
+	functionCounter = 0;
 	var defaultOptions = {
 		include_prefix: true,
 		tracer_name: '__tracer',
 		e2eTesting: false,
 	};
+	e2eTesting = options.e2eTesting;
 	options = mergeInto(options, defaultOptions);
 	var prefix = '', shebang = '', output, m;
 
@@ -108,6 +115,22 @@ function instrument(src, options) {
 
 
 var makeId = function (type, path, loc) {
+	if (e2eTesting) {
+		// console.log(functionCounter);
+		var origPath = path + '-'
+	     + type + '-'
+	     + loc.start.line + '-'
+	     + loc.start.column + '-'
+	     + loc.end.line + '-'
+	     + loc.end.column;
+	    if (simpleFunctions[origPath])
+	    	return simpleFunctions[origPath];
+		var id = "function_" + functionCounter;
+		functionCounter = functionCounter + 1;
+		// console.log( " function counter is " + functionCounter)
+		simpleFunctions[origPath] = id;
+		return id;
+	}
 	return path + '-'
 	     + type + '-'
 	     + loc.start.line + '-'
@@ -252,6 +275,10 @@ var traceFilter = function (content, options) {
 		        }   
 		        parent = parent.parent;
 		    }
+		}
+
+		var isNonDeterministc = function(src) {
+			return ((src.indexOf("random") >= 0) || (src.indexOf("Date") >= 0));
 		}
 
 		m = fala({
@@ -428,6 +455,10 @@ var traceFilter = function (content, options) {
 				if (node.globalReads) node.globalReads = node.globalReads.map(function(e){ return e.source();});
 				if (node.globalWrites) node.globalWrites = node.globalWrites.map(function(e){ return e.source();});
 				if (node.globalAlias) node.globalAlias = printFriendlyAlias(node.globalAlias);
+				var index = makeId('function', options.path, node.loc);
+
+				if (isNonDeterministc(node.source()) && uncacheableFunctions.indexOf(index) < 0)
+					uncacheableFunctions.push(index);
 			}
 		});
 
@@ -647,10 +678,11 @@ var traceFilter = function (content, options) {
 			} else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
 				var index = makeId('function', options.path, node.loc);
 				var isCacheable = true;
-				if (uncacheableFunctions.indexOf(index) >= 0){
+				if (uncacheableFunctions.indexOf(index) >= 0 || isNonDeterministc(node.source())){
 					// console.log("***NEED TO FIX UNCACHEABLE FUNCTIONS****");
-					// return;
+					return;
 				}
+
 				var args = node;
 				var serializedArgs = {};
 				// break into separate arguments

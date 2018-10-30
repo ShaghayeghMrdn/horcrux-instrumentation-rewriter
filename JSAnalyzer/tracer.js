@@ -62,72 +62,83 @@ if (typeof {name} === 'undefined') {
     var e2eTesting = true;
     var functions = new Set();
     var invocations = {};
-    var cacheStats = {};
     var nativeObjectsStore = {};
-    var customLocalStorage = {}; // Use this in place of the localstorage API for faster access. 
-    cacheStats.cacheHit = {};
+    var customLocalStorage = {}; /* Use this in place of the localstorage API for faster access. */
     var counter = 0;
-    var currentMutationContext = null;
     var shadowStack = [];
     var _shadowStackHead;
-    var objectIdCounter = 1;
-    var mutations = new Map();
-    var functionTimerS = {};
-    var functionTimerE = {};
     var ObjectTree = {};
+    var objectIdCounter = 1;
     var proxyToThis = new WeakMap();
     var methodToProxy = new WeakMap();
     var proxyToMethod = new WeakMap();
     var ObjectToId = new WeakMap();
     var idToObject = new Map();
     var processedSignature;
-    var objectToPath; 
-    var pageLoaded = false;
+    var objectToPath;
     var callGraph = {};
+    var functionsSeen = [];
+    var pageRecorded = false;
 
     /* Initialize the object tree with window as the root object*/
     ObjectToId.set(window,0);
-    // console.log(ObjectToId);
     ObjectTree[0] = {};
 
+    var getPageRecorded = localStorage.getItem("recordedPage");
+    if (getPageRecorded) {
+        console.log("Retrieving stored signature from cache")
+        pageRecorded = true;
+        var stringifiedSignature = JSON.parse(localStorage.getItem("PageLocalCache"));
+        for (var nodeId in stringifiedSignature)
+            customLocalStorage[nodeId] = parse(stringifiedSignature[nodeId]);
+        // customLocalStorage = JSON.parse(localStorage.getItem("PageLocalCache"));
+    }
 
-    // window.addEventListener("load", function(){
 
-    //     //Builds the cache object to be dumped in local persistent storage
-    //     // buildCacheObject(customLocalStorage);
-    //     localStorage.setItem("executionCount",1);
-    //     observer.disconnect();
-    // });
+    var storeSignatureInCache = function(signature) {
+        var circularSignatures = 0;
+        var cacheableSignature = {};
+        for (var nodeId in signature) {
+            try {
+                cacheableSignature[nodeId] = stringify(signature[nodeId]);
+            } catch (e) {
+                circularSignatures++;
+            }
+        }
 
-    // var targetNode = document;
-    // var config = {attributes: true, childList: true, characterData: true, subtree: true, attributeOldValue: true, characterDataOldValue: true};
-    // var callback = function(mutationsList) {
-    //     if (currentMutationContext) {
-    //         if (!mutations.get(currentMutationContext))
-    //             mutations.set(currentMutationContext, []);
-    //         var lMutations = mutations.get(currentMutationContext);
-    //         lMutations.push.apply(lMutations, mutationsList);
-
-    //         currentMutationContext = null;
-    //     }
-    // };
+        localStorage.setItem("PageLocalCache", JSON.stringify(cacheableSignature));
+        console.log("Dumped the signature");
+        console.log("Number of functions with circular objects in their signature " + circularSignatures);
+        console.log("compared to total number of nodes  " + Object.keys(signature).length);
+    }
 
     window.addEventListener("load", function(){
-        console.log("PROXY STATS");
-        console.log(window.proxyReadCount, window.proxyWriteCount);
-        pageLoaded = true;
-        window.{proxyName} = window;
-        
-        // Process the signature to construct meaningful paths
-        var sigProcessor = new SignatureProcessor(customLocalStorage, ObjectTree, idToObject, callGraph);
-        sigProcessor.process();
-        sigProcessor.postProcess();
-        sigProcessor.signaturePropogate();
-        /*
-        Setting the global variables with class fields
-        */
-        processedSignature = sigProcessor.processedSig;
-        objectToPath = sigProcessor.objectToPath;
+        if (!pageRecorded) {
+            console.log("PROXY STATS");
+            console.log(window.proxyReadCount, window.proxyWriteCount);
+            window.{proxyName} = window;
+            
+            // Process the signature to construct meaningful paths
+            var sigProcessor = new SignatureProcessor(customLocalStorage, ObjectTree, idToObject, callGraph);
+            sigProcessor.process();
+            sigProcessor.postProcess();
+
+            //Commenting out signature propogation for now
+            // sigProcessor.signaturePropogate();
+            /*
+            Setting the global variables with class fields
+            */
+            processedSignature = sigProcessor.processedSig;
+            objectToPath = sigProcessor.objectToPath;
+
+            storeSignatureInCache(processedSignature);
+            // console.log("Dumping cache to local storage")
+            // localStorage.setItem("PageLocalCache", JSON.stringify(processedSignature));
+            // localStorage.setItem("recordedPage", 1);
+        } else {
+            console.log("Page successfully replayed");
+        }
+
     })
 
     // var observer = new MutationObserver(callback);
@@ -186,7 +197,7 @@ if (typeof {name} === 'undefined') {
     var loggerFunction = function(target, key, value, logType){
         if (key == "__isProxy" || key == "top" || key == "parent" || document.readyState == "complete") return;
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
-        if (!nodeId) return;
+        if (!nodeId || (nodeId && functionsSeen.indexOf(nodeId) >= 0)) return;
         var rootId;
         var _rootId = ObjectToId.get(target);
         if (_rootId != null)
@@ -263,6 +274,7 @@ if (typeof {name} === 'undefined') {
         var method = Reflect.get(target,key);
         loggerFunction(target, key, method, "reads");
         if (key == "__isProxy") return true;
+        /* If method type if function, don't wrap in proxy for now */
         if (method && (typeof method === 'object' || typeof method=== "function") && !outOfScopeProperties.includes(key) && !isDOMInheritedProperty(target[key]) && !method.__isProxy) {
           var desc = Object.getOwnPropertyDescriptor(target, key);
           if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
@@ -276,7 +288,11 @@ if (typeof {name} === 'undefined') {
           //       Object.assign(_method, method);
           //   return new Proxy(_method,);
           // }
-          if (key == "apply" || key == "call" || key == "bind") return method;
+          /*
+          The following check is kind of inconsequental, cause even if you have a proxy around the method call or apply, the apply handler 
+          will be anyway called
+          */
+          if (key == "apply" || key == "call") return method;
           // console.log("Calling get of " + key + " and setting this to ");
           // console.log(target);
           var _proxyMethod = methodToProxy.get(method);
@@ -295,6 +311,13 @@ if (typeof {name} === 'undefined') {
         window.proxyWriteCount++;
         return Reflect.set(target, key, value);
       },
+
+      /*
+      Let p be a proxy object. The following event handler will be called :
+       - if p if a function itself, p(arg) : target -> p, thisArg -> window, args = args
+       - if you do p.call or p.apply, first you go inside the get handler, read the value, and then go inside the apply handler
+      */
+
       apply (target, thisArg, args) {
             /*
                 If no thisArg, call it in the context of window ( this happens by default )
@@ -311,13 +334,20 @@ if (typeof {name} === 'undefined') {
       construct (target, args) {
           // return new target(...args);
           return Reflect.construct(target, args);
-      }
+      },
+      setPrototypeOf (target, prototype) {
+        return Reflect.setPrototypeOf(target, prototype);
+      },
+
     }
 
     var {proxy, revoke} = Proxy.revocable(window, handler);
     window.{proxyName} = proxy;
     // window.{proxyName} = window;
     proxyToMethod.set(proxy, window);
+
+    if (pageRecorded)
+        window.{proxyName} = window;
 
 
     this.getShadowStack = function(clear){
@@ -460,17 +490,18 @@ if (typeof {name} === 'undefined') {
             // console.log("Cache hit for function " + nodeId);
             var returnValue = customLocalStorage[nodeId]["returnValue"] ? customLocalStorage[nodeId]["returnValue"] : true;
             if (params && customLocalStorage[nodeId]["arguments"]){
-                Object.keys(params).forEach(function(ind){
+                Object.keys(customLocalStorage[nodeId]["arguments"]["after"]).forEach(function(ind){
                     params[ind] = customLocalStorage[nodeId]["arguments"]["after"][ind];
                 });
             }
+            if (customLocalStorage[nodeId]["writes"]) {
+                for (var writeIndex  = 0; writeIndex < customLocalStorage[nodeId]["writes"].length; writeIndex++) {
+                    var evalString = customLocalStorage[nodeId]["writes"][writeIndex];
+                    eval(evalString);
+                };
+            }
 
-            Object.keys(customLocalStorage[nodeId]["writes"]).forEach(function(write){
-                var evalString = write + " = " + stringify(customLocalStorage[nodeId][write])
-                eval(evalString);
-            });
-
-            // return returnValue;
+            return returnValue;
         }
         // if (globalReads.length) {
         //     globalReads.forEach(function(read, it){
@@ -482,6 +513,7 @@ if (typeof {name} === 'undefined') {
     }
 
     this.exitFunction = function(nodeId, params){
+        functionsSeen.push(nodeId);
         shadowStack.pop();
         if (shadowStack.length) 
             _shadowStackHead = shadowStack[shadowStack.length - 1];
@@ -612,14 +644,9 @@ if (typeof {name} === 'undefined') {
         return (/\{\s*\[native code\]\s*\}/).test('' + fn);
     }
 
-    var stringify = function (obj) {
+    function stringify(obj) {
 
         return JSON.stringify(obj, function (key, value) {
-            var DUMMYOBJ = {}
-          // if (value == document || value == window ) 
-          //   return DUMMYOBJ;
-          // if (value && value.self == value)
-          //   return DUMMYOBJ;
 
           var fnBody;
           if (value instanceof Function || typeof value == 'function') {
@@ -630,7 +657,7 @@ if (typeof {name} === 'undefined') {
             }
             fnBody = value.toString();
 
-            if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { //this is ES6 Arrow Function
+            if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { /*this is ES6 Arrow Function*/
               return '_NuFrRa_' + fnBody;
             }
             return fnBody;
@@ -642,7 +669,7 @@ if (typeof {name} === 'undefined') {
         });
     };
 
-    var parse = function (str, date2obj) {
+    function parse(str, date2obj) {
 
     var iso8061 = date2obj ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/ : false;
 
@@ -676,14 +703,6 @@ if (typeof {name} === 'undefined') {
         return value;
         });
     };
-
-	this.Array = Array;
-
-    var isReplay = localStorage.getItem("executionCount");
-    if (isReplay){
-        // customLocalStorage = extractCacheObject();
-        console.log("Restored custom local storage");
-    }
 
     toJSON = function(node) {
         node = node || this;
@@ -725,7 +744,7 @@ if (typeof {name} === 'undefined') {
         }
         var node, nodeType = obj.nodeType;
         switch (nodeType) {
-        case 1: //ELEMENT_NODE
+        case 1: 
           node = document.createElement(obj.tagName);
           var attributes = obj.attributes || [];
           for (var i = 0, len = attributes.length; i < len; i++) {
@@ -733,19 +752,19 @@ if (typeof {name} === 'undefined') {
             node.setAttribute(attr[0], attr[1]);
           }
           break;
-        case 3: //TEXT_NODE
+        case 3: 
           node = document.createTextNode(obj.nodeValue);
           break;
-        case 8: //COMMENT_NODE
+        case 8: 
           node = document.createComment(obj.nodeValue);
           break;
-        case 9: //DOCUMENT_NODE
+        case 9: 
           node = document.implementation.createDocument();
           break;
-        case 10: //DOCUMENT_TYPE_NODE
+        case 10: 
           node = document.implementation.createDocumentType(obj.nodeName);
           break;
-        case 11: //DOCUMENT_FRAGMENT_NODE
+        case 11: 
           node = document.createDocumentFragment();
           break;
         default:
@@ -765,13 +784,13 @@ if (typeof {name} === 'undefined') {
             "use strict";
 
 
-            var objects = new WeakMap();     // object to path mappings
+            var objects = new WeakMap();     /* object to path mappings*/
 
             return (function derez(value, path) {
 
 
-                var old_path;   // The path of an earlier occurance of value
-                var nu;         // The new object or array
+                var old_path;   
+                var nu;         
 
     // If a replacer function was provided, then call it to get a replacement value.
 
@@ -867,6 +886,8 @@ if (typeof {name} === 'undefined') {
             return $;
         };
     }
+
+
 });
 
     class SignatureProcessor{
@@ -891,6 +912,30 @@ if (typeof {name} === 'undefined') {
             var init = function(){
                 objectToPath[0] = "window";
             }
+
+            var stringify = function (obj) {
+
+                return JSON.stringify(obj, function (key, value) {
+
+                  var fnBody;
+                  if (value instanceof Function || typeof value == 'function') {
+
+                    if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
+                        return {};
+                    }
+                    fnBody = value.toString();
+
+                    if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { //this is ES6 Arrow Function
+                      return '_NuFrRa_' + fnBody;
+                    }
+                    return fnBody;
+                  }
+                  if (value instanceof RegExp) {
+                    return '_PxEgEr_' + value;
+                  }
+                  return value;
+                });
+            };
 
             var _removeRedundantReads = function(nodeId, writeArray){
                 var readLength = signature[nodeId].reads.length;
@@ -976,11 +1021,12 @@ if (typeof {name} === 'undefined') {
                             readString = read[1].toString()
                         else readString = read[1] + '';
                         var path = parentPath + "['" + readString + "']";
-                        readSignature = path + " = " + JSON.stringify(fetchValue(read[2]));
+                        readSignature = path + " = " + stringify(fetchValue(read[2]));
                     } catch (e) {
-                        // console.log("Error while trying to stringify path: " + e + e.stack);
+                        console.log("Error while trying to stringify path: " + e + e.stack);
                     }
-                    processedSig[nodeId].reads.push(readSignature);
+                    if (readSignature)
+                        processedSig[nodeId].reads.push(readSignature);
                 })
             }
 
@@ -993,11 +1039,12 @@ if (typeof {name} === 'undefined') {
                     if (!parentPath) console.log("no parent path found for object id:" + JSON.stringify(write) + " " + nodeId);
                     var path = parentPath + "['" + write[1] + "']"; 
                     try {
-                        writeSignature = path + " = " + JSON.stringify(fetchValue(write[2]));
+                        writeSignature = path + " = " + stringify(fetchValue(write[2]));
                     } catch (e) {
-                        // console.log("Error while stringifying path: " + e + e.stack);
+                        console.log("Error while stringifying path: " + e + e.stack);
                     }
-                    processedSig[nodeId].writes.push(writeSignature);
+                    if (writeSignature)
+                        processedSig[nodeId].writes.push(writeSignature);
                 })
 
             }
@@ -1009,9 +1056,9 @@ if (typeof {name} === 'undefined') {
 
             Object.keys(this.signature).forEach(function(nodeId){
                 processedSig[nodeId] = {};
-                if (signature[nodeId].reads.length)
+                if (signature[nodeId].reads && signature[nodeId].reads.length)
                     processRead(nodeId)
-                if (signature[nodeId].writes.length)
+                if (signature[nodeId].writes && signature[nodeId].writes.length)
                     processWrite(nodeId)
                 processedSig[nodeId].arguments = signature[nodeId].arguments;
                 processedSig[nodeId].returnValue = signature[nodeId].returnValue;
@@ -1039,23 +1086,26 @@ if (typeof {name} === 'undefined') {
                 var readArray = processedSig[nodeId].reads;
                 var keys = readArray.map(key => key.split('=')[0].trim());
                 var redundantIndices = _removeRedundantReads(keys);
-                redundantIndices.forEach(index => {
-                    readArray.splice(index, 1);
-                });
+                for (var index = redundantIndices.length-1; index >= 0; index--)
+                    readArray.splice(redundantIndices[index],1);
+                // redundantIndices.forEach(index => {
+                //     readArray.splice(index, 1);
+                // });
             }
 
             Object.keys(processedSig).forEach(function(nodeId){
-                // removeReduntantReads(nodeId);
-                var readArray = processedSig[nodeId].reads;
-                if (readArray && readArray.length) {
-                    readArray = new Set(readArray);
-                    processedSig[nodeId].reads = readArray;
-                }
-                var writeArray = processedSig[nodeId].writes;
-                if (writeArray && writeArray.length) {
-                    writeArray = new Set(writeArray);
-                    processedSig[nodeId].writes = writeArray;
-                }
+                if (processedSig[nodeId].reads)
+                    removeReduntantReads(nodeId);
+                // var readArray = processedSig[nodeId].reads;
+                // if (readArray && readArray.length) {
+                //     readArray = new Set(readArray);
+                //     processedSig[nodeId].reads = readArray;
+                // }
+                // var writeArray = processedSig[nodeId].writes;
+                // if (writeArray && writeArray.length) {
+                //     writeArray = new Set(writeArray);
+                //     processedSig[nodeId].writes = writeArray;
+                // }
 
             });
         }
@@ -1071,14 +1121,14 @@ if (typeof {name} === 'undefined') {
             }
 
             var mergeInto = function(dstNode, srcNode) {
-                if (processedSig[srcNode].reads) {
-                    if (!processedSig[dstNode].reads) 
+                if (processedSig[srcNode] && processedSig[srcNode].reads) {
+                    if (processedSig[dstNode] && !processedSig[dstNode].reads) 
                         processedSig[dstNode].reads = new Set();
                     mergeArray(processedSig[dstNode].reads, processedSig[srcNode].reads);
                 }
 
-                if (processedSig[srcNode].writes) {
-                    if (!processedSig[dstNode].writes ) 
+                if (processedSig[srcNode] && processedSig[srcNode].writes) {
+                    if (processedSig[dstNode] && !processedSig[dstNode].writes ) 
                         processedSig[dstNode].writes = new Set();
                     mergeArray(processedSig[dstNode].writes, processedSig[srcNode].writes);
                 }
