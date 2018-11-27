@@ -5,16 +5,21 @@
 
 replay(){
 	mkdir -p $3
-	mm-webreplay $1 node inspectChrome.js -u $2 -l -t -j --log -o $3 -p $4 &
+	#mm-webreplay $1 node inspectChrome.js -u $2 -l --coverage -t -j --log -o $3 -p $4 &> replayOutput/`echo $2 | cut -d '/' -f3` &
+	#mm-webreplay $1 node inspectChrome.js -u $2 -l --log -o $3 -p $4 &
+    mm-webreplay $1 node inspectChrome.js -u $2 -l -t -j --log -o $3 -p $4 &> results/replayOutput/`echo $2 | cut -d '/' -f3` &
 	replay_pid=$!
 	#waitForNode
 	waitForNode $4
+	echo "Done waiting"
 	sleep 1
 	ps aux | grep replayshell | awk '{print $2}' | xargs kill -9
 	# kill -9 $replay_pid
 }
 
 
+# The comparison of count variable is with 2, because for some reason there is an additional 
+# process started by root on the same node port
 waitForNode(){
 	count=0
 	start_time=`date +'%s'`
@@ -24,10 +29,10 @@ waitForNode(){
 		curr_time=`date +'%s'`
 		elapsed=`expr $curr_time - $start_time`
 		echo $elapsed
-		if [ $elapsed -gt 120 ]; then
-			echo "TIMED OUT..."
-			ps aux | grep $1 | awk '{print $2}' | xargs kill -9
-		fi
+		# if [ $elapsed -gt 120 ]; then
+		# 	echo "TIMED OUT..."
+		# 	ps aux | grep $1 | awk '{print $2}' | xargs kill -9
+		# fi
 		sleep 2
 	done
 }

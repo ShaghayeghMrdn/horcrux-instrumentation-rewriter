@@ -14,7 +14,7 @@ waitForChrome(){
 		n_time=`date +'%s'`
 		elapsed=`expr $n_time - $curr_time`
 		echo "Elapsed time since: ", $elapsed
-		if [ $elapsed -gt 20 ]; then
+		if [ $elapsed -gt 30 ]; then
 			echo "TIMED OUT..."
 			ps aux | grep 9222 | awk '{print $2}' | xargs kill -9
 		fi
