@@ -24,6 +24,9 @@ program
 	.option('--log', 'extract console log')
     .option('--coverage', 'extract coverage information')
 	.option('-n, --network','extract network information')
+    .option('-m, --mobile','running chrome on mobile')
+    .option('-e, -error [errpr]','file containing errorous urls')
+    .option('--sim [sim]','enable network simulation')
 	.parse(process.argv)
 
 pageLoadTime = {}
@@ -32,8 +35,10 @@ consoleLog2 = [];
 NetworkLog = [];
 spinOnCustom = true;
 function navigate(launcher){
-	// console.log(program.port);
-	Chrome({port:Number(program.port)},async function (chrome) {
+	let local = false;
+    if (program.mobile)
+        local = true;
+	Chrome({port:Number(program.port), local: local},async function (chrome) {
 		with (chrome) {
 			await Page.enable();
 			await Profiler.enable();
@@ -41,6 +46,15 @@ function navigate(launcher){
 			await Network.enable();
 			await Log.enable();
 
+            let errFile = null;
+            if (program.error){
+                errFile = fs.readFileSync(program.error,'utf-8').split('\n');
+                if (errFile.indexOf(program.url) >=0 ){
+                    console.log("Exiting because this is an errornous url as observed in past");
+                    chrome.close();
+                    process.exit();
+                }
+            }
             /*
             Set time out to detect crashes.
             In case of a crash dump whatever information is available, specially crash logs
@@ -51,9 +65,22 @@ function navigate(launcher){
                     fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
                     console.log("Console data logged");
                 };
-                spawnSync("ps aux | grep " +  program.port + " | awk '{print $2}' | xargs kill -9",{shell:true});
+                // Push the url in the errFile before exiting
+                fs.appendFileSync("./" + program.error, program.url);
                 chrome.close();
-            }, 65000)
+                spawnSync("ps aux | grep " +  program.port + " | awk '{print $2}' | xargs kill -9",{shell:true});
+            }, 85000)
+
+            if (program.sim){
+                var simConfig = JSON.parse(fs.readFileSync(program.sim, "utf-8"));
+                console.log("Loading sim data: " + JSON.stringify(simConfig))
+                Network.emulateNetworkConditions(simConfig);
+                Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36"});
+                Emulation.setDeviceMetricsOverride({width:411, height: 731, mobile:true, deviceScaleFactor:0 })
+
+            }
+
+            // Network.emulateNetworkConditions({offline:false, latency:40, downloadThroughput:1000 * 1024/8, uploadThroughput:750 * 1024/8,connectionType: "cellular4g"})
 
 
 			if (program.jsProfiling) 
@@ -66,7 +93,7 @@ function navigate(launcher){
 				    });
 
 			if (program.network){
-				await NetworkEventHandlers(Network, program.output + "/network");
+				NetworkEventHandlers(Network, program.output + "/network");
 			}
 
             if (program.coverage)
@@ -86,17 +113,22 @@ function navigate(launcher){
             })
 
             Runtime.consoleAPICalled((entry) =>{
-                consoleLog.push(entry);
+                //Don't log regular console messages
+                // consoleLog.push(entry);
             })
 
-            Log.entryAdded((entry)=>{consoleLog.push(entry)})
+            Log.entryAdded((entry)=>{
+                // consoleLog.push(entry)
+            })
 
-            if (program.url)
+            if (program.url) {
                 await Page.navigate({'url':program.url});
+                console.log("Page navigated");
+            }
 
             await Page.loadEventFired();
-            console.log("Load event fired");
-            await extractPageLoadTime(Runtime);
+            console.log("First load event fired");
+            await extractPageLoadTime(Runtime, "/plt");
 
             if (program.coverage) {
                 var _coverageData = await Profiler.takePreciseCoverage();
@@ -114,11 +146,15 @@ function navigate(launcher){
                 console.log("Tracing data logged");
             }
 
-            if (program.network) 
-                writeFileSync(program.output + "/network", JSON.stringify(NetworkLog));
+            // if (program.network) 
+            //     fs.writeFileSync(program.output + "/network", JSON.stringify(NetworkLog));
 
             if (program.custom) {
-                   customCodes.getCacheStats(Runtime, program.output);
+                   await customCodes.getCacheStats(Runtime, program.output);
+                   await customCodes.getCustomStat('__tracer.getNonCacheableFunctions()', Runtime, program.output + "/noncache");
+                   await customCodes.getCustomStat('__tracer.getCallGraph()', Runtime, program.output + "/callgraph");
+                   await customCodes.getCacheSize(Runtime, program.output);
+                   // await customCodes.getFunctionStats(Runtime, program.output);
                    // await extractInvocationInformation(Runtime, chrome, launcher,Page, count);
                    console.log("Custom data logged");
                }
@@ -137,12 +173,12 @@ function navigate(launcher){
             spawnSync("ps aux | grep " +  program.port + " | awk '{print $2}' | xargs kill -9",{shell:true});
             // a=spawnSync("ps aux | grep replayshell | awk '{print $2}' | xargs kill -9",{shell:true});
             chrome.close();
+            process.exit();
 
 		}
 	}).on('error', function(er){
 		console.log("can't connect to chrome", er);
 	});
-    console.log("Synchronously executed before");
 }
 
 // async function getJSCoverage()
@@ -150,14 +186,32 @@ function navigate(launcher){
 async function NetworkEventHandlers(Network, file){
     console.log("Network trace file: " + file)
     await mkdirp(file.split('/').slice(0,-1).join('/'));
+    // Network.requestWillBeSent(function(data){
+    //     NetworkLog.push(data);
+    // });
     Network.requestWillBeSent(function(data){
-        NetworkLog.push(data);
+        fs.appendFileSync(file, JSON.stringify({"Network.requestWillBeSent":data})+"\n");
+    });
+    Network.requestServedFromCache(function(data){
+        fs.appendFileSync(file, JSON.stringify({"Network.requestServedFromCache":data})+"\n");
+    });
+
+    Network.responseReceived(function(data){
+        fs.appendFileSync(file, JSON.stringify({"Network.responseReceived":data})+"\n");
+    });
+
+    Network.dataReceived(function(data){
+        fs.appendFileSync(file, JSON.stringify({"Network.dataReceived":data})+"\n");
+    });
+
+    Network.loadingFinished(function(data){
+        fs.appendFileSync(file, JSON.stringify({"Network.loadingFinished":data})+"\n");
     });
 
 }
 
 
-async function extractPageLoadTime(Runtime){
+async function extractPageLoadTime(Runtime, outputFile){
     var _query  = await Runtime.evaluate({expression: 'performance.timing.navigationStart'})
     pageLoadTime["startTime"] = _query.result.value
     var _query  = await Runtime.evaluate({expression: 'performance.timing.loadEventEnd'})
@@ -169,7 +223,7 @@ async function extractPageLoadTime(Runtime){
     pageLoadTime["actualLoadTime"] = pageLoadTime["loadStartTime"] - pageLoadTime["startTime"];
 
     console.log("Dump performance timing information to file ");
-    fs.writeFileSync(program.output + "/plt", JSON.stringify(pageLoadTime));
+    fs.writeFileSync(program.output + outputFile, JSON.stringify(pageLoadTime));
 }
 
 async function extractInvocationInformation(Runtime, chrome, launcher, Page,iter){
@@ -196,6 +250,7 @@ async function extractInvocationInformation(Runtime, chrome, launcher, Page,iter
     keys = _query.result.value;
    
    if (!keys.length) {
+    fs.writeFileSync(program.output + "/Signature", JSON.stringify({}, null, 4));
     console.log("No entry in processed Signature");
     return;
    }
@@ -258,7 +313,12 @@ chromeLauncher.launch({
 	port:Number(program.port),
 	chromeFlags: [
 		'--ignore-certificate-errors',
+        '--disable-web-security',
+        '--disable-extensions ',
 		 // '--headless',
+         // '--v8-cache-options=off',
+         // '--js-flags="--compilation-cache false"',
+         // '--user-data-dir=/tmp/chromeProfiles/' + program.url.split('//')[1]
 		 '--user-data-dir=/tmp/nonexistent' + (new Date).getTime(),
 	]
 }).then(chrome => {
@@ -266,7 +326,7 @@ chromeLauncher.launch({
 	navigate(chrome);
 });
 } else {
-	spawnSync("chromium-browser --remote-debugging-port=9222 --ignore-certificate-errors --user-data-dir=/tmp/nonexistent$(date +%s%N) ; sleep 6");
+	// spawnSync("chromium-browser --remote-debugging-port=9222 --ignore-certificate-errors --user-data-dir=/tmp/nonexistent$(date +%s%N) ; sleep 6");
 	console.log("chrome launched");
 	navigate(); 
 }

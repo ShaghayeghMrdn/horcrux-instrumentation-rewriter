@@ -227,6 +227,107 @@
       return detected;
     }
 
+        this.compareAndCache = function(nodeId, params, globalReads, info) {
+        customLocalStorage[nodeId] = {};
+        customLocalStorage[nodeId]["writes"] = {};
+        return false;
+        try {
+            if (!(nodeId in invocations))
+                invocations[nodeId] = 0;
+            invocations[nodeId]++;
+            functions.add(nodeId);
+            var cacheObjectReads = this.parse.call(this, localStorage.getItem(nodeId + "-reads") || null);
+            var gthis = this;
+            if (cacheObjectReads){
+                Object.keys(cacheObjectReads).forEach(function(read){
+                    if (read == "params") {
+                        try {
+                            if (!(gthis.stringify.call(gthis, params) == cacheObjectReads[read])) {
+                                // console.log("arguments match failed for " + nodeId + " "  + JSON.stringify(params)  + cacheObjectReads[read] );
+                                return false;
+                            } 
+                        } catch (e) {
+                            // console.log("[WARNING] stringifying circular object: " + nodeId);
+                            return false;
+                        }
+                    }
+                    else if (!(gthis.stringify.call(gthis,eval(read)) == gthis.stringify.call(gthis,cacheObjectReads[read]))) {
+                        // console.log("cache exists but didn't match for function: " + nodeId + " different read:" + JSON.stringify(arguments));
+                        return false;
+                    }
+
+                }); 
+                var cacheObjectWrites = this.parse.call(this,localStorage.getItem(nodeId + "-writes") || null);
+                var returnValue = true;
+                // console.log("Cache hit for function: " + nodeId);
+                if (!(nodeId in cacheStats.cacheHit))
+                    cacheStats.cacheHit[nodeId] = 0;
+
+                cacheStats.cacheHit[nodeId]++;
+                if (cacheObjectWrites) {
+                    Object.keys(cacheObjectWrites).forEach(function(write){
+                        if (!write.includes("returnValue")) eval(write + "= " + gthis.stringify.call(gthis,cacheObjectWrites[write]));
+                        else returnValue = cacheObjectWrites[write];
+                    });
+                }
+                return false;
+            }
+
+            // If cache doesn't exist, then update cache, however if it does, no version control:
+            // console.log("Cache doesn't yet exist for : " + nodeId);
+            var serializedObject = {};
+            if (globalReads.length) {
+                globalReads.forEach(function(read, it){
+                    if (it%2==0 && !isNative(globalReads[it+1]))
+                        serializedObject[read] = globalReads[it+1]; 
+                });
+            }
+
+            serializedObject["params"] = this.stringify.call(this,params);
+            // console.log("setting read cache value for " + nodeId + " " + this.stringify(serializedObject));
+            localStorage.setItem(nodeId + "-reads", this.stringify.call(this,serializedObject));
+            return false;
+        } catch (e) { 
+            // console.log("[WARNING][COMPARECACHE] warning raised while comparing the cache" + e + e.stack); 
+            return false;
+        }
+    }
+
+        // var buildCacheObject = function(nodeId, globalWrites, returnValue) {
+    //     // console.log(local"building cache for " + info.nodeId)
+    //     try {
+    //         // console.log("the return value is: " + returnValue);
+    //         var serializedObject = {};
+    //         if (returnValue)  {
+    //             serializedObject["returnValue"] = returnValue;
+    //         }
+    //         if (globalWrites.length) {
+    //             globalWrites.forEach(function(write, it){
+    //                 if (it%2==0 && !isNative(globalWrites[it+1]))
+    //                     serializedObject[write] = globalWrites[it+1]; 
+    //                 // console.log(info.nodeId + "the cache object looks like: " + JSON.stringify(serializedObject));
+    //             });
+    //         }
+    //         // console.log("Cache looks like "  + JSON.stringify(serializedObject));
+    //         return serializedObject;
+    //     } catch (e) {
+    //         // console.log("[WARNING] Building cache object "  + e + e.stack);
+    //         return {};
+    //     }
+    // }
+
+    this.dumpCache = function(nodeId, globalWrites, returnValue) {
+        return;
+        try {
+            var _cacheValue = buildCacheObject(nodeId, globalWrites, returnValue);
+            var cacheValue =  this.stringify.call(this, _cacheValue);
+            // console.log("Dupming cache for " + nodeId + " with length " + cacheValue.length);
+            localStorage.setItem(nodeId + "-writes", cacheValue);
+        } catch (dumpErr) {
+            // do nothing as of now. 
+        }
+    }
+
 
 
 

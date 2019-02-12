@@ -12,7 +12,7 @@ program
     .option("-i, --input [input]","path to the input file")
     .option("-n, --name [name]", "name of the file being instrumented")
     .option("-t , --type [type]", "[HTML | Javascript (js)]", "html")
-    .option("--cache-toggle [cacheToggle]" , "Record (0) or replay (1) cache ")
+    .option("-j, --js-profile [file]","profile containing js runtime information")
     .parse(process.argv)
 
 /* 
@@ -33,23 +33,32 @@ function instrumentHTML(src, fondueOptions) {
 
     if (!isHtml)
         return instrumentJavaScript(src, fondueOptions);
-    
+
     console.log("Instrumenting a html file");
     var scriptLocs = [];
     var scriptBeginRegexp = /<\s*script[^>]*>/ig;
     var scriptEndRegexp = /<\s*\/\s*script/i;
     var lastScriptEnd = 0;
+    var match, newline = /\n/ig;
 
-    var match;
     while (match = scriptBeginRegexp.exec(src)) {
+        var scriptOffset = 0;
         var scriptBegin = match.index + match[0].length;
         if (scriptBegin < lastScriptEnd) {
             continue;
         }
+        /*
+        The slicing takes care of whether there is. a new line
+        immediately after the <Script> tag or not, because 
+        it will account for the correct offset
+        */
+        var _prevScript = src.slice(0,scriptBegin+1);
+        while(nMatch = newline.exec(_prevScript))
+            scriptOffset++;
         var endMatch = scriptEndRegexp.exec(src.slice(scriptBegin));
         if (endMatch) {
             var scriptEnd = scriptBegin + endMatch.index;
-            scriptLocs.push({ start: scriptBegin, end: scriptEnd });
+            scriptLocs.push({ start: scriptBegin, end: scriptEnd , offset: scriptOffset});
             lastScriptEnd = scriptEnd;
         }
     }
@@ -60,7 +69,12 @@ function instrumentHTML(src, fondueOptions) {
         var script = src.slice(loc.start, loc.end);
         // console.log("Script to be instrumented: " + script)
         var options = mergeInto(fondueOptions, {});
+        //use to store the original value of path
+        //since its value is modify to unqiue identify every in html script
+        options.origPath = options.path;
         options.path = options.path + "-script-" + i;
+        //Add the script offset to be sent to the instrumentation script
+        options.scriptOffset = loc;
         var prefix = src.slice(0, loc.start).replace(/[^\n]/g, " "); // padding it out so line numbers make sense
         // console.log("Instrumenting " + JSON.stringify(loc));
         src = src.slice(0, loc.start) + instrumentJavaScript(prefix + script, options, true) + src.slice(loc.end);
@@ -91,7 +105,6 @@ function instrumentJavaScript(src, fondueOptions, jsInHTML) {
         // console.log("Instrumenting a snippet of js: ");
     }
     src = fondue.instrument(src, fondueOptions).toString();
-    // console.log("After instrumentation the source becomes: ");
     return src;
 }
 
@@ -104,19 +117,28 @@ function mergeInto(options, defaultOptions) {
     return defaultOptions;
 }
 
-//Required for the fondue library, to determine how to instrument
-var fondueOptions = mergeInto({}, {useProxy: true, caching: false,  include_prefix: false, path: program.name, e2eTesting: false, execution_cache_toggle: parseInt(program.cacheToggle) });
+var main = function(){
+    //Required for the fondue library, to determine how to instrument
+    var fondueOptions = mergeInto({}, {useProxy: true, caching: false,  include_prefix: false, path: program.name, e2eTesting: false });
 
-src = fs.readFileSync(program.input,"utf-8")
+    if (program.jsProfile) {
+        var rti = JSON.parse(fs.readFileSync(program.jsProfile, "utf-8"));
+        fondueOptions = mergeInto(fondueOptions, {rti: rti})
+    }
+    src = fs.readFileSync(program.input,"utf-8")
 
-filename = path.basename(program.input)
+    filename = path.basename(program.input)
 
-if (program.type == "js"){
-    src = instrumentJavaScript(src, fondueOptions, false)
-    // src = src
-} else {
-    src = instrumentHTML(src, fondueOptions)
-    // src = src
+    if (program.type == "js"){
+        fondueOptions = mergeInto(fondueOptions, {origPath: fondueOptions.path})
+        src = instrumentJavaScript(src, fondueOptions, false)
+        // src = src
+    } else {
+        src = instrumentHTML(src, fondueOptions)
+        // src = src
+    }
+
+    fs.writeFileSync(program.input, src)
 }
 
-fs.writeFileSync(program.input, src)
+main();

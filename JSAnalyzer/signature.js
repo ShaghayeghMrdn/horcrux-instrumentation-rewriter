@@ -77,18 +77,23 @@ var handleReads = function(node) {
     // console.log("handling for reads: " +  node.source() + " " + node.type);
 
     var readArray = extractIdentifiers(node);
-    // console.log(readArray);
     if (readArray == null) return [];
     var globalReads = [];
-    var argReads = []
+    var argReads = [];
+    var antiLocal = [];
+    var localReads = [];
     readArray.forEach(function(read){
         var _isLocal = scope.IsLocalVariable(read)
-        if (_isLocal > 0  )
+        if (_isLocal == -3  )
             globalReads.push(read);
-        else if (_isLocal < 0)
-            argReads.push(read);
+        else if (_isLocal >= 0)
+            argReads.push({ind:_isLocal,val:read});
+        else if (_isLocal == -2)
+            localReads.push(read);
+        else
+            antiLocal.push(read);
     });
-    return {readArray: globalReads, argReads: argReads};
+    return {readArray: globalReads, local: localReads, argReads: argReads, antiLocal: antiLocal};
 }
 
 module.exports = {

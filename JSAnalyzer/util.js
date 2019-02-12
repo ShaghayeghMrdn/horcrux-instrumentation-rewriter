@@ -1,6 +1,7 @@
 
 
 var javascriptReservedWords = ['Promise','XMLHttpRequest','$','Array','abstract','arguments','await','boolean','break','byte','case','catch','char','class','const','continue','Date','debugger','define','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','this','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','require','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
+var uncacheableFunctions =[];
 
 var getArgs = function (node) {
     var args = [];
@@ -12,11 +13,111 @@ var getArgs = function (node) {
     return args;
 }
 
+
+
 /* MAJOR TODO 
 don't put the entire base variable in the logs 
 only put the exact variable being modified
 also do alias replacement and local variable replacement before 
 creating the log array*/
+
+var matchASTNodewithRTINode = function(rtiNode, AST, options, srcMap){
+    console.log("Trying to match rtiNode" + JSON.stringify(rtiNode),__filename);
+    if (!rtiNode) return;
+    var matchingNodesWithLocation = [], matchingNodesWithFnNames = [];
+
+    var _getNameFromASTNode = function(astNode){
+        if (astNode.type == "FunctionDeclaration"){
+                return astNode.id.name;
+        } else if(astNode.type == "FunctionExpression" || astNode.type == "ArrowFunctionExpression" || astNode.type == "NewExpression"){
+                var fnName;
+                //The parent could be declaration or an assignment
+                if (astNode.parent.type == "VariableDeclarator"){
+                    return astNode.parent.id.name;
+                } else if (astNode.parent.type == "AssignmentExpression"){
+                    return astNode.parent.left.name;
+                } else {
+                    console.log("[matchASTNodewithRTINode] Assuming this function to be anonymous" + srcMap.get(astNode),__filename);
+                    return null;
+                }
+                
+        }
+    }
+
+    var locationCondition = function(astNode){
+        //rti loc is zero based hence starts with 1
+        var rtiLoc = {ln:1+rtiNode.raw.lineNumber, cn:rtiNode.raw.columnNumber},
+        astLoc = {ln:0, cn:0};
+
+        if (astNode.id){
+            astLoc.ln+=astNode.id.loc.start.line;
+            astLoc.cn+=astNode.id.loc.end.column;
+        } else{
+            //If there is no id, and it is a function expression 
+            //append "function" length to column number
+            astLoc.ln+=astNode.loc.start.line;
+            astLoc.cn+=astNode.loc.start.column;
+            astLoc.cn+=astNode.type=="FunctionExpression"?"function".length:0 
+        }
+        if (options.scriptOffset)
+            astLoc.ln += options.scriptOffset.offset;
+        if (JSON.stringify(astLoc) == JSON.stringify(rtiLoc) && rtiNode.url.endsWith(options.origPath))
+            return true;
+        else {
+            console.log("[matchASTNodewithRTINode][locationCondition] No match against"  + JSON.stringify(astLoc),__filename);
+            return false;
+        }
+    }
+
+    var matchLocation = function(){
+        var foundMatch = false;
+        AST.forEach((astNode)=>{
+            if (astNode.type == "FunctionExpression" || astNode.type == "FunctionDeclaration" || astNode.type == "ArrowFunctionExpression"){
+                if (locationCondition(astNode)) {
+                    foundMatch = true;
+
+                    var matchedFnName = matchFunctionName(astNode);
+                    if (!matchedFnName)
+                        console.error("[matchASTNodewithRTINode] no fn name match despite location match for " + JSON.stringify(rtiNode.functionName));
+                    else {
+                        //Only add to the list of matches once both name and location match
+                        matchingNodesWithLocation.push(astNode);
+                        console.log("[matchASTNodewithRTINode] MATCH FOUND for rti Node "+ JSON.stringify(rtiNode.functionName),__filename);
+                    }
+                } 
+            }
+        })
+        if (!foundMatch) 
+            console.error("[matchASTNodewithRTINode] MATCH NOT FOUND for rti node" + JSON.stringify(rtiNode.functionName));
+    
+    }
+
+    var matchFunctionName = function(astNode){
+        var fnName = _getNameFromASTNode(astNode);
+        if (!fnName) {
+            if (rtiNode.functionName.indexOf("anonymous")>=0)
+                return true;
+            else {
+                console.log("[matchASTNodewithRTINode][matchFunctionName]  ast node is null, but rti node is not anonymous " +
+                 JSON.stringify(rtiNode.functionName) + " " + srcMap.get(astNode),__filename);
+                return true;
+            }
+        }
+        if (rtiNode.functionName == fnName)
+            return fnName;
+        else return false;
+    }
+
+    matchLocation();
+    if (!matchingNodesWithLocation.length)
+        return null;
+    else if (matchingNodesWithLocation.length == 1)
+        return matchingNodesWithLocation[0]
+    else {
+        console.error("[matchASTNodewithRTINode] Multiple ASTs matched with same location and function Name " + matchingNodesWithLocation.length);
+        return matchingNodesWithLocation[0];
+    }
+}
 var logReadsHelper = function(read, alias) {
     var outputArray = [];
     outputArray.push("`" + escapeRegExp(alias) + "`");
@@ -37,8 +138,10 @@ var getFunctionIdentifier = function(node) {
     parent = node.parent;
     while (parent != undefined){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression") {
-            return parent.loc;
-        }  
+            if (uncacheableFunctions.indexOf(parent)>=0) return null
+            else return parent.loc;
+        } else if (parent.type == "ArrowFunctionExpression")
+        return null;
         parent = parent.parent;
     }
     return null;
@@ -193,5 +296,7 @@ module.exports = {
     containsRange: containsRange,
     customMergeDeep: customMergeDeep,
     checkForWindowObject: checkForWindowObject,
-    checkIfReservedWord:checkIfReservedWord
+    checkIfReservedWord:checkIfReservedWord,
+    matchASTNodewithRTINode:matchASTNodewithRTINode,
+    uncacheableFunctions: uncacheableFunctions
 }

@@ -5,12 +5,16 @@ import os
 import operator
 import pandas as pd
 
+keyToNode = {}
 
 def computeOccurances(obj):
     functionToInvocation = {}
     length = len(obj["nodes"])
-    for i in range(1,length+1):
-        functionToInvocation[i] = [j for j,x in enumerate(obj["samples"]) if x == i]
+    for i in range(0,length):
+        key = obj["nodes"][i]["callFrame"]["functionName"] + "_" + str(obj["nodes"][i]["callFrame"]["lineNumber"]) + "_" + str(obj["nodes"][i]["callFrame"]["columnNumber"])
+        if key not in functionToInvocation:
+            functionToInvocation[key] = []
+        functionToInvocation[key].extend([j for j,x in enumerate(obj["samples"]) if x == obj["nodes"][i]["id"] ])
     return functionToInvocation
 
 def computeTTime(obj, functionToInvocation):
@@ -19,12 +23,20 @@ def computeTTime(obj, functionToInvocation):
     scriptingTime = 0
     for i in range(length):
         ttime = 0
-        for ind in functionToInvocation[i+1]:
-            ttime = ttime + obj["timeDeltas"][ind]
+        key = obj["nodes"][i]["callFrame"]["functionName"] + "_" + str(obj["nodes"][i]["callFrame"]["lineNumber"]) + "_" + str(obj["nodes"][i]["callFrame"]["columnNumber"])
+        for ind in functionToInvocation[key]:
+            tInd = ind if ind == len(obj["timeDeltas"]) - 1 else ind + 1
+            ttime = ttime + obj["timeDeltas"][tInd]
         scriptingTime = scriptingTime + ttime
-        functionToTTime[obj["nodes"][i]['id'],obj["nodes"][i]["callFrame"]["functionName"]] = [ttime, obj["nodes"][i]["callFrame"]["url"]]
-        functionToTTime["TOTAL"] = [scriptingTime, ""]
-    functionToTTime = sorted(functionToTTime.items(), key=lambda x: x[1][0], reverse = True)
+        if key not in keyToNode:
+            keyToNode[key] = obj["nodes"][i]
+        if key not in functionToTTime:
+            functionToTTime[key] = ttime
+        else:
+            functionToTTime[key] = functionToTTime[key] + ttime
+        # functionToTTime[obj["nodes"][i]['id'],obj["nodes"][i]["callFrame"]["functionName"]] = [ttime, obj["nodes"][i]["callFrame"]["url"]]
+    functionToTTime["TOTAL"] = scriptingTime
+    functionToTTime = sorted(functionToTTime.items(), key=lambda x: x[1], reverse = True)
     return functionToTTime
 
 
@@ -84,20 +96,18 @@ if __name__ == '__main__':
     if (int(args.parse)):
         stats = {}
         for root, folder, files in os.walk(args.trace):
-            for file in files:
-                # pid = os.fork()
-                # childPids.append(pid)
-                # if pid == 0:
-                    print "handling {}".format(os.path.join(root,file))
-                    profile = os.path.join(root , file)
-                    with open(profile, 'r') as f:
-                        jsprofile = json.loads(f.read())
-                        functionToInvocation = computeOccurances(jsprofile)
-                        functionToTTime = computeTTime(jsprofile, functionToInvocation)
+            if "jsProfile" in files:
+                file = files.index("jsProfile")
+                print "handling {}".format(os.path.join(root,file))
+                profile = os.path.join(root , file)
+                with open(profile, 'r') as f:
+                    jsprofile = json.loads(f.read())
+                    functionToInvocation = computeOccurances(jsprofile)
+                    functionToTTime = computeTTime(jsprofile, functionToInvocation)
 
-                        stats[root] = functionToTTime
-                        print "Done processing {}".format(os.path.join(root,file))
-                        # os._exit(0)
+                    stats[root] = functionToTTime
+                    print "Done processing {}".format(os.path.join(root,file))
+                    # os._exit(0)
 
         # for pid in childPids:
         #     os.waitpid(pid,0)

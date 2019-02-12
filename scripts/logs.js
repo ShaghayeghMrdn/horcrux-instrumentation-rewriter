@@ -2,6 +2,7 @@ var fs = require('fs')
 var util = require('util')
 
 var flag = process.argv[2];
+var verbose = false;
 var log1, log2;
 try {
 	log1 = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
@@ -13,6 +14,7 @@ try {
 		process.stderr.write("Empty logs: " + process.argv[2] + "\n");
 
 } catch (e) {
+	console.error(e);
 	if (flag != "-l") {
 		var val = e.toString().indexOf("unmodified") >= 0 ? true : false; 
 		process.stderr.write(util.format("na", val && "na",!val && "na","\n"));
@@ -46,24 +48,51 @@ function getExceptionsDiff(){
 	process.stdout.write(util.format(calculateErrors(log1) - matchingExceptions(log1, log2), calculateErrors(log1), calculateErrors(log2)));
 }
 
+function simpleErrorMatch(l1, l2){
+	var matches = [];
+	var unmatch = [];
+	for (var i1 of l1){
+		for (var i2 of l2){
+			if (i1 == i2) {
+				matches.push(i1);
+				break;
+			}
+		}
+	}
+	for (var i1 of l1){
+		if (matches.indexOf(i1) < 0)
+			unmatch.push(i1);
+	}
+	process.stdout.write(util.format(matches.length + " " + unmatch.length + " "  + JSON.stringify(unmatch))  );
+}
+
 function matchingExceptions(log1, log2){
 	var exceptions1 = [];
 	var exceptionCount = 0;
-	log1.forEach((l) => {
-		if (l.exceptionDetails){
-			var exception = l.exceptionDetails.exception.description || "";
-			exceptions1.push(exception.substr(0, exception.indexOf("at")));
-		}
-	});
+    log1.forEach((l) => {
+        if (l.exceptionDetails){
+            //Either there is an exceptions object or the description is contained inside the text object
+            if (l.exceptionDetails.exception) {
+                var exception = l.exceptionDetails.exception.description || "";
+                exceptions1.push(exception.substr(0, exception.indexOf("at")));
+            } else {
+                exceptions1.push(l.exceptionDetails.text);
+            }
+        }
+    });
 	var exceptions2 = [];
 	log2.forEach((l) => {
-		if (l.exceptionDetails){
-			var exception = l.exceptionDetails.exception.description || "";
-			exceptions2.push(exception.substr(0, exception.indexOf("at")));
-		}
+	    if (l.exceptionDetails){
+	            if (l.exceptionDetails.exception) {
+	                var exception = l.exceptionDetails.exception.description || "";
+	                exceptions2.push(exception.substr(0, exception.indexOf("at")));
+	            } else {
+	                exceptions2.push(l.exceptionDetails.text);
+	            }
+	    }
 	});
-	//console.log(exceptions1);
-	//console.log(exceptions2);
+	// console.log(exceptions1);
+	// console.log(exceptions2);
 	for (var ex1 in exceptions1){
 		for (var ex2 in exceptions2){
 			if (exceptions1[ex1] == exceptions2[ex2]) {
@@ -88,6 +117,7 @@ function calculateErrors(log){
 	return count;
 }
 		
-if (flag != "-l" && flag !== "-e") { console.error("No flag provided: \nUsage: node logs.js <firstLog> <secondLog> <flag>"); process.exit(); }
+if (flag != "-l" && flag !== "-e" && flag != "-simple") { console.error("No flag provided: \nUsage: node logs.js <firstLog> <secondLog> <flag>"); process.exit(); }
 if (flag == "-e") getExceptionsDiff();
 else if (flag == "-l") {getConsoleLogs(log1);}
+else if (flag == "-simple") simpleErrorMatch(log1, log2);

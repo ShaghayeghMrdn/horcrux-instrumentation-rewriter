@@ -112,7 +112,8 @@ Returns 1 for global
 */
 var IsLocalVariable = function (node){
     var identNode;
-    if (node == null || typeof(node) == "undefined") return 0;
+    var foundInImmediateParent = 0;
+    if (node == null || typeof(node) == "undefined") return -2;
     else if (node.type == "ConditionalExpression"){
         return (IsLocalVariable(node.consequent) || IsLocalVariable(node.alternate))
     } else if (node.type == "ObjectExpression" || node.type == "Literal" || 
@@ -120,7 +121,7 @@ var IsLocalVariable = function (node){
         || node.type == "ArrayExpression" || node.type == "" || node.type == "FunctionExpression" || 
         node.type == "ThisExpression" || node.type == "ArrowFunctionExpression" || node.type == "ClassExpression" || 
         node.type == "TaggedTemplateExpression" || node.type == "SequenceExpression" || node.type == "FunctionExpression" ){     // TODO handle all the dom modifications: For now the callexpression like document.getElementbyId('') will be marked as local. 
-        return 0;
+        return -2;
     } else if (node.type == "UnaryExpression" || node.type == "UpdateExpression")
         return IsLocalVariable(node.argument)
     else if (node.type == "MemberExpression" || node.type == "AssignmentExpression" || node.type == "Identifier") {
@@ -129,26 +130,34 @@ var IsLocalVariable = function (node){
     else if (node.type == "CallExpression"){
         var callexpression = handleDOMMethods(node, false);
         if (callexpression == null)
-            return 0;
+            return -2;
         else return !callexpression;
     } 
 
-    if (identNode == null ) return 0;
+    if (identNode == null ) return -2;
     parent = identNode.parent;
-    while (parent != undefined && parent.parent != undefined){
+    while (parent != undefined){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
+            foundInImmediateParent++;
             functionArguments = util.getArgs(parent);
             if (parent.localVariables == undefined) parent.localVariables = []
             /* Special case to handle !function(){} type declarations which are basically function expressions */
-            if (parent.type == "FunctionExpression" && parent.id && parent.id.source() == identNode.name) return 0; 
+            if (parent.type == "FunctionExpression" && parent.id && parent.id.source() == identNode.name) {
+                if (foundInImmediateParent == 1)
+                    return -2;
+                else return -1; 
+            }
             if (parent.localVariables.map(function(e){return e.source()}).includes(identNode.name) /*|| isGlobalAlias(identNode)*/) { /* Removed checking if the variable exists inside params or not as params also considered global*/
-                return 0;
+                if (foundInImmediateParent == 1)
+                    return -2;
+                else return -1;
             } else if (functionArguments.includes(identNode.name))
-                return -1;
+                return functionArguments.indexOf(identNode.name);
+            // return 1;
         }
         parent = parent.parent;
     }
-    return 1;
+    return -3;
 }
 /* The second argument specifies whether the values in the 
 global alias dictionary are still of the type node 
