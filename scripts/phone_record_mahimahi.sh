@@ -99,7 +99,7 @@ startChrome() {
     echo "Starting Chrome on Client"
     eval $adb_prefix shell "am start -a android.intent.action.VIEW -n com.android.chrome/com.google.android.apps.chrome.Main -d about:blank" 1>/dev/null
     sleep 1
-    if [[ $2 -eq "moto" ]]; then
+    if [[ "$2" -eq "moto" ]]; then
         skipWelcomePage
     fi
 }
@@ -131,14 +131,20 @@ enableSUAccess() {
 disableCPU(){
     eval $adb_prefix shell "am start -a android.intent.action.VIEW -n jackpal.androidterm/.Term"
     sleep 2
-    eval "$(adb </dev/null -s ZY322CMCKZ shell input text  "echo\ 0\ \>\ /sys/devices/system/cpu/cpu1/online")"
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 0\ \>\ /sys/devices/system/cpu/cpu0/online")"
+    eval $adb_prefix shell input keyevent 66
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 0\ \>\ /sys/devices/system/cpu/cpu1/online")"
+    eval $adb_prefix shell input keyevent 66
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 0\ \>\ /sys/devices/system/cpu/cpu2/online")"
+    eval $adb_prefix shell input keyevent 66
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 0\ \>\ /sys/devices/system/cpu/cpu3/online")"
     eval $adb_prefix shell input keyevent 66
 }
 
 enableCPU(){
     eval $adb_prefix shell "am start -a android.intent.action.VIEW -n jackpal.androidterm/.Term"
     sleep 2
-    eval "$(adb </dev/null -s ZY322CMCKZ shell input text  "echo\ 1\ \>\ /sys/devices/system/cpu/cpu1/online")"
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 1\ \>\ /sys/devices/system/cpu/cpu1/online")"
     eval $adb_prefix shell input keyevent 66
 }
 
@@ -154,30 +160,30 @@ rotateConfigs(){
         path=${3}/3g/
         mkdir -p $path
         startChrome
-        node inspectChrome.js -u $2 -m -o $path -p $4 --sim 3g.config
+        node inspectChrome.js -u $2 -m -t -o $path -p $4 --sim 3g.config
         ;;
     2)
         echo "Loading page in 4g config"
         path=${3}/4g/
         mkdir -p $path
         startChrome
-        node inspectChrome.js -u $2 -m -o $path -p $4 --sim 4g.config
+        node inspectChrome.js -u $2 -m -t -j -o $path -p $4 --sim 4g.config
         ;;
     3) 
         echo "Loading page in RT config"
         path=${3}/rt/
         mkdir -p $path
         startChrome
-        node inspectChrome.js -u $2 -m -o $path -p $4
+        node inspectChrome.js -u $2 -m -t -j -o $path -p $4
         ;;
     4)
         echo "Loading page in CPU disabled config"
-        path=${3}/cpuDis/
+        path=${3}/cpuDis4/
         mkdir -p $path
-        disableCPU
+        # disableCPU
         startChrome
-        node inspectChrome.js -u $2 -m -o $path -p $4 --sim 4g.config
-        enableCPU
+        node inspectChrome.js -u $2 -m -t -o $path -p $4 --sim 4g.config
+        # enableCPU
         ;;
     esac
 }
@@ -215,14 +221,16 @@ ctrl_c(){
 # eval $adb_prefix shell pm clear com.android.chrome
 
 init
+# disableCPU
 
-for iter in $(seq 1 3); do 
+for iter in $(seq 1 1); do 
     while IFS='' read -r line || [[ -n "$line" ]]; do
         echo "Iteration" $iter "replaying url: " $line 
         url=`echo $line | cut -d'/' -f 3`
         echo $url
         mkdir -p "$3"/${iter}/
-        for config in $(seq 2 2); do
+        # for config in $(seq 1 4); do
+        for config in 2; do
             sleep 1
             rotateConfigs $config $line ${4}/${iter}/"$url" $port 
         done

@@ -6,7 +6,7 @@ if (process.argv.length < 4) {
 	console.error("Invalid command: Usage: node small.js <flag> <filename>");
 	process.exit();
 } else if (process.argv[2] != "-sum" && process.argv[2] != "-simple" && process.argv[2] != "-complex" && process.argv[2] != "-plt"
-    && process.argv[2] != "-fn" && process.argv[2] != "-cache" && process.argv[2] != "-js") {
+    && process.argv[2] != "-fn" && process.argv[2] != "-cache" && process.argv[2] != "-js" && process.argv[2]!= "-invoc") {
     console.error("Invalid flag, only -simple and -complex supported");
     process.exit();
 }
@@ -49,6 +49,17 @@ var computeCategories = function(){
         }
     })
     return result;
+}
+
+var processInvocationProperties = function(invoObj){
+    Object.keys(invoObj).forEach((key)=>{
+        if (key == "Function")
+            invoObj[key] = processInvocationProperties(invoObj[key]);
+        else {
+            invoObj[key] = invoObj[key].filter((node)=>{return node.indexOf("_count")>=0});
+            process.stdout.write(util.format(key, invoObj[key].length," "));
+        }
+    })
 }
 
 if (flag == "-simple") {
@@ -106,4 +117,7 @@ if (flag == "-simple") {
 
     console.log(cpuTime, timelinecat["scripting"], timeline["JS Frame"]);
     // console.log(relevantTime/cpuTime);
+} else if (flag == "-invoc"){
+    var invoObj = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
+    processInvocationProperties(invoObj.value);
 }

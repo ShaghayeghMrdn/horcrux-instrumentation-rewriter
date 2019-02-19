@@ -2,12 +2,28 @@
 # $2 -> path to the recorded pages
 # $3 -> path to the output directory
 # $4 -> port for chrome
+# $5 -> number of iterations
 
+help(){
+	echo "Note: The 3rd argument (path to the output directory) shouldn't contain a backslash at the end"
+}
+
+
+# @params: <path to recorded page> <url> <output directory> <chrome port>
 replay(){
+	echo "$@"
 	mkdir -p $3
+	# chromium-browser --user-data-dir=/tmp/chromeProfiles/`echo $2 | cut -d/ -f3` &
+	# chrome_pid=$!
+	#wait for a few seconds before chrome is actually initialized
+	# sleep 2
+	# kill -9 $chrome_pid
 	#mm-webreplay $1 node inspectChrome.js -u $2 -l --coverage -t -j --log -o $3 -p $4 &> replayOutput/`echo $2 | cut -d '/' -f3` &
-	#mm-webreplay $1 node inspectChrome.js -u $2 -l --log -o $3 -p $4 &
-    mm-webreplay $1 node inspectChrome.js -u $2 -l -t -j --log -o $3 -p $4 &> results/replayOutput/`echo $2 | cut -d '/' -f3` &
+	# mm-webreplay $1 node inspectChrome.js -u $2 -l -o $3 -p $4 &
+	# chromium-browser --ignore-certificate-errors --user-data-dir=/tmp/nonexistent$(date +%s%N) --remote-debugging-port=$4 &>/dev/null &
+	echo "Launching chrome"
+	sleep 3
+    mm-webreplay $1 node inspectChrome.js -u $2 -t -l --log -o $3 -p $4 &
 	replay_pid=$!
 	#waitForNode
 	waitForNode $4
@@ -56,10 +72,15 @@ waitForChrome(){
 	done
 }
 
+help
+
 while IFS='' read -r line || [[ -n "$line" ]]; do
 	echo "replaying url: " $line
 	url=`echo $line | cut -d'/' -f 3`
 	path="$2"/"$url"
-	replay $path $line $3/"$url" $4;
-	sleep 2
+	for iter in $(seq 1 $5); do 
+		replay $path $line ${3}_${iter}/"$url" $4;
+		# replay $path $line ${3}2/"$url" $4;
+		sleep 2
+	done
 done < "$1"

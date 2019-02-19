@@ -150,12 +150,13 @@ function navigate(launcher){
             //     fs.writeFileSync(program.output + "/network", JSON.stringify(NetworkLog));
 
             if (program.custom) {
-                   await customCodes.getCacheStats(Runtime, program.output);
-                   await customCodes.getCustomStat('__tracer.getNonCacheableFunctions()', Runtime, program.output + "/noncache");
-                   await customCodes.getCustomStat('__tracer.getCallGraph()', Runtime, program.output + "/callgraph");
-                   await customCodes.getCacheSize(Runtime, program.output);
+                   // await customCodes.getCacheStats(Runtime, program.output);
+                   // await customCodes.getCustomStat('__tracer.getNonCacheableFunctions()', Runtime, program.output + "/noncache");
+                   // await customCodes.getCustomStat('__tracer.getCallGraph()', Runtime, program.output + "/callgraph");
+                   // await customCodes.getCacheSize(Runtime, program.output);
                    // await customCodes.getFunctionStats(Runtime, program.output);
                    // await extractInvocationInformation(Runtime, chrome, launcher,Page, count);
+                   await customCodes.getInvocationProperties(Runtime, program.output);
                    console.log("Custom data logged");
                }
 

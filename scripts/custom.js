@@ -54,6 +54,15 @@ var getFunctionStats = async function(Runtime, outDir) {
 
 }
 
+var getInvocationProperties = async function(Runtime, outDir){
+    var fetchCommand = '__tracer.getInocationProperties()';
+    var _fnStats = await Runtime.evaluate({expression : fetchCommand, returnByValue: true});
+    var stats = _fnStats.result;
+
+    fs.writeFileSync(outDir +"/invocProps", JSON.stringify(stats, null, 2));
+    console.log("Done fetching Invocation properties");    
+}
+
 var roughSizeOfObject = function( object ) {
 
     var objectList = [];
@@ -104,5 +113,6 @@ module.exports = {
     getCacheStats : getCacheStats,
     getCacheSize : getCacheSize,
     getFunctionStats: getFunctionStats,
-    getCustomStat: getCustomStat
+    getCustomStat: getCustomStat,
+    getInvocationProperties: getInvocationProperties
 }
