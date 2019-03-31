@@ -119,7 +119,7 @@ var IsLocalVariable = function (node){
     } else if (node.type == "ObjectExpression" || node.type == "Literal" || 
         node.type == "NewExpression" || node.type == "BinaryExpression" || node.type == "LogicalExpression"
         || node.type == "ArrayExpression" || node.type == "" || node.type == "FunctionExpression" || 
-        node.type == "ThisExpression" || node.type == "ArrowFunctionExpression" || node.type == "ClassExpression" || 
+         node.type == "ArrowFunctionExpression" || node.type == "ClassExpression" || 
         node.type == "TaggedTemplateExpression" || node.type == "SequenceExpression" || node.type == "FunctionExpression" ){     // TODO handle all the dom modifications: For now the callexpression like document.getElementbyId('') will be marked as local. 
         return -2;
     } else if (node.type == "UnaryExpression" || node.type == "UpdateExpression")
@@ -132,7 +132,8 @@ var IsLocalVariable = function (node){
         if (callexpression == null)
             return -2;
         else return !callexpression;
-    } 
+    } else if (node.type == "ThisExpression")
+    identNode = node;
 
     if (identNode == null ) return -2;
     parent = identNode.parent;
@@ -151,8 +152,11 @@ var IsLocalVariable = function (node){
                 if (foundInImmediateParent == 1)
                     return -2;
                 else return -1;
-            } else if (functionArguments.includes(identNode.name))
-                return functionArguments.indexOf(identNode.name);
+            } else if (functionArguments.includes(identNode.name)) {
+                if (foundInImmediateParent == 1)
+                    return functionArguments.indexOf(identNode.name);
+                else return -1;
+            }
             // return 1;
         }
         parent = parent.parent;

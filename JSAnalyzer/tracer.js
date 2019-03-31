@@ -1,5 +1,3 @@
-
-
 /*
  * Copyright (c) 2012 Massachusetts Institute of Technology, Adobe Systems
  * Incorporated, and other contributors. All rights reserved.
@@ -75,39 +73,47 @@ TODO
 if (typeof {name} === 'undefined') {
 {name} = new (function () {
     var e2eTesting = {e2eTesting};
+    var trackOnlyLeaf = true;
     var functions = new Set();
     var invocations = {};
     var customLocalStorage = {}; /* Use this in place of the localstorage API for faster access. */
     var counter = 0;
     var shadowStack = [];
     var _shadowStackHead;
-    var ObjectTree = {};
-    var objectIdCounter = 1;
-    var proxyToThis = new WeakMap();
-    var methodToProxy = new WeakMap();
-    var proxyToMethod = new WeakMap();
-    var ObjectToId = new WeakMap();
-    var idToObject = new Map();
     var processedSignature = {};
-    var objectToPath;
     var callGraph = {};
     var functionsSeen = [];
     var pageRecorded = false;
     var simpleReplay = true;
     var cacheStats = {hits: 0, misses: 0, nulls: 0}
-    var functionStats = {noarg:0, prim: 0, prim_objects:0, else: 0};
-
+    var functionStats = {noarg:[], prim: [], prim_objects:[], function: []};
+    var nonCacheableNodes = {};
     var invocationsIndName = {};
     var invocationsIndState = {};
+    var invocationToArgProxy = {};
+    var invocationToThisProxy = {}
+    var invocationToClosureProxy = {};
+    var keysToStdKeys = {};
+    var cacheableSignature = {};
+    var pageLoaded = false;
+    var INVOCATION_LIMIT = 500;
 
+    //Define all your custom methods, before they are overwritten
+    //by user javascript
+    // Declare all the custom prototype methods here
+    var customMethods = {getOwnPropertyDescriptor: Object.getOwnPropertyDescriptor}
 
     //temporary hack to store non stringifiable functions
-    var nonCacheableNodes = {};
+    // var nodesByProperties = {
+    //     "NOGSNOARG":[], "GS_f":[], "GS":[],
+    //     "Function":{}, "RTI":{RTI}, 
+    //     "antiLocal":{antiLocal},"ND":{ND}, "DOM":{DOM}
+    // };
+    var nodesByProperties = {
+      "antiLocal":{antiLocal}, "function":[], "nonFunction": []  
+    }
 
-    /* Initialize the object tree with window as the root object*/
-    ObjectToId.set(window,0);
-    ObjectTree[0] = {};
-
+    // nodesByProperties.Function = functionStats;
     //Make a point to comment unsused comments otherwise you can have unforseen errors
     // like some pages can't access the following localstorage object
     // var pageRecorded = localStorage.getItem("recordedPage");
@@ -124,33 +130,11 @@ if (typeof {name} === 'undefined') {
         // customLocalStorage = JSON.parse(localStorage.getItem("PageLocalCache"));
     }
 
-
-    var storeSignatureInCache = function(signature) {
-        var circularSignatures = 0;
-        var cacheableSignature = {};
-        for (var nodeId in signature) {
-            try {
-                cacheableSignature[nodeId] = stringify(signature[nodeId]);
-            } catch (e) {
-                circularSignatures++;
-            }
-        }
-
-        try { 
-            localStorage.setItem("PageLocalCache", JSON.stringify(cacheableSignature));
-        } catch (e) {
-            //SUPPRESS
-            // console.log("Error while storing cacheableSignature " + e);
-        }
-        console.log("Dumped the signature");
-        console.log("Number of functions with circular objects in their signature " + circularSignatures);
-        console.log("compared to total number of nodes  " + Object.keys(signature).length);
-    }
-
     var getFunctionStat = function(key){
+
         var types = key.split(';;');
-        if (types.indexOf("0")>=0) return "noarg";
-        else if (types.indexOf("function")>=0) return "else";
+        // if (types.indexOf("0")>=0) return "noarg";
+        if (types.indexOf("function")>=0) return "function";
         else if (types.indexOf("object")>=0) return "prim_objects";
         else return "prim";
     }
@@ -160,29 +144,10 @@ if (typeof {name} === 'undefined') {
             console.log("PROXY STATS");
             console.log(window.proxyReadCount, window.proxyWriteCount);
             window.{proxyName} = window;
+            pageLoaded = true;
 
-            //Process invocation keys and determine function types
-            for (var i in invocations){
-                functionStats[getFunctionStat(i)] += invocations[i];
-            }
-
-            // Since we are only using the cache from the first load
-            // for now we would comment all the post processing code.
-            
-            // Process the signature to construct meaningful paths
-            var sigProcessor = new SignatureProcessor(customLocalStorage, ObjectTree, idToObject, callGraph);
-            sigProcessor.process();
-            sigProcessor.postProcess();
-
-            // // //Commenting out signature propogation for now
-            // // //TODO
-            sigProcessor.signaturePropogate();
-            // // /*
-            // // Setting the global variables with class fields
-            // // */
-            processedSignature = sigProcessor.processedSig;
-            objectToPath = sigProcessor.objectToPath;
-
+            // processFinalSignature();
+            // processInvocationProperties();
             // storeSignatureInCache(processedSignature);
             // console.log("Dumping cache to local storage")
             // localStorage.setItem("PageLocalCache", JSON.stringify(processedSignature));
@@ -194,8 +159,124 @@ if (typeof {name} === 'undefined') {
 
     })
 
-    // var observer = new MutationObserver(callback);
-    // observer.observe(document, config);
+    var processFinalSignature = function(){
+        // First process the global state of every function
+        var proxyPrivates = globalProxyHandler.accessToPrivates();
+        // Process the signature to construct meaningful paths
+        var sigProcessor = new SignatureProcessor(customLocalStorage, proxyPrivates.ObjectTree, callGraph, "global");
+        sigProcessor.process();
+        sigProcessor.postProcess();
+        // sigProcessor.signaturePropogate();
+        processedSignature = sigProcessor.processedSig;
+
+        //Now individual iterate the invocations and convert object ids to strings
+        Object.keys(invocationToArgProxy).forEach((invocationId)=>{
+             // Return if not leaf node
+            if (trackOnlyLeaf &&  callGraph[invocationId].length) return;
+            var argProxyHandler = invocationToArgProxy[invocationId];
+            var proxyPrivates = argProxyHandler.accessToPrivates();
+            var invocationSignature = {};
+            invocationSignature[invocationId] = processedSignature[invocationId];
+            var sigProcessor = new SignatureProcessor(invocationSignature, proxyPrivates.ObjectTree, callGraph, "argument");
+            sigProcessor.process();
+            sigProcessor.postProcess();
+            processedSignature[invocationId] = sigProcessor.processedSig[invocationId];
+        })
+
+        Object.keys(invocationToThisProxy).forEach((invocationId)=>{
+            // Return if not leaf node
+            if (trackOnlyLeaf && callGraph[invocationId].length) return;
+            var thisProxyHandler = invocationToThisProxy[invocationId];
+            var proxyPrivates = thisProxyHandler.accessToPrivates();
+            var invocationSignature = {};
+            invocationSignature[invocationId] = processedSignature[invocationId];
+            var sigProcessor = new SignatureProcessor(invocationSignature, proxyPrivates.ObjectTree, callGraph, "this");
+            sigProcessor.process();
+            sigProcessor.postProcess();
+            processedSignature[invocationId] = sigProcessor.processedSig[invocationId];
+        })
+
+        Object.keys(invocationToClosureProxy).forEach((invocationId)=>{
+            // Return if not leaf node
+            if (trackOnlyLeaf && callGraph[invocationId].length) return;
+            var closureProxyHandler = invocationToClosureProxy[invocationId];
+            var proxyPrivates = closureProxyHandler.accessToPrivates();
+            var invocationSignature = {};
+            invocationSignature[invocationId] = processedSignature[invocationId];
+            var sigProcessor = new SignatureProcessor(invocationSignature, proxyPrivates.ObjectTree, callGraph, "closure");
+            sigProcessor.process();
+            sigProcessor.postProcess();
+            processedSignature[invocationId] = sigProcessor.processedSig[invocationId];
+        })
+
+        console.log("Done processing final signature")
+
+        //garbage cleaning
+        delete invocationToArgProxy;
+        delete globalProxyHandler;
+        delete customLocalStorage;
+        delete invocationToClosureProxy;
+
+    }
+
+    var storeSignature = function(){
+        Object.keys(processedSignature).forEach((invocId)=>{
+            var strSig = stringify(processedSignature[invocId]);
+            if (strSig && strSig.__proto__.__proto__ == "Error") {
+                nonCacheableNodes[invocId.split("_count")[0]] = "stringify";
+                return;
+            }
+
+            //convert the original signature in the string format, to do a memory comparison
+            processedSignature[invocId] = strSig;
+            var _matchInvocId, matchInvocId;
+            if (_matchInvocId=Object.values(cacheableSignature).indexOf(strSig)>=0){
+                matchInvocId = Object.keys(cacheableSignature)[_matchInvocId];
+                keysToStdKeys[invocId] = matchInvocId;
+            } else {
+                cacheableSignature[invocId] = strSig;
+                keysToStdKeys[invocId] = invocId;
+            }
+        })
+
+        console.log(Object.keys(processedSignature).length + " coalesced into " + Object.keys(cacheableSignature).length);
+    }
+
+    this.storeSignature = storeSignature;
+
+    this.processFinalSignature = processFinalSignature;
+
+    this.getKeysToStdKeys = function(){
+        return keysToStdKeys;
+    }
+
+    this.getStoredSignature = function(){
+        return cacheableSignature;
+    }
+
+    var processInvocationProperties = function(){
+        //Iterate processed signature instead of customLocalStorage object
+        Object.keys(processedSignature).forEach((nodeId)=>{
+            var propertyObj = processedSignature[nodeId];
+            // if (!propertyObj.reads.length && !propertyObj.writes.length && !propertyObj.argProp) {
+            //     // if (nodesByProperties.DOM.indexOf(nodeId)<0 && nodesByProperties.antiLocal.indexOf(nodeId)<0)
+            //         nodesByProperties.NOGSNOARG.push(nodeId);
+            // } else if ( (propertyObj.reads && propertyObj.reads.length) || ( propertyObj.writes && propertyObj.writes.length) ) {
+            //     if (propertyObj.argProp && getFunctionStat(propertyObj.argProp) == "function")
+            //         nodesByProperties.GS_f.push(nodeId);
+            //     else nodesByProperties.GS.push(nodeId);
+            // }
+            // else {
+            //     var argType = getFunctionStat(propertyObj.argProp);
+            //     nodesByProperties.Function[argType].push(nodeId);
+            // }
+            if (nodesByProperties.antiLocal.indexOf(nodeId) < 0) {
+                if (propertyObj.isFunction)
+                    nodesByProperties.function.push(nodeId)
+                else nodesByProperties.nonFunction.push(nodeId);
+            }
+        });
+    }
 
     /* Proxy object handler */
     window.proxyReadCount =0; window.proxyWriteCount = 0;
@@ -211,6 +292,12 @@ if (typeof {name} === 'undefined') {
     }
     /*Re write the bind method because the default bind might be overridden. */
 
+    // var _eval = window.eval;
+    // window.eval = function(arg){
+    //     window.{name}.insideEval = true;
+    //     _eval(arg);
+    //     window.{name}.insideEval = false;
+    // }
     // Function.prototype._bind = function(thisArg){
     //     return Function.prototype.bind.apply(this, thisArg);
     // }
@@ -236,219 +323,371 @@ if (typeof {name} === 'undefined') {
 
     //     this.apply(vThisArg, args);
     // }
+    function proxyEncapsulation(rootObject, type) {
 
-    var appendObjectTree = function(rootId, key, childId){
-        var _edge = ObjectTree[rootId];
-        if (typeof key == "symbol")
-            var ekey = "e_" + key.toString();
-        else var ekey = "e_" + key;
-        if (_edge) {
-            if (!_edge[ekey]) {
-                _edge[ekey] = [];
-                _edge[ekey].push(childId);
-            } else _edge[ekey].push(childId);
-        }
-        else {
-            ObjectTree[rootId]  = {};
-            var edge = ObjectTree[rootId];
-            edge[ekey] = [];
-            edge[ekey].push(childId);
-        }
-    }
+        var ObjectTree = {};
+        var objectIdCounter = 1;
+        var methodToProxy = new WeakMap();
+        var proxyToMethod = new WeakMap();
+        var ObjectToId = new WeakMap();
+        var objectToPath;
+        var parentFunctionId = null;
+        var rootType = type;
+        if (rootType == "argument" || rootType == "this" || rootType == "closure")
+            parentFunctionId = _shadowStackHead;
+        /* Initialize the object tree with window as the root object*/
+        ObjectToId.set(rootObject,0);
+        ObjectTree[0] = {};
 
-    var stateAlreadyLogged = function(nodeId, logTup, logType){
-        var stateLogged = false;
-        customLocalStorage[nodeId][logType].forEach((tupEntry)=>{
-            if (JSON.stringify(tupEntry) == JSON.stringify(logTup))
-                stateLogged = true;
-        })
-        return stateLogged;
-    }
 
-    var loggerFunction = function(target, key, value, logType){
-        if (key == "__isProxy" || key == "top" || key == "parent" || document.readyState == "complete") return;
-        var nodeId = _shadowStackHead ? _shadowStackHead : null;
-        // var nodeId = _nodeId + "_count" + invocationsIndName[_nodeId];
-        //TODO only storing signature of the first invocation and not including the signature of future 
-        //invocations. 
-        if (!nodeId || (nodeId && (functionsSeen.indexOf(nodeId) >= 0 || nonCacheableNodes[nodeId]) ) ) return;
-        var rootId;
-        var _rootId = ObjectToId.get(target);
-        if (_rootId != null)
-            rootId = _rootId;
-        else {
-            rootId = objectIdCounter;
-            idToObject.set(objectIdCounter, target);
-            ObjectToId.set(target, objectIdCounter++);
-        }
-        if (value instanceof Object) {
-            var _id = ObjectToId.get(value);
-            if (_id != null)
-                var childId = _id;
+        var appendObjectTree = function(rootId, key, childId){
+            var _edge = ObjectTree[rootId];
+            if (typeof key == "symbol")
+                var ekey = "e_" + key.toString();
+            else var ekey = "e_" + key;
+            if (_edge) {
+                if (!_edge[ekey])
+                    _edge[ekey] = [];
+                if (_edge[ekey].indexOf(childId)<0)
+                    _edge[ekey].push(childId);
+            }
             else {
-                var childId = objectIdCounter;
-                idToObject.set(objectIdCounter, value);
-                ObjectToId.set(value, objectIdCounter++);
-            }
-            // Only add to tree if the value is type object
-            appendObjectTree(rootId, key, childId);
-        } else {
-            if (typeof value == "symbol")
-                var childId = 'p-'  + value.toString();
-            else var childId = 'p-' + value;
-        }
-
-        if (logType == "reads") {
-            if (!stateAlreadyLogged(nodeId, [rootId, key, childId], "reads"))
-                customLocalStorage[nodeId]["reads"].push([rootId, key, childId]);
-        }
-        else {
-            if (!stateAlreadyLogged(nodeId, [rootId, key, childId], "writes"))
-                customLocalStorage[nodeId]["writes"].push([rootId, key, childId]);
-        }
-    }
-
-    var _handleSymbolKey = function(target, key){
-        if (!Reflect.get(target, key)){
-            switch (key.toString()){
-                case 'Symbol(Symbol.toPrimitive)':
-                    if (+target) return +target;
-                    if (''+target) return ''+target;
+                ObjectTree[rootId]  = {};
+                var edge = ObjectTree[rootId];
+                edge[ekey] = [];
+                edge[ekey].push(childId);
             }
         }
-    }
 
-    var handleNonConfigurableProperty = function(target, key){
-        var method = Reflect.get(target,key);
-        /*if (typeof target[key] == "function"){
-            _thisArg = target;
-            method.call = method._call;
-            return method;
-        } else*/ return method;
-    } 
+        var stateAlreadyLogged = function(nodeId, logTup, logType){
+            var otherLogType = logType.indexOf("reads")>=0 ? rootType+"_writes" : rootType +"_reads";
+            var stateLogged = false;
+            if (logType.indexOf("reads")>=0){
+                //Test whether the value read is written inside the current function itself
+                if (customLocalStorage[nodeId][otherLogType]) {
+                    customLocalStorage[nodeId][otherLogType].forEach((el)=>{
+                        if (el[0] == logTup[0] && el[1] == logTup[1])
+                            stateLogged = true;
+                    });
+                    if (stateLogged) return stateLogged;
+                }
+            }
 
-    var handleMetaProperties = function(target, key){
-        switch(key){
-            case 'apply' :
-                return Reflect.get(target, key);
-                break;
-            case 'call':
-                return Reflect.get(target, key);
-                break;
-            case 'bind':
-                return Reflect.get(target, key);
-                break;            
+            customLocalStorage[nodeId][logType].forEach((tupEntry)=>{
+                if (JSON.stringify(tupEntry) == JSON.stringify(logTup))
+                    stateLogged = true;
+            })
+            return stateLogged;
         }
-    }
 
-    var isDOMInheritedProperty = function(method){
-        return (method instanceof Element || method instanceof HTMLCollection)
-    }
+        var hasObjectId = function(obj){
+            return ObjectToId.get(obj);
+        }
 
-    var outOfScopeProperties = ["location", "body", "Promise", "top", "parent", "prototype", "__proto__"];
+        var getObjectId = function(obj){
+            var rootId = ObjectToId.get(obj);
+            if (rootId != null) return rootId;
+            rootId = objectIdCounter;
+            objectIdCounter++;
+            ObjectToId.set(obj, rootId);
+            return rootId;
+        }
 
-    var handler = {
-      get(target, key, receiver) {
-        var method = Reflect.get(target,key);
-        if (key == "__isProxy") return true;
-        if (key == "__target") return target;
-        loggerFunction(target, key, method, "reads");
-        /* If method type if function, don't wrap in proxy for now */
-        if (method && (typeof method === 'object' || typeof method=== "function") && !outOfScopeProperties.includes(key) && !isDOMInheritedProperty(target[key]) && !method.__isProxy) {
-          var desc = Object.getOwnPropertyDescriptor(target, key);
-          if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
-          window.proxyReadCount++;
-          // if (window.proxyReadCount % 1000000 == 0)
-          //   alert("window.Proxyreadcount is " + window.proxyReadCount);
-          // if (typeof method == "function") {
-          //   var _method = method._bind(target);
-          //   Object.setPrototypeOf(_method, method);
-          //   if (!isNative(method))
-          //       Object.assign(_method, method);
-          //   return new Proxy(_method,);
-          // }
+        var loggerFunction = function(target, key, value, logType){
+            if (key == "__isProxy" || key == "top" || key == "parent" || document.readyState == "complete") return;
+            // if ( value && value.self == value) return;
+            if (value && value.__isProxy)
+                value = value.__target;
+            var nodeId = _shadowStackHead ? _shadowStackHead : null;
+            // var nodeId = _nodeId + "_count" + invocationsIndName[_nodeId];
+            //TODO only storing signature of the first invocation and not including the signature of future 
+            //invocations. 
+            if ( (!nodeId && logType.indexOf("global")<0 ) || (nodeId && 
+                (functionsSeen.indexOf(nodeId) >= 0 || nonCacheableNodes[nodeId] || exceedsInvocationLimit(nodeId))) ) return;
+
+            if (logType.indexOf("argument")>=0 || logType.indexOf("this")>=0 || logType.indexOf("closure")>=0)
+                nodeId = parentFunctionId;
+
+            var rootId = getObjectId(target);
+            //This check implies that the function where the proxy is being accessed
+            // is different from where it was created
+            // therefore, add the log in both function signatures
+            var currentObjectTree = null;
+            var remoteLogType = "";
+            if (_shadowStackHead != nodeId) {
+                //Check how in the current function, it is being accessed: as closure,argument, or this
+                if ( invocationToArgProxy[_shadowStackHead] ){
+                    var remotePrivates = invocationToArgProxy[_shadowStackHead].accessToPrivates();
+                    if (remotePrivates.hasObjectId(target)) {
+                        currentObjectTree = remotePrivates.getObjectId;
+                        var remoteRootId = currentObjectTree(target);
+                        remoteLogType += "argument_" + logType.split('_')[1];
+                    }
+                } 
+                if (!currentObjectTree && invocationToClosureProxy[_shadowStackHead]) {
+                    var remotePrivates = invocationToClosureProxy[_shadowStackHead].accessToPrivates();
+                    if (remotePrivates.hasObjectId(target)) {
+                        currentObjectTree = remotePrivates.getObjectId;
+                        var remoteRootId = currentObjectTree(target);
+                        remoteLogType += "closure_" + logType.split('_')[1];
+                    }
+                }
+                if (!currentObjectTree && invocationToThisProxy[_shadowStackHead]){
+                    var remotePrivates = invocationToThisProxy[_shadowStackHead].accessToPrivates();
+                    if (remotePrivates.hasObjectId(target)) {
+                        currentObjectTree = remotePrivates.getObjectId;
+                        var remoteRootId = currentObjectTree(target);
+                        remoteLogType += "this_" + logType.split('_')[1];
+                    }
+                }
+            }
+            
+            if (value instanceof Object || (typeof value == "object" && value != null)) {
+                var childId = getObjectId(value);
+            
+                // Only add to tree if the value is type object
+                appendObjectTree(rootId, key, childId);
+                if (currentObjectTree) {
+                    var remoteChildId = currentObjectTree(value);
+                    remotePrivates.appendObjectTree(remoteRootId, key, remoteChildId);
+                }
+                // Only read argument reads if they are primitives, ie the next else condition
+                if (logType == "argument_reads" && rootId == 0 ) return;
+                if (logType == "closure_reads" && rootId == 0 ) return;
+            } else {
+                if (typeof value == "symbol")
+                    var childId = 'p-'  + value.toString();
+                else var childId = 'p-' + value;
+            }
+
+            if (typeof value == "undefined" && logType == "argument_reads" && rootId == 0) return;
+               
+            // The only time when not having a nodeId is allowed, is when the logger function is closed for a 
+            // global read or write. However since the nodeId is not there, we won't be adding to any signature
+            //only appending the object in the tree. 
+            if (!nodeId) return;
+
+            //Let's only store the child id and not worry about stringifying reads/writes
+            var childLogStr = stringify(value);
+            if (childLogStr && childLogStr.__proto__.__proto__ == "Error"){
+                nonCacheableNodes[nodeId.split("_count")[0]] = "circular";
+                return;
+            } else if (!childLogStr && logType.indexOf("reads")>=0)
+                return;
+
+            // if (!stateAlreadyLogged(nodeId, [rootId, key, childLogStr], logType))
+            customLocalStorage[nodeId][logType].push([rootId, key, childLogStr]);
+            if (currentObjectTree) {
+                // customLocalStorage[_shadowStackHead][remoteLogType].push([remoteRootId, key, childId]);
+            }
+        }
+            
+
+        var _handleSymbolKey = function(target, key){
+            if (!Reflect.get(target, key)){
+                switch (key.toString()){
+                    case 'Symbol(Symbol.toPrimitive)':
+                        if (+target) return +target;
+                        if (''+target) return ''+target;
+                }
+            }
+        }
+
+        var handleNonConfigurableProperty = function(target, key){
+            var method = Reflect.get(target,key);
+            /*if (typeof target[key] == "function"){
+                _thisArg = target;
+                method.call = method._call;
+                return method;
+            } else*/ return method;
+        } 
+
+        var handleMetaProperties = function(target, key){
+            switch(key){
+                case 'apply' :
+                    return Reflect.get(target, key);
+                    break;
+                case 'call':
+                    return Reflect.get(target, key);
+                    break;
+                case 'bind':
+                    return Reflect.get(target, key);
+                    break;            
+            }
+        }
+
+        // use hacks to detect if a method is a DOM object or not 
+        // as sometimes even document objets are not instances of these parent objects
+        // for reasons unknown
+        // Despite window satisfying this criteria have this function return false for window
+        // object specifically
+        var isDOMInheritedProperty = function(method){
+            return (method instanceof EventTarget || method instanceof HTMLCollection || method instanceof NodeList || method.readState
+                || method.click) /*&& (method && method.self != method)*/
+        }
+
+        var outOfScopeProperties = ["location", "body", "Promise", "top", "parent", "prototype", "__proto__","toJSON", "self"];
+
+        var isWindow = function(obj){
+            if (obj && obj.self == obj){
+                var proxyPrivates = globalProxyHandler.accessToPrivates();
+                var _proxyMethod = proxyPrivates.methodToProxy.get(obj);
+                if (_proxyMethod) return _proxyMethod;
+                var proxyMethod = new Proxy(obj, handler);
+                proxyPrivates.methodToProxy.set(obj, proxyMethod);
+                return proxyMethod;
+            }
+        }
+
+        var handler = {
+          get(target, key, receiver) {
+
+            if (key == "__isProxy") return rootType;
+            if (key == "__target") return target;
+            if (key == "__debug") return parentFunctionId;
+            
+            var method = Reflect.get(target,key);
+
+            var isWinObj;
+            if (isWinObj = isWindow(method))
+
+
+            if (outOfScopeProperties.includes(key)) return method;
+
+            loggerFunction(target, key, method, rootType + "_reads");
+
+            if (method && method.__isProxy) {
+                if (rootType == "global" || method.__isProxy == "global") 
+                    return method;
+                method = method.__target;
+                // Sometimes the toString method doesn't exist on certain objects
+                // if (Object.prototype.toString.call(target).indexOf("Arguments")>=0)
+                //     return method;
+                //     var actualMethod = method.__target;
+                //     var childId = getObjectId(actualMethod);
+                //     appendObjectTree(0, key, childId, ObjectTree);
+                // } else if (target.__isClosureProxy) {
+                //     var actualMethod = method.__target;
+                //     var childId = getObjectId(actualMethod);
+                //     appendObjectTree(0, key, childId, ObjectTree);
+                
+                // return method;
+            }
+            /* If method type if function, don't wrap in proxy for now */
+            if (method && (typeof method === 'object' || typeof method=== "function") && !outOfScopeProperties.includes(key) && !isDOMInheritedProperty(method)) {
+              var desc = customMethods.getOwnPropertyDescriptor(target, key);
+              if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
+              window.proxyReadCount++;
+              // if (window.proxyReadCount % 1000000 == 0)
+              //   alert("window.Proxyreadcount is " + window.proxyReadCount);
+              // if (typeof method == "function") {
+              //   var _method = method._bind(target);
+              //   Object.setPrototypeOf(_method, method);
+              //   if (!isNative(method))
+              //       Object.assign(_method, method);
+              //   return new Proxy(_method,);
+              // }
+              /*
+              The following check is kind of inconsequental, cause even if you have a proxy around the method call or apply, the apply handler 
+              will be anyway called
+              */
+              if (key == "apply" || key == "call") return method;
+              // console.log("Calling get of " + key + " and setting this to ");
+              // console.log(target);
+              var _proxyMethod = methodToProxy.get(method);
+              if (_proxyMethod) return _proxyMethod;
+              // var proxyHandler = rootType == "global"  ? handler : _shadowStackHead ? invocationToProxy[_shadowStackHead][1] : handler;
+              var proxyMethod = new Proxy(method, handler);
+              methodToProxy.set(method, proxyMethod);
+              return proxyMethod;
+            } else {
+              return method;
+            }
+          },
+          set (target, key, value, receiver) {
+            loggerFunction(target, key, value,rootType + "_writes");
+            window.proxyWriteCount++;
+            return Reflect.set(target, key, value);
+          },
+
           /*
-          The following check is kind of inconsequental, cause even if you have a proxy around the method call or apply, the apply handler 
-          will be anyway called
+          Let p be a proxy object. The following event handler will be called :
+           - if p if a function itself, p(arg) : target -> p, thisArg -> window, args = args
+           - if you do p.call or p.apply, first you go inside the get handler, read the value, and then go inside the apply handler
           */
-          if (key == "apply" || key == "call") return method;
-          // console.log("Calling get of " + key + " and setting this to ");
-          // console.log(target);
-          var _proxyMethod = methodToProxy.get(method);
-          if (_proxyMethod) return _proxyMethod;
-          var proxyMethod = new Proxy(method, handler);
-          methodToProxy.set(method, proxyMethod);
-          proxyToThis.set(method, target);
-          proxyToMethod.set(proxyMethod, method);
-          return proxyMethod;
-        } else {
-          return method;
+
+          apply (target, thisArg, args) {
+                /*
+                    If no thisArg, call it in the context of window ( this happens by default )
+                    If the thisArg is a proxy object however it has no corresponding target method, call apply on the proxy object itself.
+                    If the thisArg is not a proxy object, call the method on the thisArg itself. 
+                */
+                if (Reflect.apply.__isProxy)
+                    Reflect.apply = Reflect.apply.__target;
+                if (!thisArg) return Reflect.apply(target, thisArg, args);
+                else if (!thisArg.__isProxy)
+                 return Reflect.apply(target, thisArg, args);
+                else return Reflect.apply(target, thisArg.__target, args);
+          },
+          construct (target, args) {
+              // return new target(...args);
+              return Reflect.construct(target, args);
+          },
+          setPrototypeOf (target, prototype) {
+            return Reflect.setPrototypeOf(target, prototype);
+          },
+          getPrototypeOf (target) {
+            return Reflect.getPrototypeOf(target);
+          },
+          getOwnPropertyDescriptor (target, propertyKey) {
+            return Reflect.getOwnPropertyDescriptor(target, propertyKey);
+          },
+          ownKeys (target) {
+            return Reflect.ownKeys(target)
+          },
+          has (target, propertyKey) {
+            return Reflect.has(target, propertyKey);
+          },
+          isExtensible (target) {
+            return Reflect.isExtensible(target)
+          },
+          defineProperty (target, propertyKey, attributes) {
+            return Reflect.defineProperty(target, propertyKey, attributes);
+          },
+          deleteProperty (target, propertyKey) {
+            return Reflect.deleteProperty(target, propertyKey);
+          },
+          preventExtensions (target) {
+            return  Reflect.preventExtensions(target);
+          },
+          accessToPrivates (){
+            return {ObjectTree: ObjectTree,getObjectId:getObjectId, appendObjectTree:appendObjectTree, hasObjectId:hasObjectId,
+                    methodToProxy:methodToProxy}
+          },
+
+          getProcessedSignature (){
+            var sigProcessor = new SignatureProcessor();
+            sigProcessor.process();
+            sigProcessor.postProcess();
+
+            // // //Commenting out signature propogation for now
+            // // //TODO
+            sigProcessor.signaturePropogate();
+            return sigProcessor.processedSig;
+          }
+
         }
-      },
-      set (target, key, value, receiver) {
-        loggerFunction(target, key, value,"writes");
-        window.proxyWriteCount++;
-        return Reflect.set(target, key, value);
-      },
 
-      /*
-      Let p be a proxy object. The following event handler will be called :
-       - if p if a function itself, p(arg) : target -> p, thisArg -> window, args = args
-       - if you do p.call or p.apply, first you go inside the get handler, read the value, and then go inside the apply handler
-      */
-
-      apply (target, thisArg, args) {
-            /*
-                If no thisArg, call it in the context of window ( this happens by default )
-                If the thisArg is a proxy object however it has no corresponding target method, call apply on the proxy object itself.
-                If the thisArg is not a proxy object, call the method on the thisArg itself. 
-            */
-            if (!thisArg) return Reflect.apply(target, window, args);
-            else if (!thisArg.__isProxy) return Reflect.apply(target, thisArg, args);
-            // else if (proxyToMethod.get(thisArg) == null) {
-            //     //throw "No method found for proxy";
-            // }
-            return Reflect.apply(target, proxyToMethod.get(thisArg), args);
-      },
-      construct (target, args) {
-          // return new target(...args);
-          return Reflect.construct(target, args);
-      },
-      setPrototypeOf (target, prototype) {
-        return Reflect.setPrototypeOf(target, prototype);
-      },
-      getPrototypeOf (target) {
-        return Reflect.getPrototypeOf(target);
-      },
-      getOwnPropertyDescriptor (target, propertyKey) {
-        return Reflect.getOwnPropertyDescriptor(target, propertyKey);
-      },
-      ownKeys (target) {
-        return Reflect.ownKeys(target)
-      },
-      has (target, propertyKey) {
-        return Reflect.has(target, propertyKey);
-      },
-      isExtensible (target) {
-        return Reflect.isExtensible(target)
-      },
-      defineProperty (target, propertyKey, attributes) {
-        return Reflect.defineProperty(target, propertyKey, attributes);
-      },
-      deleteProperty (target, propertyKey) {
-        return Reflect.deleteProperty(target, propertyKey);
-      },
-      preventExtensions (target) {
-        return  Reflect.preventExtensions(target);
-      }
-
+        return handler;
     }
 
-    var {proxy, revoke} = Proxy.revocable(window, handler);
+    var globalProxyHandler = proxyEncapsulation(window,"global");
+
+    var {proxy, revoke} = Proxy.revocable(window, globalProxyHandler);
     // Flag to disable proxy
     window.{proxyName} = proxy;
     // window.{proxyName} = window;
-    proxyToMethod.set(proxy, window);
+    globalProxyHandler.accessToPrivates().methodToProxy.set(window, proxy);
 
     if (pageRecorded && e2eTesting)
         window.{proxyName} = window;
@@ -472,8 +711,8 @@ if (typeof {name} === 'undefined') {
         return callGraph;
     }
 
-    this.getFunctionStats = function() {
-        return functionStats;
+    this.getInvocationProperties = function() {
+        return nodesByProperties;
     }
     
     this.setMutationContext = function(command, nodeId) {
@@ -547,6 +786,13 @@ if (typeof {name} === 'undefined') {
         else return rhs[0];
     }
 
+    this.isProxy = function(obj){
+        if (!obj || (typeof obj != "function" && typeof obj !="object")) return obj;
+        if (obj.self == obj) return obj;
+        if (obj.__isProxy) return obj.__target
+        else return obj;
+    }
+
     this.logWrite = function(functionIdentifier, rhs, variableName, listOfProperties ){
         var key = variableName;
         if (listOfProperties.length > 0)
@@ -575,9 +821,11 @@ if (typeof {name} === 'undefined') {
         return readArray[1];
     }
 
-    this.logReturnValue = function(functionIdentifier, returnValue, proxyReturnValue) {
+    this.logReturnValue = function(functionIdentifier, returnValue, params) {
+        this.exitFunction(functionIdentifier, params);
         if (pageRecorded) return returnValue;
-        if (functionsSeen.indexOf(nodeId) >= 0) return returnValue;
+        if (functionsSeen.indexOf(functionIdentifier) >= 0 || exceedsInvocationLimit(functionIdentifier) ) return returnValue;
+        // return returnValue;
         /* 
         Check in case there is a logreturn statement but the function was uncacheable
         usually happens when there is an antilocal written to after the return statement inside a function
@@ -589,23 +837,17 @@ if (typeof {name} === 'undefined') {
 
         var cacheIndex = functionIdentifier + "_count" + invocationsIndName[functionIdentifier];
         if (customLocalStorage[cacheIndex]) customLocalStorage[cacheIndex]["returnValue"] = returnValue;
-        return returnValue;
+        if (returnValue && returnValue.__debug && returnValue.__debug != "global")
+            return returnValue.__target;
+        else return returnValue;
     }
 
     var logNonProxyParams = function(nodeId,params){
         for(var i in params) {
-            try {
-                if (params[i] != null && !params[i].__isProxy)
-                    customLocalStorage[nodeId]["arguments"]["before"][i] =  stringify(params[i]);
-            } catch (e) {
-                // console.log("Error while stringifying the before state of arguments. " + e + e.stack);
-                // SUPPRESS
-                //Discard the entire signature 
-                delete customLocalStorage[nodeId];
-                nonCacheableNodes[nodeId] = "circular";
-                // Even if one is non stringiable return out
-                return;
-            }
+                if (params[i] != null && !params[i].__isProxy && typeof params[i] != "function")
+                    var strParam =  stringify(params[i]);
+                 if (strParam && strParam.__proto__.__proto__ == "Error") return
+                 customLocalStorage[nodeId].arguments.before[i] = strParam;
         }
     }
 
@@ -664,6 +906,10 @@ if (typeof {name} === 'undefined') {
         return argTypes;
     }
 
+    var exceedsInvocationLimit = function(nodeId){
+        return nodeId.split("_count")[1] > INVOCATION_LIMIT;
+    }
+
     this.cacheInit = function(nodeId, params){
         if (invocationsIndName[nodeId] != null)
             invocationsIndName[nodeId]++;
@@ -674,31 +920,40 @@ if (typeof {name} === 'undefined') {
         if (!callGraph[cacheIndex])
             callGraph[cacheIndex] = [];
 
-        if (nonCacheableNodes[nodeId]) {
-            return false;
-        }
+        // if (nonCacheableNodes[nodeId]) {
+        //     return false;
+        // }
+
+        // if (nodesByProperties["ND"].indexOf(nodeId)>=0)
+        //     nodesByProperties["ND"].push(cacheIndex);
+        // else if (nodesByProperties["RTI"].indexOf(nodeId)>=0)
+        //     nodesByProperties["RTI"].push(cacheIndex);
+        // else if (nodesByProperties["DOM"].indexOf(nodeId)>=0)
+        //     nodesByProperties["DOM"].push(cacheIndex);
+         // if (nodesByProperties["antiLocal"].indexOf(nodeId)>=0)
+         //    nodesByProperties["antiLocal"].push(cacheIndex);
 
         /*
         * The following snippet analyses the 
         * type of functions based on their arguments
         * data type
         */
-        /*
+        
         let key = nodeId;
         const delim = ';;';
         var _sig = getArgTypes(params,delim);
 
-        if (_sig.indexOf("function") >= 0 ) {
-            nonCacheableNodes[nodeId] = "arg";
-            return false;
-        }
+        // if (_sig.indexOf("function") >= 0 ) {
+        //     nonCacheableNodes[nodeId] = "arg";
+        //     return false;
+        // }
 
-        key +=  delim + params.length + delim + _sig;
+        // key +=  delim + params.length + delim + _sig;
 
-        if (invocations[key])
-            invocations[key]++;
-        else invocations[key] = 1;
-        */
+        // if (invocations[key])
+        //     invocations[key]++;
+        // else invocations[key] = 1;
+        
 
         if (_shadowStackHead) {
             callGraph[_shadowStackHead].push(cacheIndex)
@@ -708,17 +963,27 @@ if (typeof {name} === 'undefined') {
         shadowStack.push(cacheIndex);
         _shadowStackHead = cacheIndex;
 
+        if (invocationsIndName[nodeId] > INVOCATION_LIMIT)
+            return;
+
         if (customLocalStorage[cacheIndex])
             console.error("Same function with same invocation id", cacheIndex);
 
         customLocalStorage[cacheIndex] = {}
-        customLocalStorage[cacheIndex]["writes"] = [];
-        customLocalStorage[cacheIndex]["reads"] = [];
+        customLocalStorage[cacheIndex]["global_writes"] = [];
+        customLocalStorage[cacheIndex]["global_reads"] = [];
+        customLocalStorage[cacheIndex]["argument_reads"] = [];
+        customLocalStorage[cacheIndex]["argument_writes"] = [];
+        customLocalStorage[cacheIndex]["this_reads"] = [];
+        customLocalStorage[cacheIndex]["this_writes"] = [];
+        customLocalStorage[cacheIndex]["closure_reads"] = [];
+        customLocalStorage[cacheIndex]["closure_writes"] = [];
         if (params && params.length != 0) {
-            customLocalStorage[cacheIndex]["arguments"] = {};
-            customLocalStorage[cacheIndex]["arguments"]["before"] = {};
-            customLocalStorage[cacheIndex]["arguments"]["after"] = {};
-            logNonProxyParams(cacheIndex, params);
+            // customLocalStorage[cacheIndex]["arguments"] = {}
+            // customLocalStorage[cacheIndex]["arguments"]["before"] = {};
+            // logNonProxyParams(cacheIndex, params);
+            //Only for capturing the type of arguments:
+            customLocalStorage[cacheIndex]["argProp"] = _sig;
         }
     }
 
@@ -773,19 +1038,8 @@ if (typeof {name} === 'undefined') {
             _shadowStackHead = shadowStack[shadowStack.length - 1];
         else _shadowStackHead = null;
 
-        // Since the signature might be discarded, first check if the customStorage entry exists and then check for arguments
-        if (customLocalStorage[cacheIndex] && customLocalStorage[cacheIndex]["arguments"]) {
-            for (var p in customLocalStorage[cacheIndex]["arguments"]["before"]) {
-                try {
-                    customLocalStorage[cacheIndex]["arguments"]["after"][p] = stringify(params[p]);
-                } catch (e) {
-                    //SUPPRESS
-                    console.log("Error while stringifying arguments object " + e + e.stack);
-                    //discard the entire signature
-                    delete customLocalStorage[nodeId];
-                }
-            }
-        }
+        // if (invocationToArgProxy[cacheIndex])
+        //     invocationToArgProxy[cacheIndex][1] = invocationToArgProxy[cacheIndex][]
     }
 
     this.dumpArguments = function(nodeId, params) {
@@ -795,7 +1049,52 @@ if (typeof {name} === 'undefined') {
         if (customLocalStorage[nodeId]["arguments"])
             customLocalStorage[nodeId]["arguments"]["after"] = params;
         shadowStack.pop();
+    }
 
+    this.createArgumentProxy = function(argObj){
+        if (pageLoaded) return argObj;
+        var nodeId = _shadowStackHead ? _shadowStackHead : null;
+        if (!nodeId || (nodeId && (nonCacheableNodes[nodeId] || exceedsInvocationLimit(nodeId) ))) return argObj;
+        if (!argObj.length) return argObj;
+        if (argObj.__isProxy) argObj = argObj.__target;
+        var proxyHandler = proxyEncapsulation(argObj,"argument");
+        var argProxy = new Proxy(argObj, proxyHandler);
+        // proxyHandler.accessToPrivates().proxyToMethod.set(argProxy, argObj);
+        if (invocationToArgProxy[nodeId]) console.error("invocation already has a previous proxy");
+        invocationToArgProxy[nodeId] = proxyHandler;
+        return argProxy
+    }
+
+    this.createClosureProxy = function(closureObj){
+        if (pageLoaded) return closureObj;
+        var nodeId = _shadowStackHead ? _shadowStackHead : null;
+        if (!nodeId || (nodeId && (nonCacheableNodes[nodeId] || exceedsInvocationLimit(nodeId) ) ) ) return closureObj;
+        if (!Object.keys(closureObj).length) return closureObj;
+        if (closureObj.__isProxy) closureObj = closureObj.__target;
+        var proxyHandler = proxyEncapsulation(closureObj,"closure");
+        var closureProxy = new Proxy(closureObj, proxyHandler);
+        // proxyHandler.accessToPrivates().proxyToMethod.set(closureProxy, closureObj);
+        invocationToClosureProxy[nodeId] = proxyHandler;
+        return closureProxy;
+    }
+
+    /*
+    thisProxy is separate from argument Proxy, as the target object itself could
+    be a proxy object, and we don't want to wrap a proxy on top a proxy
+    therefore, first we check if it already is a proxy and get rid of it, before wrapping
+    it up in a proxy. 
+    */
+    this.createThisProxy = function(thisObj){
+        if (pageLoaded || !thisObj || (typeof thisObj != "function" && typeof thisObj != "object")) return thisObj;
+        var nodeId = _shadowStackHead ? _shadowStackHead : null;
+        if (!nodeId || (nodeId && (functionsSeen.indexOf(nodeId) >= 0 || nonCacheableNodes[nodeId]) || exceedsInvocationLimit(nodeId) ) ) return thisObj;
+        if (thisObj.__isProxy) thisObj = thisObj.__target;
+        var proxyHandler = proxyEncapsulation(thisObj,"this");
+        var thisProxy = new Proxy(thisObj, proxyHandler);
+        // proxyHandler.accessToPrivates().proxyToMethod.set(thisProxy, thisObj);
+        if (invocationToThisProxy[nodeId]) console.error("invocation already has a previous proxy");
+        invocationToThisProxy[nodeId] =   proxyHandler;
+        return thisProxy;
     }
 
     var escapeRegExp = function(str) {
@@ -807,27 +1106,31 @@ if (typeof {name} === 'undefined') {
     }
 
     function stringify(obj) {
+        try {
+            return JSON.stringify(obj, function (key, value) {
+              if (value && value.__isProxy)
+                    value = value.__target;
+              var fnBody;
+              if (value instanceof Function || typeof value == 'function') {
 
-        return JSON.stringify(obj, function (key, value) {
+                if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
+                    return value.name;
+                }
+                fnBody = value.toString();
 
-          var fnBody;
-          if (value instanceof Function || typeof value == 'function') {
-
-            if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
-                return {};
-            }
-            fnBody = value.toString();
-
-            if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { /*this is ES6 Arrow Function*/
-              return '_NuFrRa_' + fnBody;
-            }
-            return fnBody;
-          }
-          if (value instanceof RegExp) {
-            return '_PxEgEr_' + value;
-          }
-          return value;
-        });
+                if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { /*this is ES6 Arrow Function*/
+                  return '_NuFrRa_' + fnBody;
+                }
+                return fnBody;
+              }
+              if (value instanceof RegExp) {
+                return '_PxEgEr_' + value;
+              }
+              return value;
+            });
+        } catch(e){
+            return e;
+        }
     };
 
     function parse(str, date2obj) {
@@ -865,480 +1168,332 @@ if (typeof {name} === 'undefined') {
         });
     };
 
-    toJSON = function(node) {
-        node = node || this;
-        var obj = {
-        nodeType: node.nodeType
-        };
-        if (node.tagName) {
-        obj.tagName = node.tagName.toLowerCase();
-        } else
-        if (node.nodeName) {
-        obj.nodeName = node.nodeName;
-        }
-        if (node.nodeValue) {
-        obj.nodeValue = node.nodeValue;
-        }
-        var attrs = node.attributes;
-        if (attrs) {
-        var length = attrs.length;
-        var arr = obj.attributes = new Array(length);
-        for (var i = 0; i < length; i++) {
-          attr = attrs[i];
-          arr[i] = [attr.nodeName, attr.nodeValue];
-        }
-        }
-        var childNodes = node.childNodes;
-        if (childNodes) {
-        length = childNodes.length;
-        arr = obj.childNodes = new Array(length);
-        for (i = 0; i < length; i++) {
-          arr[i] = toJSON(childNodes[i]);
-        }
-        }
-        return obj;
-    }
-
-    toDOM = function(obj) {
-        if (typeof obj == 'string') {
-        obj = JSON.parse(obj);
-        }
-        var node, nodeType = obj.nodeType;
-        switch (nodeType) {
-        case 1: 
-          node = document.createElement(obj.tagName);
-          var attributes = obj.attributes || [];
-          for (var i = 0, len = attributes.length; i < len; i++) {
-            var attr = attributes[i];
-            node.setAttribute(attr[0], attr[1]);
-          }
-          break;
-        case 3: 
-          node = document.createTextNode(obj.nodeValue);
-          break;
-        case 8: 
-          node = document.createComment(obj.nodeValue);
-          break;
-        case 9: 
-          node = document.implementation.createDocument();
-          break;
-        case 10: 
-          node = document.implementation.createDocumentType(obj.nodeName);
-          break;
-        case 11: 
-          node = document.createDocumentFragment();
-          break;
-        default:
-          return node;
-        }
-        if (nodeType == 1 || nodeType == 11) {
-        var childNodes = obj.childNodes || [];
-        for (i = 0, len = childNodes.length; i < len; i++) {
-          node.appendChild(toDOM(childNodes[i]));
-        }
-        }
-        return node;
-    }
-
-    if (typeof JSON.decycle !== "function") {
-        JSON.decycle = function decycle(object, replacer) {
-            "use strict";
-
-
-            var objects = new WeakMap();     /* object to path mappings*/
-
-            return (function derez(value, path) {
-
-
-                var old_path;   
-                var nu;         
-
-    // If a replacer function was provided, then call it to get a replacement value.
-
-                if (replacer !== undefined) {
-                    value = replacer(value);
-                }
-
-                if (
-                    typeof value === "object" && value !== null &&
-                    !(value instanceof Boolean) &&
-                    !(value instanceof Date) &&
-                    !(value instanceof Number) &&
-                    !(value instanceof RegExp) &&
-                    !(value instanceof String)
-                ) {
-
-    // If the value is an object or array, look to see if we have already
-    // encountered it. If so, return a {"$ref":PATH} object. This uses an
-    // ES6 WeakMap.
-
-                    old_path = objects.get(value);
-                    if (old_path !== undefined) {
-                        return {$ref: old_path};
-                    }
-
-    // Otherwise, accumulate the unique value and its path.
-
-                    objects.set(value, path);
-
-    // If it is an array, replicate the array.
-
-                    if (Array.isArray(value)) {
-                        nu = [];
-                        value.forEach(function (element, i) {
-                            nu[i] = derez(element, path + "[" + i + "]");
-                        });
-                    } else {
-
-    // If it is an object, replicate the object.
-
-                        nu = {};
-                        Object.keys(value).forEach(function (name) {
-                            nu[name] = derez(
-                                value[name],
-                                path + "[" + JSON.stringify(name) + "]"
-                            );
-                        });
-                    }
-                    return nu;
-                }
-                return value;
-            }(object, "$"));
-        };
-    }
-
-
-    if (typeof JSON.retrocycle !== "function") {
-        JSON.retrocycle = function retrocycle($) {
-            "use strict";
-
-            var px = /^\$(?:\[(?:\d+|"(?:[^\\"\u0000-\u001f]|\\([\\"\/bfnrt]|u[0-9a-zA-Z]{4}))*")\])*$/;
-
-            (function rez(value) {
-
-
-                if (value && typeof value === "object") {
-                    if (Array.isArray(value)) {
-                        value.forEach(function (element, i) {
-                            if (typeof element === "object" && element !== null) {
-                                var path = element.$ref;
-                                if (typeof path === "string" && px.test(path)) {
-                                    value[i] = eval(path);
-                                } else {
-                                    rez(element);
-                                }
-                            }
-                        });
-                    } else {
-                        Object.keys(value).forEach(function (name) {
-                            var item = value[name];
-                            if (typeof item === "object" && item !== null) {
-                                var path = item.$ref;
-                                if (typeof path === "string" && px.test(path)) {
-                                    value[name] = eval(path);
-                                } else {
-                                    rez(item);
-                                }
-                            }
-                        });
-                    }
-                }
-            }($));
-            return $;
-        };
-    }
-
-
-});
-
     class SignatureProcessor{
 
-        constructor(signature, objectTree, idToObject, callGraph){
-            this.signature = signature;
-            this.objectTree = objectTree;
-            this.processedSig = {};
-            this.objectToPath = {};
-            this.idToObject = idToObject;
-            this.callGraph = callGraph;
-        }
-
-        process(){
-            var objectToPath = this.objectToPath;
-            var objectTree = this.objectTree;
-            var signature = this.signature;
-            var processedSig = this.processedSig;
-            var idToObject = this.idToObject;
-            var reverseObjectToId = {};
-
-            var init = function(){
-                objectToPath[0] = "window";
+            //ptype - specifies the type of processing to do, by pointing to the node
+            constructor(signature, ObjectTree, callGraph, pType){
+                this.signature = signature;
+                this.objectTree = ObjectTree;
+                this.processedSig = {};
+                this.objectToPathPerOT = {"this":{}};
+                this.callGraph = callGraph;
+                this.logType = pType;
             }
 
-            var stringify = function (obj) {
+            process(){
+                var objectToPathPerOT = this.objectToPathPerOT;
+                var objectTreeThis = this.objectTree;
+                var signature = this.signature;
+                var processedSig = this.processedSig;
+                var reverseObjectToId = {};
+                var logType = this.logType;
+                var callGraph = this.callGraph;
 
-                return JSON.stringify(obj, function (key, value) {
-
-                  var fnBody;
-                  if (value instanceof Function || typeof value == 'function') {
-
-                    if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
-                        return {};
-                    }
-                    fnBody = value.toString();
-
-                    if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { //this is ES6 Arrow Function
-                      return '_NuFrRa_' + fnBody;
-                    }
-                    return fnBody;
-                  }
-                  if (value instanceof RegExp) {
-                    return '_PxEgEr_' + value;
-                  }
-                  return value;
-                });
-            };
-
-            var _removeRedundantReads = function(nodeId, writeArray){
-                var readLength = signature[nodeId].reads.length;
-                if (readLength) {
-                    while (readLength--){
-                        if ( signature[nodeId].reads[readLength][0] == writeArray[0] && signature[nodeId].reads[readLength][1] == writeArray[1] )
-                            signature[nodeId].reads.splice(readLength, 1);
+                var init = function(){
+                    switch(logType){
+                        case  "global" :
+                            objectToPathPerOT.this[0] = "window";
+                            break;
+                        case "argument" :
+                            objectToPathPerOT.this[0] = "arguments"
+                            break;
+                        case "closure":
+                            objectToPathPerOT.this[0] = "closure"
+                            break;
+                        case "this" :
+                            objectToPathPerOT.this[0] = "this";
+                            break;
                     }
                 }
-            }
-            var removeReduntantReads = function(){
-                for (var nodeId in signature){
-                    if (signature[nodeId].writes.length) {
-                        signature[nodeId].writes.forEach(function(write){
-                            _removeRedundantReads(nodeId, write);
-                        })
-                    }
-                }
-            }
 
-            /*
-            While constructing paths instead of using the dot operator for properties
-            we use the bracket operators for two reasons
-            - If the property is a number
-            - if the property has special symbols like dot itlelf or spaces
-            */
+                var stringify = function (obj) {
 
-            var constructPath = function(objectId){
-                if (objectToPath[objectId]) return objectToPath[objectId];
-                var path = "";
-                for (var nodeId in objectTree){
-                    for (var edge in objectTree[nodeId]) {
-                        var _id = objectTree[nodeId][edge].indexOf(objectId);
-                        if (_id) {
-                            var parentPath = constructPath(nodeId);
-                            path = parentPath + "['" + edge.substr(2) + "']";
-                            objectToPath[objectId] = path;
-                            return path;
+                    return JSON.stringify(obj, function (key, value) {
+                      if (value.__isProxy)
+                        value = value.__target;
+                      var fnBody;
+                      if (value instanceof Function || typeof value == 'function') {
+                        return value.toString();
+
+                        if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
+                            return {};
+                        }
+                        fnBody = value.toString();
+
+                        if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { //this is ES6 Arrow Function
+                          return '_NuFrRa_' + fnBody;
+                        }
+                        return fnBody;
+                      }
+                      if (value instanceof RegExp) {
+                        return '_PxEgEr_' + value;
+                      }
+                      return value;
+                    });
+                };
+
+                var _removeRedundantReads = function(nodeId, writeArray){
+                    var readLength = signature[nodeId].reads.length;
+                    if (readLength) {
+                        while (readLength--){
+                            if ( signature[nodeId].reads[readLength][0] == writeArray[0] && signature[nodeId].reads[readLength][1] == writeArray[1] )
+                                signature[nodeId].reads.splice(readLength, 1);
                         }
                     }
                 }
-                console.error("NO PATH FOUND FOR OBJECT ID: " + objectId);
-            }
+                var removeReduntantReads = function(){
+                    for (var nodeId in signature){
+                        if (signature[nodeId].writes.length) {
+                            signature[nodeId].writes.forEach(function(write){
+                                _removeRedundantReads(nodeId, write);
+                            })
+                        }
+                    }
+                }
 
-            var reverseLookup = function(objectId) {
-                if (reverseObjectToId[objectId]) return reverseObjectToId[objectId];
+                /*
+                While constructing paths instead of using the dot operator for properties
+                we use the bracket operators for two reasons
+                - If the property is a number
+                - if the property has special symbols like dot itlelf or spaces
+                */
 
-            }
-
-            var preProcess = function(){
-                for (var nodeId in objectTree) {
-                    var parentPath = constructPath(nodeId);
-                    if (!parentPath) console.error("NO PARENT PATH FOUND WHILE PREPROCESSING " + nodeId );
-                    for (var edge in objectTree[nodeId]) {
-                        objectTree[nodeId][edge].forEach(function(objectId){
-                             if (!objectToPath[objectId]) {
-                                var path = parentPath + "['" + edge.substr(2) + "']";
-                                objectToPath[objectId] = path;
+                var constructPath = function(objectId, OT="this"){
+                    if (!objectToPathPerOT[OT]) objectToPathPerOT[OT] = {0:"arguments"};
+                    if (objectToPathPerOT[OT][objectId]) return objectToPathPerOT[OT][objectId];
+                    var path = "";
+                    var objectTree = OT == "this" ? objectTreeThis : invocationToArgProxy[OT].accessToPrivates().ObjectTree;
+                    for (var nodeId in objectTree){
+                        for (var edge in objectTree[nodeId]) {
+                            var _id = objectTree[nodeId][edge].indexOf(objectId);
+                            if (_id) {
+                                var parentPath = constructPath(nodeId, OT);
+                                path = parentPath + "['" + edge.substr(2) + "']";
+                                objectToPathPerOT[OT][objectId] = path;
+                                return path;
                             }
-                        })
+                        }
+                    }
+                    // console.error("NO PATH FOUND FOR OBJECT ID: " + objectId);
+                }
+
+                var reverseLookup = function(objectId) {
+                    if (reverseObjectToId[objectId]) return reverseObjectToId[objectId];
+
+                }
+
+                var preProcess = function(OT){
+                    var objectTree = OT == "this" ? objectTreeThis : invocationToArgProxy[OT].accessToPrivates().ObjectTree;
+                    for (var nodeId in objectTree) {
+                        var parentPath = constructPath(nodeId, OT);
+                        // if (!parentPath) console.error("NO PARENT PATH FOUND WHILE PREPROCESSING " + nodeId );
+                        for (var edge in objectTree[nodeId]) {
+                            objectTree[nodeId][edge].forEach(function(objectId){
+                                 if (!objectToPathPerOT.this[objectId]) {
+                                    var path = parentPath + "['" + edge.substr(2) + "']";
+                                    objectToPathPerOT.this[objectId] = path;
+                                }
+                            })
+                        }
                     }
                 }
-            }
 
-            var fetchValue = function(log){
-                var _id = parseInt(log);
-                if (!isNaN(_id))
-                    return idToObject.get(_id);
-                else
-                    return log.substr(2);
-            }
+                var fetchValue = function(log){
+                    var _id = parseInt(log);
+                    if (!isNaN(_id))
+                        return idToObject.get(_id);
+                    else
+                        return log.substr(2);
+                }
 
-            var processRead = function(nodeId){
-                var readSignature;
-                var readArray = signature[nodeId].reads;
-                processedSig[nodeId].reads = [];
-                readArray.forEach(function(read){
-                    var parentPath = objectToPath[read[0]];
-                    if (!parentPath) console.log("no parent path found for object id:" + JSON.stringify(read) + " " + nodeId);
-                    try {
-                        var readString;
-                        if (typeof read[1] == 'symbol')
-                            readString = read[1].toString()
-                        else readString = read[1] + '';
-                        var path = parentPath + "['" + readString + "']";
-                        readSignature = path + " = " + stringify(fetchValue(read[2]));
-                    } catch (e) {
-                        //TODO
-                        //suppressing for now
-                        //SUPPRESS
-                        // console.log("Error while trying to stringify path: " + e + e.stack);
-                    }
-                    if (readSignature)
-                        processedSig[nodeId].reads.push(readSignature);
-                })
-            }
+                var processRead = function(nodeId){
+                    var readSignature;
+                    var readArray = signature[nodeId][logType+"_reads"];
+                    processedSig[nodeId][logType+"_reads"] = [];
+                    readArray.forEach(function(read){
+                        var OT = "this"
+                        if (OT != "this")
+                            preProcess(OT);
+                        var parentPath = objectToPathPerOT[OT][read[0]]
+                        // if (!parentPath) console.log("no parent path found for object id:" + JSON.stringify(read) + " " + nodeId);
+                        try {
+                            var readString;
+                            if (typeof read[1] == 'symbol')
+                                readString = read[1].toString()
+                            else readString = read[1] + '';
+                            var path = parentPath + "['" + readString + "']";
+                            var readVal = read[2];
+                            readSignature = path + " = " + readVal;
+                        } catch (e) {
+                            //TODO
+                            //suppressing for now
+                            //SUPPRESS
+                            // console.log("Error while trying to stringify path: " + e + e.stack);
+                        }
+                        if (readSignature) {
+                            if (detectProperty(readVal)) processedSig[nodeId].isFunction = true;
+                            processedSig[nodeId][logType+"_reads"].push(readSignature);
+                        }
+                    })
+                }
 
-            var processWrite = function(nodeId){
-                var writeSignature;
-                var writeArray = signature[nodeId].writes;
-                processedSig[nodeId].writes = [];
-                writeArray.forEach(function(write){
-                    var parentPath = objectToPath[write[0]];
-                    if (!parentPath) console.log("no parent path found for object id:" + JSON.stringify(write) + " " + nodeId);
-                    var path = parentPath + "['" + write[1] + "']"; 
-                    try {
-                        writeSignature = path + " = " + stringify(fetchValue(write[2]));
-                    } catch (e) {
-                        //TODO
-                        //suppressing for now
-                        //SUPPRESS
-                        // console.log("Error while stringifying path: " + e + e.stack);
-                    }
-                    if (writeSignature)
-                        processedSig[nodeId].writes.push(writeSignature);
-                })
+                var processWrite = function(nodeId){
+                    var writeSignature;
+                    var writeArray = signature[nodeId][logType+"_writes"];
+                    processedSig[nodeId][logType+"_writes"] = [];
+                    writeArray.forEach(function(write){
+                        var OT = "this"
+                        if (OT != "this")
+                            preProcess(OT);
+                        var parentPath = objectToPathPerOT[OT][write[0]];
+                        if (!parentPath) console.log("no parent path found for object id:" + JSON.stringify(write) + " " + nodeId);
+                        var path = parentPath + "['" + write[1] + "']"; 
+                        try {
+                            var writeVal = write[2];
+                            writeSignature = path + " = " + writeVal;
+                        } catch (e) {
+                            //TODO
+                            //suppressing for now
+                            //SUPPRESS
+                            // console.log("Error while stringifying path: " + e + e.stack);
+                        }
+                        if (writeSignature) {
+                            if (detectProperty(writeVal)) processedSig[nodeId].isFunction = true;
+                            processedSig[nodeId][logType+"_writes"].push(writeSignature);
+                        }
+                    })
 
-            }
+                }
 
-            init();
-            preProcess();
-            //cleanup signatures ie remove a read after write
-            // removeReduntantReads();
+                //Generic function to detect a specific property of the signature
+                var detectProperty = function(obj, property="function"){
+                    if (typeof obj == "string")
+                        return obj.split(';;').indexOf(property) >=0;
+                    else if (typeof obj == property) return true;
+                    else return false;
+                }
 
-            Object.keys(this.signature).forEach(function(nodeId){
-                processedSig[nodeId] = {};
-                if (signature[nodeId].reads && signature[nodeId].reads.length)
-                    processRead(nodeId)
-                if (signature[nodeId].writes && signature[nodeId].writes.length)
-                    processWrite(nodeId)
-                processedSig[nodeId].arguments = signature[nodeId].arguments;
-                processedSig[nodeId].returnValue = signature[nodeId].returnValue;
-            });
 
-        }
+                init();
+                preProcess("this");
+                //cleanup signatures ie remove a read after write
+                // removeReduntantReads();
 
-        postProcess() {
-            var processedSig = this.processedSig;
-
-            var _removeRedundantReads = function(keyArray){
-                var redundantIndices = [];
-                keyArray.forEach(key => {
-                    var indices = keyArray.keys();
-                    for (var i of indices) {
-                        if (key.trim().indexOf(keyArray[i].trim()) >= 0 && keyArray[i].trim() != key.trim())
-                            redundantIndices.push(i);
-                    }
+                Object.keys(this.signature).forEach(function(nodeId){
+                    // Return if not leaf node
+                    if (trackOnlyLeaf &&  callGraph[nodeId].length) return;
+                    processedSig[nodeId] = {};
+                    if (signature[nodeId][logType+"_reads"] && signature[nodeId][logType+"_reads"].length)
+                        processRead(nodeId)
+                    if (signature[nodeId][logType+"_writes"] && signature[nodeId][[logType+"_writes"]].length)
+                        processWrite(nodeId)
+                    Object.keys(signature[nodeId]).forEach((key)=>{
+                        if (!processedSig[nodeId][key]) {
+                            if (detectProperty(signature[nodeId][key])) processedSig[nodeId].isFunction = true;
+                            processedSig[nodeId][key] = signature[nodeId][key];
+                        }
+                    })
                 });
 
-                return [...(new Set(redundantIndices))]
             }
 
-            var removeReduntantReads = function(nodeId){
-                var readArray = processedSig[nodeId].reads;
-                var keys = readArray.map(key => key.split('=')[0].trim());
-                var redundantIndices = _removeRedundantReads(keys);
-                for (var index = redundantIndices.length-1; index >= 0; index--)
-                    readArray.splice(redundantIndices[index],1);
-                // redundantIndices.forEach(index => {
-                //     readArray.splice(index, 1);
-                // });
-            }
-
-            Object.keys(processedSig).forEach(function(nodeId){
-                if (processedSig[nodeId].reads)
-                    removeReduntantReads(nodeId);
-                // var readArray = processedSig[nodeId].reads;
-                // if (readArray && readArray.length) {
-                //     readArray = new Set(readArray);
-                //     processedSig[nodeId].reads = readArray;
-                // }
-                // var writeArray = processedSig[nodeId].writes;
-                // if (writeArray && writeArray.length) {
-                //     writeArray = new Set(writeArray);
-                //     processedSig[nodeId].writes = writeArray;
-                // }
-
-            });
-        }
-
-        signaturePropogate() {
-            var callGraph = this.callGraph;
-            var processedSig = this.processedSig;
-
-            var mergeArray = function(dstSig, srcSig) {
-                srcSig.forEach((sig) => {
-                    if (dstSig.indexOf(sig) < 0)
-                        dstSig.push(sig);
-                });
-            }
-
-            var mergeInto = function(dstNode, srcNode) {
-                if (processedSig[srcNode] && processedSig[srcNode].reads) {
-                    if (processedSig[dstNode] && !processedSig[dstNode].reads) 
-                        processedSig[dstNode].reads = [];
-                    mergeArray(processedSig[dstNode].reads, processedSig[srcNode].reads);
-                }
-
-                if (processedSig[srcNode] && processedSig[srcNode].writes) {
-                    if (processedSig[dstNode] && !processedSig[dstNode].writes ) 
-                        processedSig[dstNode].writes = [];
-                    mergeArray(processedSig[dstNode].writes, processedSig[srcNode].writes);
-                }
-            }
-
-            var traverseGraph = function() {
-                Object.keys(callGraph).forEach((nodeId) => {
-                    var children = callGraph[nodeId];
-                    children.forEach((child) => {
-                        if (processedSig[nodeId])
-                            mergeInto(nodeId, child);
+            postProcess() {
+                var processedSig = this.processedSig;
+                var callGraph = this.callGraph;
+                var logType = this.logType;
+                var _removeRedundantReads = function(keyArray){
+                    var redundantIndices = [];
+                    keyArray.forEach(key => {
+                        var indices = keyArray.keys();
+                        for (var i of indices) {
+                            if (key.trim().indexOf(keyArray[i].trim()) >= 0 && keyArray[i].trim() != key.trim())
+                                redundantIndices.push(i);
+                        }
                     });
+
+                    return [...(new Set(redundantIndices))]
+                }
+
+                var removeReduntantReads = function(nodeId){
+                    var readArray = processedSig[nodeId][logType+"_reads"];
+                    var keys = readArray.map(key => key.split('=')[0].trim());
+                    var redundantIndices = _removeRedundantReads(keys);
+                    for (var index = redundantIndices.length-1; index >= 0; index--)
+                        readArray.splice(redundantIndices[index],1);
+                    // redundantIndices.forEach(index => {
+                    //     readArray.splice(index, 1);
+                    // });
+                }
+
+                Object.keys(processedSig).forEach(function(nodeId){
+                    if (trackOnlyLeaf && callGraph[nodeId].length) return;
+                    if (processedSig[nodeId][logType+"_reads"])
+                        removeReduntantReads(nodeId);
+                    // var readArray = processedSig[nodeId].reads;
+                    // if (readArray && readArray.length) {
+                    //     readArray = new Set(readArray);
+                    //     processedSig[nodeId].reads = readArray;
+                    // }
+                    // var writeArray = processedSig[nodeId].writes;
+                    // if (writeArray && writeArray.length) {
+                    //     writeArray = new Set(writeArray);
+                    //     processedSig[nodeId].writes = writeArray;
+                    // }
+
                 });
             }
 
-            /*
-            Need to propagate the signature twice, due to the order of invocation
-            eg: callgraph -> function0 : function 1
-                             function1 : function2
-                             if 1 is propagated to 0 before 2 is propagated to 1, then 0 won't 
-                             contain 2'signature.
-            */
-            traverseGraph();
-            traverseGraph();
+            signaturePropogate() {
+                var callGraph = this.callGraph;
+                var processedSig = this.processedSig;
+                var logType = this.logType;
+                var mergeArray = function(dstSig, srcSig) {
+                    srcSig.forEach((sig) => {
+                        if (dstSig.indexOf(sig) < 0)
+                            dstSig.push(sig);
+                    });
+                }
 
-        }
+                var mergeInto = function(dstNode, srcNode) {
+                    if (processedSig[srcNode] && processedSig[srcNode].isFunction)
+                        processedSig[dstNode].isFunction = true;
+                    if (processedSig[srcNode] && processedSig[srcNode][logType+"_reads"]) {
+                        if (processedSig[dstNode] && !processedSig[dstNode][logType+"_reads"]) 
+                            processedSig[dstNode][logType+"_reads"] = [];
+                        mergeArray(processedSig[dstNode][logType+"_reads"], processedSig[srcNode][logType+"_reads"]);
+                    }
+
+                    if (processedSig[srcNode] && processedSig[srcNode][logType+"_writes"]) {
+                        if (processedSig[dstNode] && !processedSig[dstNode][logType+"_writes"] ) 
+                            processedSig[dstNode][logType+"_writes"] = [];
+                        mergeArray(processedSig[dstNode][logType+"_writes"], processedSig[srcNode][logType+"_writes"]);
+                    }
+                }
+
+                var traverseGraph = function() {
+                    Object.keys(callGraph).forEach((nodeId) => {
+                        var children = callGraph[nodeId];
+                        children.forEach((child) => {
+                            if (processedSig[nodeId])
+                                mergeInto(nodeId, child);
+                        });
+                    });
+                }
+
+                /*
+                Need to propagate the signature twice, due to the order of invocation
+                eg: callgraph -> function0 : function 1
+                                 function1 : function2
+                                 if 1 is propagated to 0 before 2 is propagated to 1, then 0 won't 
+                                 contain 2'signature.
+                */
+                traverseGraph();
+                traverseGraph();
+
+            }
     }
+
+});
 
 }
 (function () { {name}.setGlobal(this); })();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

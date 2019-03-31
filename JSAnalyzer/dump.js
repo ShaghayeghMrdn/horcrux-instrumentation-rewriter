@@ -330,6 +330,191 @@
 
 
 
+        toJSON = function(node) {
+        node = node || this;
+        var obj = {
+        nodeType: node.nodeType
+        };
+        if (node.tagName) {
+        obj.tagName = node.tagName.toLowerCase();
+        } else
+        if (node.nodeName) {
+        obj.nodeName = node.nodeName;
+        }
+        if (node.nodeValue) {
+        obj.nodeValue = node.nodeValue;
+        }
+        var attrs = node.attributes;
+        if (attrs) {
+        var length = attrs.length;
+        var arr = obj.attributes = new Array(length);
+        for (var i = 0; i < length; i++) {
+          attr = attrs[i];
+          arr[i] = [attr.nodeName, attr.nodeValue];
+        }
+        }
+        var childNodes = node.childNodes;
+        if (childNodes) {
+        length = childNodes.length;
+        arr = obj.childNodes = new Array(length);
+        for (i = 0; i < length; i++) {
+          arr[i] = toJSON(childNodes[i]);
+        }
+        }
+        return obj;
+    }
+
+    toDOM = function(obj) {
+        if (typeof obj == 'string') {
+        obj = JSON.parse(obj);
+        }
+        var node, nodeType = obj.nodeType;
+        switch (nodeType) {
+        case 1: 
+          node = document.createElement(obj.tagName);
+          var attributes = obj.attributes || [];
+          for (var i = 0, len = attributes.length; i < len; i++) {
+            var attr = attributes[i];
+            node.setAttribute(attr[0], attr[1]);
+          }
+          break;
+        case 3: 
+          node = document.createTextNode(obj.nodeValue);
+          break;
+        case 8: 
+          node = document.createComment(obj.nodeValue);
+          break;
+        case 9: 
+          node = document.implementation.createDocument();
+          break;
+        case 10: 
+          node = document.implementation.createDocumentType(obj.nodeName);
+          break;
+        case 11: 
+          node = document.createDocumentFragment();
+          break;
+        default:
+          return node;
+        }
+        if (nodeType == 1 || nodeType == 11) {
+        var childNodes = obj.childNodes || [];
+        for (i = 0, len = childNodes.length; i < len; i++) {
+          node.appendChild(toDOM(childNodes[i]));
+        }
+        }
+        return node;
+    }
+
+    if (typeof JSON.decycle !== "function") {
+        JSON.decycle = function decycle(object, replacer) {
+            "use strict";
+
+
+            var objects = new WeakMap();     /* object to path mappings*/
+
+            return (function derez(value, path) {
+
+
+                var old_path;   
+                var nu;         
+
+    // If a replacer function was provided, then call it to get a replacement value.
+
+                if (replacer !== undefined) {
+                    value = replacer(value);
+                }
+
+                if (
+                    typeof value === "object" && value !== null &&
+                    !(value instanceof Boolean) &&
+                    !(value instanceof Date) &&
+                    !(value instanceof Number) &&
+                    !(value instanceof RegExp) &&
+                    !(value instanceof String)
+                ) {
+
+    // If the value is an object or array, look to see if we have already
+    // encountered it. If so, return a {"$ref":PATH} object. This uses an
+    // ES6 WeakMap.
+
+                    old_path = objects.get(value);
+                    if (old_path !== undefined) {
+                        return {$ref: old_path};
+                    }
+
+    // Otherwise, accumulate the unique value and its path.
+
+                    objects.set(value, path);
+
+    // If it is an array, replicate the array.
+
+                    if (Array.isArray(value)) {
+                        nu = [];
+                        value.forEach(function (element, i) {
+                            nu[i] = derez(element, path + "[" + i + "]");
+                        });
+                    } else {
+
+    // If it is an object, replicate the object.
+
+                        nu = {};
+                        Object.keys(value).forEach(function (name) {
+                            nu[name] = derez(
+                                value[name],
+                                path + "[" + JSON.stringify(name) + "]"
+                            );
+                        });
+                    }
+                    return nu;
+                }
+                return value;
+            }(object, "$"));
+        };
+    }
+
+
+    if (typeof JSON.retrocycle !== "function") {
+        JSON.retrocycle = function retrocycle($) {
+            "use strict";
+
+            var px = /^\$(?:\[(?:\d+|"(?:[^\\"\u0000-\u001f]|\\([\\"\/bfnrt]|u[0-9a-zA-Z]{4}))*")\])*$/;
+
+            (function rez(value) {
+
+
+                if (value && typeof value === "object") {
+                    if (Array.isArray(value)) {
+                        value.forEach(function (element, i) {
+                            if (typeof element === "object" && element !== null) {
+                                var path = element.$ref;
+                                if (typeof path === "string" && px.test(path)) {
+                                    value[i] = eval(path);
+                                } else {
+                                    rez(element);
+                                }
+                            }
+                        });
+                    } else {
+                        Object.keys(value).forEach(function (name) {
+                            var item = value[name];
+                            if (typeof item === "object" && item !== null) {
+                                var path = item.$ref;
+                                if (typeof path === "string" && px.test(path)) {
+                                    value[name] = eval(path);
+                                } else {
+                                    rez(item);
+                                }
+                            }
+                        });
+                    }
+                }
+            }($));
+            return $;
+        };
+    }
+
+
+
 
     /* The following code is from util.js*/
 

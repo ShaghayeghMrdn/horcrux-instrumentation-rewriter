@@ -24,17 +24,17 @@ var extractIdentifiers = function(node){
         // console.log("checking for " + node.source() + "with type " + node.type)
         if (node == null || node.type == "Literal")
             return;
-        if (node.type == "Identifier") {
+        if (node.type == "Identifier" || node.type == "ThisExpression") {
             readArray.push(node)
             return;
         } /*else if (node.type == "BinaryExpression" || node.type == "LogicalExpression") {
             readRecursively(node.left);
             readRecursively(node.right);
-        }*/ else if (node.type == "MemberExpression") {
+        }*/ /*else if (node.type == "MemberExpression") {
             readRecursively(node.object);
             if (node.computed)
                 readRecursively(node.property);
-        } else if (node.type == "UnaryExpression" || node.type == "UpdateExpression") {
+        }*/ else if (node.type == "UnaryExpression") {
                 readRecursively(node.argument);
         } else if (node.type == "ConditionalExpression") {
             readRecursively(node.test);
@@ -42,7 +42,7 @@ var extractIdentifiers = function(node){
             readRecursively(node.alternate);
         } else if (node.type == "ObjectExpression") {
             node.properties.forEach(function(elem){
-                readRecursively(elem);
+                readRecursively(elem.value);
             });
             // readArray.push(node);
         } else if (node.type == "ArrayExpression") {
@@ -54,11 +54,12 @@ var extractIdentifiers = function(node){
             node.arguments.forEach(function(arg){
                 readRecursively(arg);
             });
-        } else if (node.type == "FunctionExpression") {
+            //WTF am I doing this?
+        } /*else if (node.type == "FunctionExpression") {
             node.params.forEach(function(arg){
                 readRecursively(arg);
             })
-        } else if (node.type == "AssignmentExpression"){
+        } */ else if (node.type == "AssignmentExpression"){
             /* DOn't need to handle this case, as the right hand side assignment expression will handle it's own reads during the assignment expression node type callback*/
             // readArray = handleAssignmentExpressions(node);
         } else if (node.type == "SequenceExpression"){
@@ -72,7 +73,21 @@ var extractIdentifiers = function(node){
     return readArray; 
 }
 
-
+var isParamOfFunction = function(node){
+    //Find the first parent of the type function expression or declaration
+    // and test whether it is a param of that immediate function parent
+    var parent = node;
+    var isParam = false;
+    while (parent != null && parent.type != "FunctionExpression" && parent.type != "FunctionDeclaration")
+        parent = parent.parent;
+    if (parent != null) {
+        parent.params.forEach((param)=>{
+            if (param == node)
+                isParam = true;
+        })
+    }
+    return isParam;
+}
 var handleReads = function(node) {
     // console.log("handling for reads: " +  node.source() + " " + node.type);
 
@@ -86,7 +101,7 @@ var handleReads = function(node) {
         var _isLocal = scope.IsLocalVariable(read)
         if (_isLocal == -3  )
             globalReads.push(read);
-        else if (_isLocal >= 0)
+        else if (_isLocal >= 0 && !isParamOfFunction(read))
             argReads.push({ind:_isLocal,val:read});
         else if (_isLocal == -2)
             localReads.push(read);

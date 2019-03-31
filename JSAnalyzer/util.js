@@ -1,7 +1,8 @@
 
 
-var javascriptReservedWords = ['Promise','XMLHttpRequest','$','Array','abstract','arguments','await','boolean','break','byte','case','catch','char','class','const','continue','Date','debugger','define','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','this','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','require','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
-var uncacheableFunctions =[];
+var javascriptReservedWords = ['amzn_aps_csm','Promise','XMLHttpRequest','$','Array','abstract','arguments','await','boolean','break','byte','this','case','catch','char','class','const','continue','Date','debugger','define','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','require','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
+var uncacheableFunctions ={"RTI":[], "antiLocal":[], "DOM":[], "ND":[]};
+var options;
 
 var getArgs = function (node) {
     var args = [];
@@ -22,6 +23,7 @@ also do alias replacement and local variable replacement before
 creating the log array*/
 
 var matchASTNodewithRTINode = function(rtiNode, AST, options, srcMap){
+    options = options;
     console.log("Trying to match rtiNode" + JSON.stringify(rtiNode),__filename);
     if (!rtiNode) return;
     var matchingNodesWithLocation = [], matchingNodesWithFnNames = [];
@@ -31,13 +33,17 @@ var matchASTNodewithRTINode = function(rtiNode, AST, options, srcMap){
                 return astNode.id.name;
         } else if(astNode.type == "FunctionExpression" || astNode.type == "ArrowFunctionExpression" || astNode.type == "NewExpression"){
                 var fnName;
+
+                //Even an expression might have an identifier
+                if (astNode.id)
+                    return astNode.id.name;
                 //The parent could be declaration or an assignment
                 if (astNode.parent.type == "VariableDeclarator"){
                     return astNode.parent.id.name;
                 } else if (astNode.parent.type == "AssignmentExpression"){
                     return astNode.parent.left.name;
                 } else {
-                    console.log("[matchASTNodewithRTINode] Assuming this function to be anonymous" + srcMap.get(astNode),__filename);
+                    // console.log("[matchASTNodewithRTINode] Assuming this function to be anonymous" + srcMap.get(astNode),__filename);
                     return null;
                 }
                 
@@ -58,13 +64,15 @@ var matchASTNodewithRTINode = function(rtiNode, AST, options, srcMap){
             astLoc.ln+=astNode.loc.start.line;
             astLoc.cn+=astNode.loc.start.column;
             astLoc.cn+=astNode.type=="FunctionExpression"?"function".length:0 
+            // if (astNode.parent.type == "Property")
+            //     astLoc.cn+=1;
         }
         if (options.scriptOffset)
             astLoc.ln += options.scriptOffset.offset;
         if (JSON.stringify(astLoc) == JSON.stringify(rtiLoc) && rtiNode.url.endsWith(options.origPath))
             return true;
         else {
-            console.log("[matchASTNodewithRTINode][locationCondition] No match against"  + JSON.stringify(astLoc),__filename);
+            // console.log("[matchASTNodewithRTINode][locationCondition] No match against"  + JSON.stringify(astLoc),__filename);
             return false;
         }
     }
@@ -87,7 +95,8 @@ var matchASTNodewithRTINode = function(rtiNode, AST, options, srcMap){
                 } 
             }
         })
-        if (!foundMatch) 
+        //options.path and options.origPath are same when the file is a JS file
+        if (!foundMatch && options.path == options.origPath) 
             console.error("[matchASTNodewithRTINode] MATCH NOT FOUND for rti node" + JSON.stringify(rtiNode.functionName));
     
     }
@@ -98,8 +107,8 @@ var matchASTNodewithRTINode = function(rtiNode, AST, options, srcMap){
             if (rtiNode.functionName.indexOf("anonymous")>=0)
                 return true;
             else {
-                console.log("[matchASTNodewithRTINode][matchFunctionName]  ast node is null, but rti node is not anonymous " +
-                 JSON.stringify(rtiNode.functionName) + " " + srcMap.get(astNode),__filename);
+                // console.log("[matchASTNodewithRTINode][matchFunctionName]  ast node is null, but rti node is not anonymous " +
+                //  JSON.stringify(rtiNode.functionName) + " " + srcMap.get(astNode),__filename);
                 return true;
             }
         }
@@ -135,11 +144,11 @@ var logWritesHelper = function(node, aliasValue) {
 
 var getFunctionIdentifier = function(node) {
     if (node == null) return null;
-    parent = node.parent;
+    parent = node;
     while (parent != undefined){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression") {
-            if (uncacheableFunctions.indexOf(parent)>=0) return null
-            else return parent.loc;
+            if (uncacheableFunctions["RTI"] && uncacheableFunctions["RTI"].indexOf(parent)>=0) return null
+            else return parent;
         } else if (parent.type == "ArrowFunctionExpression")
         return null;
         parent = parent.parent;
@@ -179,6 +188,39 @@ var getAllIdentifiersFromMemberExpression = function(node) {
     }
     recurseThroughProps(node);
     return properties;
+}
+
+/*
+Returns true for member expression which are child of call expression
+for example, a.b(), the node a.b returns true
+however, a(b.c), here b.c doesn't return true, even though
+it is a child of a call expression
+*/
+var isChildOfCallExpression = function(node){
+    if (node == null) return;
+    if (node.type == "CallExpression") return true;
+    if (node.parent.type == "MemberExpression")
+        return isChildOfCallExpression(node.parent)
+    if (node.parent.type == "CallExpression" && !isArgofCallExpression(node))
+        return isChildOfCallExpression(node.parent);
+    return false;
+}
+
+var isArgofCallExpression = function(node){
+    var ce = node;
+    var findCE = function(n){
+        if (!n) return null;
+        if (n.type == "CallExpression") return n;
+        if (n.parent.type == "MemberExpression" || n.parent.type == "CallExpression")
+            return findCE(n.parent);
+        return null;
+    }
+
+    ce = findCE(node);
+    if (!ce) return false;
+    if (ce.arguments && ce.arguments.indexOf(node)>=0) return true;
+
+    return false;
 }
 
 var checkForWindowObject = function(arrayOfIdentifiers){
@@ -292,11 +334,13 @@ module.exports = {
     getIdentifierFromMemberExpression: getIdentifierFromMemberExpression,
     getIdentifierFromGenericExpression: getIdentifierFromGenericExpression,
     getFunctionIdentifier: getFunctionIdentifier,
-    escapeRegExp: escapeRegExp,
+    escapeRegExp2: escapeRegExp2,
     containsRange: containsRange,
     customMergeDeep: customMergeDeep,
     checkForWindowObject: checkForWindowObject,
     checkIfReservedWord:checkIfReservedWord,
     matchASTNodewithRTINode:matchASTNodewithRTINode,
-    uncacheableFunctions: uncacheableFunctions
+    uncacheableFunctions: uncacheableFunctions,
+    isChildOfCallExpression:isChildOfCallExpression,
+    isArgofCallExpression: isArgofCallExpression
 }
