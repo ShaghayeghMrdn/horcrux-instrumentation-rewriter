@@ -6,7 +6,8 @@ if (process.argv.length < 4) {
 	console.error("Invalid command: Usage: node small.js <flag> <filename>");
 	process.exit();
 } else if (process.argv[2] != "-sum" && process.argv[2] != "-simple" && process.argv[2] != "-complex" && process.argv[2] != "-plt"
-    && process.argv[2] != "-fn" && process.argv[2] != "-cache" && process.argv[2] != "-js" && process.argv[2]!= "-invoc") {
+    && process.argv[2] != "-fn" && process.argv[2] != "-cache" && process.argv[2] != "-js" && process.argv[2]!= "-invoc"
+    && process.argv[2] != "-jsProfile" && process.argv[2]!="--mem" ) {
     console.error("Invalid flag, only -simple and -complex supported");
     process.exit();
 }
@@ -51,15 +52,48 @@ var computeCategories = function(){
     return result;
 }
 
-var processInvocationProperties = function(invoObj){
+var processInvocationProperties = function(invoObj,totalValue){
     Object.keys(invoObj).forEach((key)=>{
         if (key == "Function")
-            invoObj[key] = processInvocationProperties(invoObj[key]);
+            invoObj[key] = processInvocationProperties(invoObj[key], invoObj.TOTAL);
         else {
-            invoObj[key] = invoObj[key].filter((node)=>{return node.indexOf("_count")>=0});
-            process.stdout.write(util.format(key, invoObj[key].length," "));
+            // invoObj[key] = invoObj[key].filter((node)=>{return node.indexOf("_count")>=0});
+            var ttime = totalValue ? totalValue : invoObj.TOTAL;
+            // if (key != "RTI" && key != "DOM" && key != "ND" && key != "antiLocal" && key != "noarg")
+            if (key =="TOTAL")
+                process.stdout.write(util.format(invoObj[key]));
         }
+    });
+    // console.log(invoObj.TOTAL);
+}
+var median = function(values){
+    values.sort(function(a,b){
+    return a-b;
+  });
+
+  if(values.length ===0) return 0
+
+  var half = Math.floor(values.length / 2);
+
+  if (values.length % 2)
+    return values[half];
+  else
+    return (values[half - 1] + values[half]) / 2.0;
+}
+
+var processInvocations = function(invocations){
+    var fnToCount = {};
+    console.log("processing invocations");
+    invocations.forEach((invoc)=>{
+        var fn = invoc.split("_count")[0];
+        if (!fnToCount[fn]) 
+            fnToCount[fn] = 0;
+        fnToCount[fn]++
     })
+    Object.values(fnToCount).forEach((c)=>{
+        console.log(c);
+    })
+    return median(Object.values(fnToCount));
 }
 
 if (flag == "-simple") {
@@ -119,5 +153,23 @@ if (flag == "-simple") {
     // console.log(relevantTime/cpuTime);
 } else if (flag == "-invoc"){
     var invoObj = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
-    processInvocationProperties(invoObj.value);
+    console.log(processInvocations(invoObj.value));
+    // processInvocationProperties(invoObj);
+} else if (flag == "-jsProfile") {
+     var rti = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
+     // process.stdout.write(util.format(rti.length +" "));
+     console.log(rti.slice(0,10).map((el)=>{return el.functionName;}))
+} else if (flag == "--mem"){
+    var memMsg = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
+    var sizeR = /[0-9]* MB/g, sizes = [];
+    while (m = sizeR.exec(memMsg)){ sizes.push(Number.parseInt(m[0].split(' ')[0])) }
+    // console.log(Math.max(...sizes))    
+    process.stdout.write(Math.max(...sizes) + " ");
+
 }
+
+
+
+
+
+

@@ -85,7 +85,7 @@ if (typeof {name} === 'undefined') {
     var functionsSeen = [];
     var pageRecorded = false;
     var simpleReplay = true;
-    var cacheStats = {hits: 0, misses: 0, nulls: 0}
+    var cacheStats = {hits: 0, misses: {mismatch:0, empty:0}}; 
     var functionStats = {noarg:[], prim: [], prim_objects:[], function: []};
     var nonCacheableNodes = {};
     var invocationsIndName = {};
@@ -113,21 +113,17 @@ if (typeof {name} === 'undefined') {
       "antiLocal":{antiLocal}, "function":[], "nonFunction": []  
     }
 
-    // nodesByProperties.Function = functionStats;
-    //Make a point to comment unsused comments otherwise you can have unforseen errors
-    // like some pages can't access the following localstorage object
-    // var pageRecorded = localStorage.getItem("recordedPage");
-    if (pageRecorded && e2eTesting) {
-        console.log("Retrieving stored signature from cache")
-        pageRecorded = true;
-        var stringifiedSignature = JSON.parse(localStorage.getItem("PageLocalCache"));
-        for (var nodeId in stringifiedSignature) {
-            processedSignature[nodeId] = parse(stringifiedSignature[nodeId]);
-            for ( var argInd in processedSignature[nodeId].arguments.after )
-                processedSignature[nodeId].arguments.after[argInd] = parse(processedSignature[nodeId].arguments.after[argInd]);
-        }
+    var fnCacheExists = false;
+    if (fnCacheExists = localStorage.getItem("fnCacheExists")){
+        console.log("Fn cache exists, skippping function executions..");
+        keysToStdKeys = JSON.parse(localStorage.getItem("keyMap"));
 
-        // customLocalStorage = JSON.parse(localStorage.getItem("PageLocalCache"));
+        var _processedSignature = JSON.parse(localStorage.getItem("signature"));
+        Object.keys(_processedSignature).forEach((key)=>{
+            processedSignature[key] = parse(_processedSignature[key], true);
+        })
+        console.log("Function signatures loaded..");
+        pageLoaded = true;
     }
 
     var getFunctionStat = function(key){
@@ -240,6 +236,13 @@ if (typeof {name} === 'undefined') {
         })
 
         console.log(Object.keys(processedSignature).length + " coalesced into " + Object.keys(cacheableSignature).length);
+
+        //Store the signature in local storage
+        localStorage.setItem("signature", JSON.stringify(cacheableSignature));
+        //store the uniq keys map 
+        localStorage.setItem("keyMap", JSON.stringify(keysToStdKeys));
+        //store a small key to check whether a signature is available or not
+        localStorage.setItem("fnCacheExists",1);
     }
 
     this.storeSignature = storeSignature;
@@ -689,12 +692,9 @@ if (typeof {name} === 'undefined') {
     // window.{proxyName} = window;
     globalProxyHandler.accessToPrivates().methodToProxy.set(window, proxy);
 
-    if (pageRecorded && e2eTesting)
+    if (pageLoaded){
         window.{proxyName} = window;
-
-    this.argProxyHandler = {
-
-    };
+    }
 
 
     this.getShadowStack = function(clear){
@@ -823,7 +823,7 @@ if (typeof {name} === 'undefined') {
 
     this.logReturnValue = function(functionIdentifier, returnValue, params) {
         this.exitFunction(functionIdentifier, params);
-        if (pageRecorded) return returnValue;
+        if (pageLoaded) return returnValue;
         if (functionsSeen.indexOf(functionIdentifier) >= 0 || exceedsInvocationLimit(functionIdentifier) ) return returnValue;
         // return returnValue;
         /* 
@@ -858,45 +858,33 @@ if (typeof {name} === 'undefined') {
         }
     }
 
-    var verifyAndReplayCache = function(nodeId, params) {
-        var processedSignature = customLocalStorage;
-        if (simpleReplay && (processedSignature[nodeId] && processedSignature[nodeId].reads.length || processedSignature[nodeId].writes.length)) {
-            //Only cache objects with simple signatures
-            nonCacheableNodes[nodeId] = "global";
-            return false;
-        }
+    var replay_arg = (write_array, arg) => {
+        write_array.forEach((write_log)=>{
+            eval(write_log);
+        })
+    };
+    var replay_closure = (write_array, closure) => {
+        write_array.forEach((write_log)=>{
+            eval(write_log);
+        })
+    };
+    var replay_this = (write_array, thisObj) => {
+        write_array.forEach((write_log)=>{
+            eval(write_log);
+        })
+    }
 
-        // Compare the input state only params
-        if (processedSignature[nodeId].arguments){
-            for (var index in processedSignature[nodeId].arguments.before) {
-                try {
-                    if (stringify(params[index]) != processedSignature[nodeId].arguments.before[index]) {
-                        //cache miss
-                        cacheStats.misses++;
-                        // console.log("Cache miss " + nodeId);
-                        return false;
-                    }
-                } catch(e) {
-                    //SUPPRESS
-                    nonCacheableNodes[nodeId] = "circular";
-                    return false;
-                }
-            }
-        } else { 
-            cacheStats.nulls++;
-            // console.log(nodeId + " contains neither global state changes nor arguments");
-            return false;
-        }
+    var verifyAndReplayCache = function(cacheIndex,writeObj) {
+        //Replay all the non global writes speculatively
+        var sig = processedSignature[cacheIndex];
+        if (Object.prototype.toString.call(writeObj).indexOf("Arguments")>=0)
+            replay_arg(sig.argument_writes, writeObj);
+        else if (writeObj.__isClosureProxy)
+            replay_closure(sig.closure_writes, writeObj);
+        else replay_this(sig.this_writes, writeObj);
 
-        for (var index in processedSignature[nodeId].arguments) {
-            mergeObjects(processedSignature[nodeId].arguments.after[index], params[index]);
-            // params[index] = processedSignature[nodeId].arguments.after[index];
-        }
-
-        var returnValue = processedSignature[nodeId].returnValue || true;
-        cacheStats.hits++;
-        // console.log("cache hit " + nodeId);
-        return returnValue;
+        //use any of the above replay functions to replay global writes
+        replay_this(sig.global_writes);
     }
 
     var getArgTypes = function(args, delim){
@@ -983,47 +971,27 @@ if (typeof {name} === 'undefined') {
             // customLocalStorage[cacheIndex]["arguments"]["before"] = {};
             // logNonProxyParams(cacheIndex, params);
             //Only for capturing the type of arguments:
-            customLocalStorage[cacheIndex]["argProp"] = _sig;
+            // customLocalStorage[cacheIndex]["argProp"] = _sig;
         }
     }
 
-    this.cacheAndReplay = function(nodeId, params, info){
+    this.cacheAndReplay = function(nodeId, ...params){
+        var cacheIndex = nodeId + "_count" + invocationsIndName[nodeId];
 
-        // if (!customLocalStorage[nodeId]) {
-        //     customLocalStorage[nodeId] = {};
-        //     customLocalStorage[nodeId]["writes"] = [];
-        //     customLocalStorage[nodeId]["reads"] = [];
-        //     if (params.length != 0) {
-        //         customLocalStorage[nodeId]["arguments"] = {};
-        //         customLocalStorage[nodeId]["arguments"]["before"] = {};
-        //         customLocalStorage[nodeId]["arguments"]["after"] = {};
-        //         logNonProxyParams(nodeId, params);
-        //     }
-        // } else {
-        //     /*
-        //         Enables cache replay during the first load
-        //         In memory cache replay, avoid the need for stringification
-        //     */
-        //     // var returnValue = verifyAndReplayCache(nodeId, params);
-        //     // return returnValue;
-        //     return false;
-        //     // console.log("Cache hit for function " + nodeId);
-        //     // var returnValue = customLocalStorage[nodeId]["returnValue"] ? customLocalStorage[nodeId]["returnValue"] : true;
-        //     // if (params && customLocalStorage[nodeId]["arguments"]){
-        //     //     Object.keys(customLocalStorage[nodeId]["arguments"]["after"]).forEach(function(ind){
-        //     //         params[ind] = customLocalStorage[nodeId]["arguments"]["after"][ind];
-        //     //     });
-        //     // }
-        //     // if (customLocalStorage[nodeId]["writes"]) {
-        //     //     for (var writeIndex  = 0; writeIndex < customLocalStorage[nodeId]["writes"].length; writeIndex++) {
-        //     //         var evalString = customLocalStorage[nodeId]["writes"][writeIndex];
-        //     //         eval(evalString);
-        //     //     };
-        //     // }
-
-        //     // return returnValue;
-        // }
-
+        if (invocationsIndName[nodeId] > INVOCATION_LIMIT)
+            return false;
+        var sig;
+        if (sig = processedSignature[keysToStdKeys[cacheIndex]]) {
+            if (sig == "NonLeafNode")
+                return false;
+            // console.log("cache entry found for " + cacheIndex);
+            cacheStats.hits++;
+            params.forEach((state)=>{
+                verifyAndReplayCache(keysToStdKeys[cacheIndex], state);
+            })
+            return processedSignature[keysToStdKeys[cacheIndex]].returnValue || true
+        }
+        cacheStats.misses.empty++;
         return false;
     }
 
@@ -1195,13 +1163,13 @@ if (typeof {name} === 'undefined') {
                             objectToPathPerOT.this[0] = "window";
                             break;
                         case "argument" :
-                            objectToPathPerOT.this[0] = "arguments"
+                            objectToPathPerOT.this[0] = "arg"
                             break;
                         case "closure":
                             objectToPathPerOT.this[0] = "closure"
                             break;
                         case "this" :
-                            objectToPathPerOT.this[0] = "this";
+                            objectToPathPerOT.this[0] = "thisObj";
                             break;
                     }
                 }
@@ -1381,7 +1349,10 @@ if (typeof {name} === 'undefined') {
 
                 Object.keys(this.signature).forEach(function(nodeId){
                     // Return if not leaf node
-                    if (trackOnlyLeaf &&  callGraph[nodeId].length) return;
+                    if (trackOnlyLeaf &&  callGraph[nodeId].length) {
+                        processedSig[nodeId] = "NonLeafNode";
+                        return;
+                    }
                     processedSig[nodeId] = {};
                     if (signature[nodeId][logType+"_reads"] && signature[nodeId][logType+"_reads"].length)
                         processRead(nodeId)

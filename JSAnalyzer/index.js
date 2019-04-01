@@ -405,7 +405,7 @@ var traceFilter = function (content, options) {
 		var insertClosureProxy = function(fnNode, fnIndex){
 			var closurePrefixStr = "var closureProxy = " + options.tracer_name + 
 				'.createClosureProxy(';
-			var closureObjStr = "{ ";
+			var closureObjStr = "var __closureObj = { ";
 			var closureVarStr = "";
 			//Remove duplocates
 			var nonLocalsSrc = functionToNonLocals[fnIndex].map((el)=>{return ASTSourceMap.get(el)});
@@ -421,10 +421,10 @@ var traceFilter = function (content, options) {
 
 				closureVarStr += idsrc + " = closureProxy." + idsrc + "\n";
 			})
-			closureObjStr += "__isClosureProxy: true} "
-			closurePrefixStr += closureObjStr + ");\n";
+			closureObjStr += "__isClosureProxy: true}\n"
+			closurePrefixStr += "__closureObj);\n";
 
-			update(fnNode.body, closurePrefixStr , closureVarStr, fnNode.body.source());
+			update(fnNode.body, closureObjStr, closurePrefixStr , closureVarStr, fnNode.body.source());
 		}
 
 		// console.log(esprima.parse(content));
@@ -971,7 +971,17 @@ var traceFilter = function (content, options) {
 				if (options.myRti && uncacheableFunctions["RTI"].indexOf(node)>=0) return
 				var isCacheable = true;
 				var nodeBody = node.body.source().substring(1, node.body.source().length-1);
-				// console.log(uncacheableFunctions);
+				//Start modifiying the function 
+				var replayObjects = ",arguments,";
+				if (functionToNonLocals[index].length)
+					replayObjects+="__closureObj,";
+				if (functionsContainingThis.indexOf(index)>=0)
+					replayObjects+="this";
+				var _traceBegin = "" + options.tracer_name + ".cacheAndReplay(";
+				update(node.body, '\n', ' var __tracerRet; \nif ( __tracerRet = ', _traceBegin, JSON.stringify(index) ,replayObjects,
+					 ')) \n return __tracerRet; \n',
+					 nodeBody,' \n');
+
 				insertArgumentProxy(node);
 				if (functionsContainingThis.indexOf(index)>=0) {
 					var proxyStr = 'var thisProxy = ' + options.tracer_name + '.createThisProxy(this);\n';
@@ -980,7 +990,7 @@ var traceFilter = function (content, options) {
 				if (functionToNonLocals[index].length)
 					insertClosureProxy(node, index);
 
-				update(node.body, '\n',options.tracer_name,'.cacheInit(',JSON.stringify(index),',arguments);\n',
+				update(node.body, '{ \n',options.tracer_name,'.cacheInit(',JSON.stringify(index),',arguments);\n',
 					node.body.source());
 
 				var args = node;
@@ -992,24 +1002,17 @@ var traceFilter = function (content, options) {
 				if (args.globalAlias) serializedArgs.globalAlias = args.globalAlias;
 				serializedArgs.returnValue = returnValue;
 				// serializedArgs = {};
-				var _traceBegin = "" + options.tracer_name + ".cacheAndReplay(";// + args + ")) return;"
 				var _traceEnd = options.tracer_name + ".exitFunction(";// + args + ");";
 				// if (options.myRti && instrumentedNodes.indexOf(node)<0){
 				// 	update(node.body,'{\n' ,node.body.source(),'\n', _traceEnd, JSON.stringify(index),',arguments);\n}\n');
 				// 	return;
 				// }
 
-				if (containsReturn)
-					update(node.body, '{ \n', ' var __tracerRet; \nif ( __tracerRet = ', _traceBegin, JSON.stringify(index) ,', arguments,',
-					 ')) \n return __tracerRet; \n',
-					 node.body.source(),
-					 // ' \n finally { ', _traceEnd, JSON.stringify(index),',arguments', ');}
-					 ' \n }');
-				else {
-					update(node.body, '{ \n', ' var __tracerRet; \nif ( __tracerRet = ', _traceBegin, JSON.stringify(index) ,', arguments,',
-					 ')) \n return __tracerRet; \n',
-					 node.body.source(),' \n', _traceEnd, JSON.stringify(index),',arguments', ');\n }');
-				}
+				if (!containsReturn)
+					update(node.body, node.body.source(),' \n', _traceEnd, JSON.stringify(index),',arguments', ');\n }');
+				else 
+					update(node.body, node.body.source(),'}');
+				
 				//This is only to add performance api calls to the functions. 
 				// update(node.body, '{', 'try { \n performance.now();\n', sourceNodes(node.body), '\n} finally {performance.now();}}',)
 			// } else if (node.type == "ArrowFunctionExpression"){

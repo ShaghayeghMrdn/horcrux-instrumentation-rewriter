@@ -8,18 +8,18 @@ try {
 	log1 = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
 	log2 = JSON.parse(fs.readFileSync(process.argv[4],"utf-8"))
 
-	if (!log1.length)
-		process.stderr.write(util.format("Empty logs: " + process.argv[2] + "\n"));
-	if (!log2.length)
-		process.stderr.write("Empty logs: " + process.argv[2] + "\n");
+	// if (!log1.length)
+	// 	process.stderr.write(util.format("Empty logs: log1" + process.argv[3] + "\n"));
+	// if (!log2.length)
+	// 	process.stderr.write("Empty logs: log2" + process.argv[3] + "\n");
 
 } catch (e) {
-	console.error(e);
+	// console.error(e);
 	if (flag != "-l") {
-		var val = e.toString().indexOf("unmodified") >= 0 ? true : false; 
-		process.stderr.write(util.format("na", val && "na",!val && "na","\n"));
+		var unmodified = e.toString().indexOf("unmodified") >= 0 ? true : false; 
+		process.stderr.write(util.format("na", !unmodified, unmodified,"\n"));
 	}
-	//process.exit();
+	process.exit();
 }
 
 function getConsoleLogs(logs1){
@@ -67,7 +67,7 @@ function simpleErrorMatch(l1, l2){
 }
 
 function matchingExceptions(log1, log2){
-	var exceptions1 = [];
+	var exceptions1 = [], unmatches = [];
 	var exceptionCount = 0;
     log1.forEach((l) => {
         if (l.exceptionDetails){
@@ -91,18 +91,23 @@ function matchingExceptions(log1, log2){
 	            }
 	    }
 	});
-	// console.log(exceptions1);
-	// console.log(exceptions2);
+	console.error(exceptions1);
+	console.error(exceptions2);
 	for (var ex1 in exceptions1){
+		var foundMatch = false;
 		for (var ex2 in exceptions2){
 			if (exceptions1[ex1] == exceptions2[ex2]) {
 				exceptionCount++;
+				foundMatch = true;
 				break;
 			}
 		}
+		if (!foundMatch)
+			unmatches.push(exceptions1[ex1]);
 	}
 	//console.log(exceptions1);
 	//console.log(exceptions2);
+	console.error(unmatches);
 	return exceptionCount;
 
 }

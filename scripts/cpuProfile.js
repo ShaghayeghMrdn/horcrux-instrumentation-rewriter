@@ -12,7 +12,7 @@ var {cpuProfileParser} = require("../devtool-cpu-model/analyze_cpu_profile.js");
 
 program
     .version("0.1.0")
-    .option("-i, --input [input]","path to the input js Profile")
+    .option("-i, --input [input]","path to the input raw js Profile")
     .option('-o, --output [output]', 'path to the output file')
     .parse(process.argv)
 
@@ -38,8 +38,8 @@ function getUniqueIds(idArr){
     var uniqueIds = [], seenUIDs = [];
     idArr.forEach((id)=>{
         var node = cpu.raw._idToNode.get(id);
-        if (seenUIDs.indexOf(node.callUID)<0) {
-            seenUIDs.push(node.callUID);
+        if (seenUIDs.indexOf(JSON.stringify(node.callFrame))<0) {
+            seenUIDs.push(JSON.stringify(node.callFrame));
             uniqueIds.push(id);
         }
     });
@@ -115,12 +115,12 @@ var getTimeFromId = function( id){
 
 var checkForExistenceOfId = function(idArr, dstArr){
     var idArrUIDs = idArr.map((id)=>{
-        return cpu.raw._idToNode.get(id).callUID;
+        return JSON.stringify(cpu.raw._idToNode.get(id).callFrame);
     })
     var dstArrUIDs = dstArr.map((id)=>{
-        return cpu.raw._idToNode.get(id);
+        return [JSON.stringify(cpu.raw._idToNode.get(id).callFrame),id];
     })
-    return dstArrUIDs.filter((i)=>{return idArrUIDs.indexOf(i.callUID)<0}).map((i)=>{return i.id});
+    return dstArrUIDs.filter((i)=>{return idArrUIDs.indexOf(i[0])<0}).map((i)=>{return i[1]});
 }
 
 var finalIDSanityCheck = function(idArr){
@@ -150,8 +150,8 @@ function topKRti(rti, k){
         if (listOfIds.indexOf(curFn.profileNode.id)>=0) continue;
         // If a different invocation has been already via the children of the previous nodes
         if (listOfIds.map((id)=>{
-            return cpu.raw._idToNode.get(id).callUID;
-        }).indexOf(curFn.profileNode.callUID)>=0)
+            return JSON.stringify(cpu.raw._idToNode.get(id).callFrame);
+        }).indexOf(JSON.stringify(curFn.profileNode.callFrame))>=0)
             continue;
         //Test whether the root is inbuilt or not. 
         if (!curFn.profileNode.callFrame.url.startsWith("http")) {
@@ -233,6 +233,26 @@ var getIdFromCallGraph = function(){
     return ids;
 }
 
+var getLeafNodes = function(ids){
+    var leafNodes = [];
+    ids.forEach((id)=>{
+        var profileNode = cpu.raw._idToNode.get(id);
+        var subTree = getSubTree(profileNode);
+        if (!subTree.length) {
+            leafNodes.push(id);
+            return;
+        }
+        for (var childId of subTree){
+            var childNode = cpu.raw._idToNode.get(childId);
+            if (childNode.url.startsWith("http"))
+                return;
+        }
+        leafNodes.push(id);
+    })
+
+    return leafNodes;
+}
+
 function main(){
     // var totalTime = sumTotalTime(cpu, true);
     // var top20RTI = topKFnFromRTI(cpu, 20);
@@ -246,13 +266,25 @@ function main(){
 
     
     var top80percentRTI = topKRti(cpu.parsed, 80);
-    finalIDSanityCheck(top80percentRTI);
-    var output = {};
+    // finalIDSanityCheck(top80percentRTI);
+    var leafNodes = getLeafNodes(top80percentRTI);
+    var timeInstrumented = 0;
     var top80percentRTIUser = top80percentRTI.map((id)=>{
         var child = cpu.raw._idToNode.get(id);
-        if (child.url.startsWith("http"))
-            return {self:child.self, total: child.total, callUID: child.callUID, functionName: child.functionName,
+        if (child.url.startsWith("http")) {
+            timeInstrumented += getTimeFromId(id);
+            return {self:getTimeFromId(id), total: child.total, callUID: child.callUID, functionName: child.functionName,
                 url: child.url, raw: child.callFrame, id:id};
+        }
+    }).filter(node => node);
+    var leafNodesTime = 0;
+    var leafNodesUser = leafNodes.map((id)=>{
+        var child = cpu.raw._idToNode.get(id);
+        if (child.url.startsWith("http")) {
+            leafNodesTime += getTimeFromId(id);
+            return {self:getTimeFromId(id), total: child.total, callUID: child.callUID, functionName: child.functionName,
+                url: child.url, raw: child.callFrame, id:id};
+        }
     }).filter(node => node);
 
     // var totalUniqueFunctions = getUniqueFunctions(getIdFromCallGraph());
@@ -267,8 +299,9 @@ function main(){
     //print the BU time vs the total cpu time
     // const reducer = (accumulator, currentValue) => accumulator + currentValue.self;
     // console.log(cpu.parsed.children.reduce(reducer), cpuTime)
-    fs.writeFileSync(program.output, JSON.stringify(top80percentRTIUser));
-    console.log("Written " + top80percentRTIUser.length + " functions: " +  program.input);
+    fs.writeFileSync(program.output, JSON.stringify(leafNodesUser));
+    // console.log("Written " + top80percentRTIUser.length + " functions: " +  program.input);
+    process.stdout.write(util.format(timeInstrumented + " " + leafNodesTime + " " + leafNodes.length ));
 }
 
 main();
