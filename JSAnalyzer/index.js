@@ -189,11 +189,12 @@ var makeId = function (type, path, node) {
 	     + loc.end.column;
 	    if (simpleFunctions[origPath])
 	    	return simpleFunctions[origPath];
-		var id = "function_" + functionCounter;
-		functionCounter = functionCounter + 1;
+	    var name = node.id != undefined ? node.id.name : "function"
+		
+		// functionCounter = functionCounter + 1;
 		// console.log( " function counter is " + functionCounter)
-		simpleFunctions[origPath] = id;
-		return id;
+		// simpleFunctions[origPath] = id;
+		return name;
 	}
 
 	return path + '-'
@@ -937,6 +938,7 @@ var traceFilter = function (content, options) {
 			} else if (node.type == "ReturnStatement" && node.argument) {
 				var _functionId = util.getFunctionIdentifier(node);
 				if (_functionId) {
+					node.containsReturn = true;
 					var functionId = makeId('function', options.path, _functionId);
 					var _traceEnd = options.tracer_name + ".exitFunction(";
 					if (node.argument.type == "SequenceExpression" ) {
@@ -967,7 +969,7 @@ var traceFilter = function (content, options) {
 			} else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
 				var containsReturn = false;
 				var index = makeId('function', options.path, node);
-				if (node.source().indexOf(index)>=0) containsReturn = true;
+				if (node.containsReturn) containsReturn = true;
 				if (options.myRti && uncacheableFunctions["RTI"].indexOf(node)>=0) return
 				var isCacheable = true;
 				var nodeBody = node.body.source().substring(1, node.body.source().length-1);

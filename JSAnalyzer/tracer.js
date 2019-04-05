@@ -85,7 +85,7 @@ if (typeof {name} === 'undefined') {
     var functionsSeen = [];
     var pageRecorded = false;
     var simpleReplay = true;
-    var cacheStats = {hits: 0, misses: {mismatch:0, empty:0}}; 
+    var cacheStats = {hits: [], misses: {nonLeaf:[], empty:[]}}; 
     var functionStats = {noarg:[], prim: [], prim_objects:[], function: []};
     var nonCacheableNodes = {};
     var invocationsIndName = {};
@@ -97,6 +97,10 @@ if (typeof {name} === 'undefined') {
     var cacheableSignature = {};
     var pageLoaded = false;
     var INVOCATION_LIMIT = 500;
+
+    var omniStringifier = new Omni();
+    var stringify = omniStringifier.stringify;
+    var parse = omniStringifier.parse;
 
     //Define all your custom methods, before they are overwritten
     //by user javascript
@@ -120,7 +124,7 @@ if (typeof {name} === 'undefined') {
 
         var _processedSignature = JSON.parse(localStorage.getItem("signature"));
         Object.keys(_processedSignature).forEach((key)=>{
-            processedSignature[key] = parse(_processedSignature[key], true);
+            processedSignature[key] = JSON.parse(_processedSignature[key], true);
         })
         console.log("Function signatures loaded..");
         pageLoaded = true;
@@ -217,16 +221,16 @@ if (typeof {name} === 'undefined') {
 
     var storeSignature = function(){
         Object.keys(processedSignature).forEach((invocId)=>{
-            var strSig = stringify(processedSignature[invocId]);
-            if (strSig && strSig.__proto__.__proto__ == "Error") {
+            var strSig = JSON.stringify(processedSignature[invocId]);
+            if (strSig && strSig instanceof Error) {
                 nonCacheableNodes[invocId.split("_count")[0]] = "stringify";
                 return;
-            }
+            } else if (invocId.split("_count")[0] in nonCacheableNodes) return;
 
             //convert the original signature in the string format, to do a memory comparison
             processedSignature[invocId] = strSig;
-            var _matchInvocId, matchInvocId;
-            if (_matchInvocId=Object.values(cacheableSignature).indexOf(strSig)>=0){
+            var _matchInvocId = Object.values(cacheableSignature).indexOf(strSig), matchInvocId;
+            if (_matchInvocId>=0){
                 matchInvocId = Object.keys(cacheableSignature)[_matchInvocId];
                 keysToStdKeys[invocId] = matchInvocId;
             } else {
@@ -326,6 +330,17 @@ if (typeof {name} === 'undefined') {
 
     //     this.apply(vThisArg, args);
     // }
+
+    // use hacks to detect if a method is a DOM object or not 
+    // as sometimes even document objets are not instances of these parent objects
+    // for reasons unknown
+    // Despite window satisfying this criteria have this function return false for window
+    // object specifically
+    var isDOMInheritedProperty = function(method){
+        return method && (method instanceof EventTarget || method instanceof HTMLCollection || method instanceof NodeList || method.readState
+            || method.click) /*&& (method && method.self != method)*/
+    }
+
     function proxyEncapsulation(rootObject, type) {
 
         var ObjectTree = {};
@@ -471,8 +486,8 @@ if (typeof {name} === 'undefined') {
             if (!nodeId) return;
 
             //Let's only store the child id and not worry about stringifying reads/writes
-            var childLogStr = stringify(value);
-            if (childLogStr && childLogStr.__proto__.__proto__ == "Error"){
+            var childLogStr = omniStringifier.stringify(value);
+            if (childLogStr && childLogStr instanceof Error){
                 nonCacheableNodes[nodeId.split("_count")[0]] = "circular";
                 return;
             } else if (!childLogStr && logType.indexOf("reads")>=0)
@@ -519,20 +534,11 @@ if (typeof {name} === 'undefined') {
             }
         }
 
-        // use hacks to detect if a method is a DOM object or not 
-        // as sometimes even document objets are not instances of these parent objects
-        // for reasons unknown
-        // Despite window satisfying this criteria have this function return false for window
-        // object specifically
-        var isDOMInheritedProperty = function(method){
-            return (method instanceof EventTarget || method instanceof HTMLCollection || method instanceof NodeList || method.readState
-                || method.click) /*&& (method && method.self != method)*/
-        }
-
         var outOfScopeProperties = ["location", "body", "Promise", "top", "parent", "prototype", "__proto__","toJSON", "self"];
 
         var isWindow = function(obj){
             if (obj && obj.self == obj){
+                if (obj.__isProxy) return obj;
                 var proxyPrivates = globalProxyHandler.accessToPrivates();
                 var _proxyMethod = proxyPrivates.methodToProxy.get(obj);
                 if (_proxyMethod) return _proxyMethod;
@@ -551,11 +557,12 @@ if (typeof {name} === 'undefined') {
             
             var method = Reflect.get(target,key);
 
+            if (outOfScopeProperties.includes(key)) return method;
+            var desc = customMethods.getOwnPropertyDescriptor(target, key);
+            if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
             var isWinObj;
             if (isWinObj = isWindow(method))
-
-
-            if (outOfScopeProperties.includes(key)) return method;
+                return isWinObj;
 
             loggerFunction(target, key, method, rootType + "_reads");
 
@@ -832,11 +839,15 @@ if (typeof {name} === 'undefined') {
         */ 
         if (invocationsIndName[functionIdentifier] == null){
             console.error("No invocation count for the nodeId " + functionIdentifier);
-            return;
+            return returnValue;
         }
 
         var cacheIndex = functionIdentifier + "_count" + invocationsIndName[functionIdentifier];
-        if (customLocalStorage[cacheIndex]) customLocalStorage[cacheIndex]["returnValue"] = returnValue;
+        var _retString = omniStringifier.stringify(returnValue);
+        if (_retString && _retString.__proto__.__proto__ == "Error" || isDOMInheritedProperty(returnValue)) {
+                nonCacheableNodes[functionIdentifier] = "stringify";
+            }
+        if (customLocalStorage[cacheIndex]) customLocalStorage[cacheIndex]["returnValue"] = _retString;
         if (returnValue && returnValue.__debug && returnValue.__debug != "global")
             return returnValue.__target;
         else return returnValue;
@@ -982,16 +993,17 @@ if (typeof {name} === 'undefined') {
             return false;
         var sig;
         if (sig = processedSignature[keysToStdKeys[cacheIndex]]) {
-            if (sig == "NonLeafNode")
+            if (sig == "NonLeafNode"){
+                cacheStats.misses.nonLeaf.push(cacheIndex);
                 return false;
-            // console.log("cache entry found for " + cacheIndex);
-            cacheStats.hits++;
+            }
+            cacheStats.hits.push(cacheIndex);
             params.forEach((state)=>{
-                verifyAndReplayCache(keysToStdKeys[cacheIndex], state);
+                state && verifyAndReplayCache(keysToStdKeys[cacheIndex], state);
             })
-            return processedSignature[keysToStdKeys[cacheIndex]].returnValue || true
+            return omniStringifier.parse(processedSignature[keysToStdKeys[cacheIndex]].returnValue) || true
         }
-        cacheStats.misses.empty++;
+        cacheStats.misses.empty.push(cacheIndex);
         return false;
     }
 
@@ -1073,68 +1085,68 @@ if (typeof {name} === 'undefined') {
         return (/\{\s*\[native code\]\s*\}/).test('' + fn);
     }
 
-    function stringify(obj) {
-        try {
-            return JSON.stringify(obj, function (key, value) {
-              if (value && value.__isProxy)
-                    value = value.__target;
-              var fnBody;
-              if (value instanceof Function || typeof value == 'function') {
+    // function stringify(obj) {
+    //     try {
+    //         return JSON.stringify(obj, function (key, value) {
+    //           if (value && value.__isProxy)
+    //                 value = value.__target;
+    //           var fnBody;
+    //           if (value instanceof Function || typeof value == 'function') {
 
-                if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
-                    return value.name;
-                }
-                fnBody = value.toString();
+    //             if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
+    //                 return value.name;
+    //             }
+    //             fnBody = value.toString();
 
-                if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { /*this is ES6 Arrow Function*/
-                  return '_NuFrRa_' + fnBody;
-                }
-                return fnBody;
-              }
-              if (value instanceof RegExp) {
-                return '_PxEgEr_' + value;
-              }
-              return value;
-            });
-        } catch(e){
-            return e;
-        }
-    };
+    //             if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { /*this is ES6 Arrow Function*/
+    //               return '_NuFrRa_' + fnBody;
+    //             }
+    //             return fnBody;
+    //           }
+    //           if (value instanceof RegExp) {
+    //             return '_PxEgEr_' + value;
+    //           }
+    //           return value;
+    //         });
+    //     } catch(e){
+    //         return e;
+    //     }
+    // };
 
-    function parse(str, date2obj) {
+    // function parse(str, date2obj) {
 
-    var iso8061 = date2obj ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/ : false;
+    // var iso8061 = date2obj ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/ : false;
 
-    return JSON.parse(str, function (key, value) {
-        var prefix;
+    // return JSON.parse(str, function (key, value) {
+    //     var prefix;
 
-        if (typeof value != 'string') {
-        return value;
-        }
-        if (value.length < 8) {
-        return value;
-        }
+    //     if (typeof value != 'string') {
+    //     return value;
+    //     }
+    //     if (value.length < 8) {
+    //     return value;
+    //     }
 
-        prefix = value.substring(0, 8);
+    //     prefix = value.substring(0, 8);
 
-        if (iso8061 && value.match(iso8061)) {
-            return new Date(value);
-        }
-        if (prefix === 'function') {
-            // if ((/\{\s*\[native code\]\s*\}/).test(value))
-            //     return nativeObjectsStore[key]
-            return eval('(' + value + ')');
-        }
-        if (prefix === '_PxEgEr_') {
-            return eval(value.slice(8));
-        }
-        if (prefix === '_NuFrRa_') {
-            return eval(value.slice(8));
-        }
+    //     if (iso8061 && value.match(iso8061)) {
+    //         return new Date(value);
+    //     }
+    //     if (prefix === 'function') {
+    //         // if ((/\{\s*\[native code\]\s*\}/).test(value))
+    //         //     return nativeObjectsStore[key]
+    //         return eval('(' + value + ')');
+    //     }
+    //     if (prefix === '_PxEgEr_') {
+    //         return eval(value.slice(8));
+    //     }
+    //     if (prefix === '_NuFrRa_') {
+    //         return eval(value.slice(8));
+    //     }
 
-        return value;
-        });
-    };
+    //     return value;
+    //     });
+    // };
 
     class SignatureProcessor{
 
@@ -1291,7 +1303,7 @@ if (typeof {name} === 'undefined') {
                             else readString = read[1] + '';
                             var path = parentPath + "['" + readString + "']";
                             var readVal = read[2];
-                            readSignature = path + " = " + readVal;
+                            readSignature = path + " = omniStringifier.parse('" + readVal +"')";
                         } catch (e) {
                             //TODO
                             //suppressing for now
@@ -1318,7 +1330,7 @@ if (typeof {name} === 'undefined') {
                         var path = parentPath + "['" + write[1] + "']"; 
                         try {
                             var writeVal = write[2];
-                            writeSignature = path + " = " + writeVal;
+                            writeSignature = path + " = omniStringifier.parse('" + writeVal +"')";
                         } catch (e) {
                             //TODO
                             //suppressing for now
