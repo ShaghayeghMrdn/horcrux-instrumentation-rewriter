@@ -1,4 +1,6 @@
 
+
+mmwebrecord=/home/goelayu/research/hotOS/origMahimahi/mahimahi/buildDir/bin/mm-webrecord
 #set -e
 url=`echo $1 | cut -d'/' -f 3` 
 # $1 is the path to the list of pages
@@ -33,10 +35,10 @@ waitForNode(){
 		curr_time=`date +'%s'`
 		elapsed=`expr $curr_time - $start_time`
 		echo $elapsed
-		# if [ $elapsed -gt 120 ]; then
-		# 	echo "TIMED OUT..."
-		# 	ps aux | grep $1 | awk '{print $2}' | xargs kill -9
-		# fi
+		if [ $elapsed -gt 120 ]; then
+			echo "TIMED OUT..."
+			ps aux | grep $1 | awk '{print $2}' | xargs kill -9
+		fi
 		sleep 2
 	done
 }
@@ -52,15 +54,16 @@ record(){
 	echo "Recording"  $1
 	mkdir -p $4/"$2"/
 	mkdir -p $3
-	mm-webrecord $3/"$2"/ node inspectChrome.js -l -j -t -u "$1" -p $5 -o $4/"$2"/ &
+	$mmwebrecord $3/"$2"/ node inspectChrome.js --log -l -j -n -u "$1" -p $5 -o $4/"$2"/ --mode record
+	# node inspectChrome.js --log -l -j -n -u "$1" -p $5 -o $4/"$2"/ --mode record
 	# chromium-browser --ignore-certificate-errors --user-data-dir=/tmp/nonexistent$(date +%s%N) --remote-debugging-port=$4 &>/dev/null &
 	#mkdir -p $3/"$2"/
 	#sleep 2
 	#node inspectChrome.js -t --sim 3g.config -u "$1" -p $4 -o $3/"$2"/ &
 	record_pid=$!
 	#waitForNode
-	waitForNode $4
-	ps aux | grep recordshell | awk '{print $2}' | xargs kill -9
+	# waitForNode $5
+	# ps aux | grep recordshell | awk '{print $2}' | xargs kill -9
 	#kill -9 $record_pid
 }
 # Arguments

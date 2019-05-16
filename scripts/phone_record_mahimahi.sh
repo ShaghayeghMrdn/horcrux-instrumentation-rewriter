@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# set -v
 
 ######################################
 #Records webpages in mahimahi format
@@ -9,6 +9,7 @@
 # $2 device_type - takes only the following values: pixel,samsung, moto
 # $3 recordDir - path to the recorded webpages
 # 44 dataDir - path to devtools output like plt, Network, js, logs
+# $5 -> mode in which to replay
 
 
 #Note:
@@ -28,12 +29,23 @@ yaxis=${device[${2}Yaxis]}
 
 serverVPNID=
 
+nodeTIMEOUT=110
+
 echo $id $port
 
 # $1 -> port for the device
 adb_prefix="adb </dev/null -s ${id}"
 record_binary="/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-phone-webrecord-using-vpn"
 RT_binary="/home/goelayu/research/hotOS/gnirehtet-rust-linux64/gnirehtet"
+
+stock_chrome="am start -a android.intent.action.VIEW -n com.android.chrome/com.google.android.apps.chrome.Main -d about:blank"
+custom_chrome="am start -a android.intent.action.VIEW -n org.chromium.chrome/com.google.android.apps.chrome.Main -d about:blank"
+
+echo "DATA FLAGS: " $DATAFLAGS
+if [[ $DATAFLAGS == *"testing"* ]]; then
+    echo "Running in testing mode..."
+    nodeTIMEOUT=1100000
+fi
 
 #Does the initial setting up for the script
 #Forwards chrome remote port
@@ -43,11 +55,11 @@ RT_binary="/home/goelayu/research/hotOS/gnirehtet-rust-linux64/gnirehtet"
 init(){
     eval $adb_prefix forward tcp:$port localabstract:chrome_devtools_remote
     eval $adb_prefix shell pm clear com.android.chrome
-    eval $adb_prefix shell pm clear jackpal.androidterm
-    enableSUAccess
+    # eval $adb_prefix shell pm clear jackpal.androidterm
+    # enableSUAccess
     #make sure no previous instances are running
-    sudo pkill openvpn
-    sudo pkill mm-phone-webrecord-using-vpn
+    # sudo pkill openvpn
+    # sudo pkill mm-phone-webrecord-using-vpn
 
     #start reverse tethering for all the experiments
     # echo "Starting the reverse tethering which would persist throughout"
@@ -55,11 +67,41 @@ init(){
     # $RT_binary start $id &
 }
 
+killProcess(){
+    ps aux | grep $1 | awk '{print $2}' | xargs sudo kill -2
+}
+
 cleanUp(){
     # sudo pkill openvpn
-    sudo pkill mm-phone-webrecord-using-vpn
-    eval $adb_prefix shell pm clear com.android.chrome
-    eval $adb_prefix shell pm clear jackpal.androidterm
+    # sudo pkill mm-phone-webrecord-using-vpn
+    # eval $adb_prefix shell pm clear com.android.chrome
+    # eval $adb_prefix shell pm clear jackpal.androidterm
+
+    # sudo iptables -t nat -F
+    killProcess openvpn
+    # killProcess /usr/sbin/apache2
+    # ifconfig | grep veth* | awk '{print $1}' | cut -d: -f1  | xargs -I{} sudo ifconfig {} down
+
+    toggleClientVpn
+}
+
+vpnIsRunning(){
+
+    adb </dev/null shell ifconfig tun0
+    vpnstatus=`echo $?`
+    echo "vpnstatus is " $vpnstatus
+    retryCount=0
+    while [ $vpnstatus -eq 1 ]; do
+        retryCount=`expr $retryCount + 1`
+        echo "Current retryCount " $retryCount
+        toggleClientVpn
+        adb </dev/null shell ifconfig tun0
+        vpnstatus=`echo $?`
+        if [[ $retryCount -gt 11 ]]; then
+            exit 1
+            break;
+        fi
+    done
 }
 
 #SKips the welcome screen on chrome
@@ -77,15 +119,17 @@ startServerVPN(){
     #instead of running mahimahi vpn simply do vpn
     # sudo systemctl start openvpn@server.service
     # $record_binary $1 disk ls 2>1 1>$2 &
-    $record_binary $1 disk ls & 
+    # $record_binary $1 disk ls & 
+    sudo openvpn --config /etc/openvpn/server.conf.bck &
     # serverVPNID=$!
-    sleep 3
+    sleep 1
 }
 
 toggleClientVpn(){
     echo "Toggling client vpn"
     eval $adb_prefix shell "am start -a android.intent.action.VIEW -n net.openvpn.openvpn/net.openvpn.unified.MainActivity" 1>/dev/null
     sleep 1 #wait for the app to be displayed
+    echo "tapping phone at $xaxis $yaxis"
     eval $adb_prefix shell input tap $xaxis $yaxis
     sleep 2 #wait while the vpn gets connected
 }
@@ -94,10 +138,10 @@ toggleClientVpn(){
 # none
 startChrome() {
     #forward the debugging port
-    eval $adb_prefix shell pm clear com.android.chrome
-    sleep 1
+    # eval $adb_prefix shell pm clear com.android.chrome
+    # sleep 1
     echo "Starting Chrome on Client"
-    eval $adb_prefix shell "am start -a android.intent.action.VIEW -n com.android.chrome/com.google.android.apps.chrome.Main -d about:blank" 1>/dev/null
+    eval $adb_prefix shell $stock_chrome 1>/dev/null
     sleep 1
     if [[ "$2" -eq "moto" ]]; then
         skipWelcomePage
@@ -153,6 +197,7 @@ enableCPU(){
 # $2: url
 # $3: path to the output directory
 # $4: port
+# $5 : mode in which run the app
 rotateConfigs(){
     case $1 in
     1)
@@ -167,14 +212,17 @@ rotateConfigs(){
         path=${3}/4g/
         mkdir -p $path
         startChrome
-        node inspectChrome.js -u $2 -m -t -j -o $path -p $4 --sim 4g.config
+        node inspectChrome.js -u $2 -m -t -j -o $path -p $4 --sim 4g.config &
+        waitForNode $4
         ;;
     3) 
         echo "Loading page in RT config"
         path=${3}/rt/
         mkdir -p $path
         startChrome
-        node inspectChrome.js -u $2 -m -t -j -o $path -p $4
+        # node inspectChrome.js -u $2 -m -n --log -j -o $3 -p $4 --mode $5 &
+        node inspectChrome.js -u $2 -m -o $3 -p $4 --mode $5 $DATAFLAGS &
+        waitForNode $4
         ;;
     4)
         echo "Loading page in CPU disabled config"
@@ -182,11 +230,13 @@ rotateConfigs(){
         mkdir -p $path
         # disableCPU
         startChrome
-        node inspectChrome.js -u $2 -m -t -o $path -p $4 --sim 4g.config
+        node inspectChrome.js -u $2 -m -t -o $path -p $4 --sim 4g.config &
+        waitForNode $4
         # enableCPU
         ;;
     esac
 }
+
 
 # Waits for the port to be killed
 # Arguments:
@@ -200,10 +250,10 @@ waitForNode(){
         curr_time=`date +'%s'`
         elapsed=`expr $curr_time - $start_time`
         echo $elapsed
-        # if [ $elapsed -gt 120 ]; then
-        #   echo "TIMED OUT..."
-        #   ps aux | grep $1 | awk '{print $2}' | xargs kill -9
-        # fi
+        if [ $elapsed -gt $nodeTIMEOUT ]; then
+            echo "TIMED OUT..."
+            ps aux | grep $1 | awk '{print $2}' | xargs kill -9
+        fi
         sleep 2
     done
 }
@@ -213,29 +263,55 @@ trap ctrl_c INT
 ctrl_c(){
     echo "Handling process exit.."
     cleanUp
-    # toggleClientVpn
+    sudo kill -INT 888
     exit 1
 }
 
 #clear chrome once before the experiment
 # eval $adb_prefix shell pm clear com.android.chrome
 
-init
+# init
 # disableCPU
 
-for iter in $(seq 1 1); do 
-    while IFS='' read -r line || [[ -n "$line" ]]; do
-        echo "Iteration" $iter "replaying url: " $line 
-        url=`echo $line | cut -d'/' -f 3`
-        echo $url
-        mkdir -p "$3"/${iter}/
-        # for config in $(seq 1 4); do
-        for config in 2; do
-            sleep 1
-            rotateConfigs $config $line ${4}/${iter}/"$url" $port 
-        done
-        sleep 1
-    done <"$1"
-done
+# for iter in $(seq 1 1); do 
+#     while IFS='' read -r line || [[ -n "$line" ]]; do
+#         echo "Iteration" $iter "replaying url: " $line 
+#         url=`echo $line | cut -d'/' -f 3`
+#         echo $url
+#         mkdir -p "$3"/${iter}/
+#         # for config in $(seq 1 4); do
+#         for config in {2..3}; do
+#             sleep 1
+#             rotateConfigs $config $line ${4}/${iter}/"$url" $port 
+#         done
+#         sleep 1
+#     done <"$1"
+# done
 
-cleanUp
+# startServerVPN
+# masquerade
+# toggleClientVpn
+# init
+if [[ $5 == "record" ]]; then
+    echo "Record mode"
+    toggleClientVpn
+    vpnIsRunning
+fi
+sleep 1
+rotateConfigs $1 $3 $4 $port $5
+sleep 1
+# toggleClientVpn
+# cleanUp
+if [[ $5 == "replay" ]]; then
+    echo "Replay mode"
+    toggleClientVpn
+fi
+
+
+
+
+
+
+
+
+
