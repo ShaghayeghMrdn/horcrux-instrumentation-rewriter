@@ -91,11 +91,13 @@ function matchingExceptions(log1, log2){
 	            }
 	    }
 	});
-	console.error(exceptions1);
-	console.error(exceptions2);
+	// console.error(exceptions1);
+	// console.error(exceptions2);
 	for (var ex1 in exceptions1){
 		var foundMatch = false;
+		// console.log("exception1" + exceptions1[ex1]);
 		for (var ex2 in exceptions2){
+			// console.log("exceptions2" + exceptions2[ex2]);
 			if (exceptions1[ex1] == exceptions2[ex2]) {
 				exceptionCount++;
 				foundMatch = true;

@@ -10,7 +10,7 @@
 # $3 recordDir - path to the recorded webpages
 # 44 dataDir - path to devtools output like plt, Network, js, logs
 # $5 -> mode in which to replay
-
+# The last argument is the pid of the parent script
 
 #Note:
 # We eval bash commands which are concatenated because 
@@ -29,9 +29,9 @@ yaxis=${device[${2}Yaxis]}
 
 serverVPNID=
 
-nodeTIMEOUT=110
+nodeTIMEOUT=100
 
-echo $id $port
+echo "received arguments: " $@
 
 # $1 -> port for the device
 adb_prefix="adb </dev/null -s ${id}"
@@ -54,7 +54,7 @@ fi
 #Gives root access to the emulator
 init(){
     eval $adb_prefix forward tcp:$port localabstract:chrome_devtools_remote
-    eval $adb_prefix shell pm clear com.android.chrome
+    # eval $adb_prefix shell pm clear com.android.chrome
     # eval $adb_prefix shell pm clear jackpal.androidterm
     # enableSUAccess
     #make sure no previous instances are running
@@ -74,7 +74,7 @@ killProcess(){
 cleanUp(){
     # sudo pkill openvpn
     # sudo pkill mm-phone-webrecord-using-vpn
-    # eval $adb_prefix shell pm clear com.android.chrome
+    eval $adb_prefix shell pm clear com.android.chrome
     # eval $adb_prefix shell pm clear jackpal.androidterm
 
     # sudo iptables -t nat -F
@@ -261,9 +261,9 @@ waitForNode(){
 trap ctrl_c INT
 
 ctrl_c(){
-    echo "Handling process exit.."
+    echo "phone_record_mahimahi exiting.."
     cleanUp
-    sudo kill -INT 888
+    sudo kill -9 ${BASH_ARGV}
     exit 1
 }
 
@@ -291,8 +291,8 @@ ctrl_c(){
 # startServerVPN
 # masquerade
 # toggleClientVpn
-# init
-if [[ $5 == "record" ]]; then
+init
+if [[ $5 == "record" || $5 == "std" ]]; then
     echo "Record mode"
     toggleClientVpn
     vpnIsRunning

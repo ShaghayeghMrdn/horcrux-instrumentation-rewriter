@@ -82,16 +82,16 @@ cpdelayFile(){
 trap ctrl_c INT1
 
 ctrl_c(){
-    echo "Handling process exit.."
+    echo "run_phone_record exiting.."
     cleanUp
     exit 1
 }
 
 rm fetchErrors
 rm loadErrors
-cleanUp
+# cleanUp
 
-for iter in $(seq 1 1); do 
+for iter in $(seq 1 3); do 
     echo "current iteration is " $iter 
     while IFS='' read -r line || [[ -n "$line" ]]; do
         echo "Iteration" $iter "replaying url: " $line 
@@ -105,10 +105,12 @@ for iter in $(seq 1 1); do
              # cpdelayFile $url
              $phone_replay_bin $3/$url 1194 regular_replay none &
              # $phone_record_bin $3/$url none none & 
-             sleep 3 
+             sleep 3
             # iptableSetup
-            ./$phone_record_file $config $2 $line ${4}/$iter/record/"$url"/ record
-            ./$phone_record_file $config $2 $line ${4}/$iter/replay/"$url"/ replay
+             ./$phone_record_file $config $2 $line ${4}/$iter/record/"$url"/ record "$$"
+             ./$phone_record_file $config $2 $line ${4}/$iter/replay/"$url"/ replay "$$"
+             echo "Returned from phone_record_file, since parent wasn't killed"
+            # ./$phone_record_file $config $2 $line ${4}/$iter/replay/"$url"/ replay
              # adb </dev/null shell am force-stop com.android.chrome
             # ./$phone_record_file $config $2 $line ${4}/replay/"$url"/ replay
             # killProcess replayshell

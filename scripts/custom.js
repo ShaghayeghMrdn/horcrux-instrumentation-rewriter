@@ -36,6 +36,44 @@ var getNonCacheable = async function(Runtime, outDir){
     console.log("Done fetching non-cache statistics");
 }
 
+var processLeafNodes = function(cg){
+    var leafGraph = [];
+    var nonLeafs = [];
+    if (!cg) return leafGraph;
+    Object.keys(cg).forEach((nodeId)=>{
+        var node = cg[nodeId];
+        var fnName = nodeId.split("_count")[0];
+        if (nonLeafs.indexOf(fnName)>=0) return;
+        if (!node.length && leafGraph.indexOf(fnName)<0)
+            leafGraph.push(fnName);
+        else nonLeafs.push(fnName);
+    })
+
+    return leafGraph;
+}
+
+var getNodeTimingInfo = function(leafNodes){
+    var timeEntries = performance.getEntriesByType("mark");
+    node2time = {};
+    leafNodes.forEach((lg)=>{
+        var pair = timeEntries.filter(e=>e.name.indexOf(lg)>=0);
+        node2time[lg] = pair[1].startTime = pair[0].startTime;
+    })
+    expensiveNodes = Object.entries(node2time).sort((a,b)=>{return b[1] - a[1]}).slice(0,10);
+}
+
+var runCodeOnClient = async function(Runtime){
+    var cmd = `
+        var processLeafNodes = ${processLeafNodes};
+        var leafNodes = processLeafNodes(__tracer.getCallGraph());
+    
+        var timingInfo = performance.getEntriesByType("mark").filter(e=>e.name.indexOf("-function-")>=0).map((e)=>{return { n:e.name, t:e.startTime} });
+    `;
+    await Runtime.evaluate({expression : cmd, returnByValue: true});
+    console.log("Done computing expensive leaf nodes")
+
+}
+
 var getFunctionStats = async function(Runtime, outDir) {
     var stats = {};
     var fetchCommand = '__tracer.getFunctionStats()';
@@ -54,12 +92,17 @@ var getFunctionStats = async function(Runtime, outDir) {
 
 }
 
-var getInvocationProperties = async function(Runtime, outFile, fetchCommand){
+var getInvocationProperties = async function(Runtime, outFile, fetchCommand, preProcess){
+    if (preProcess)
+        await runCodeOnClient(Runtime);
     var _fnStats = await Runtime.evaluate({expression : fetchCommand, returnByValue: true});
     var stats = _fnStats.result;
+    if (_fnStats.code || _fnStats.exceptionDetails){
+        fs.appendFileSync("./fetchErrors",outFile + "\n");
+    }
 
     fs.writeFileSync(outFile, JSON.stringify(stats, null, 2));
-    console.log("Done fetching Invocation properties");    
+    console.log("Done fetching " + fetchCommand);    
 }
 
 function escapeBackSlash(str){
@@ -67,6 +110,7 @@ function escapeBackSlash(str){
 }
 
 var runPostLoadScripts = async function(Runtime){
+    console.log("Running postload scripts..");
     //process final signature
     var processCommand = '__tracer.processFinalSignature()'
     var cmdOutput = await Runtime.evaluate({expression : processCommand, returnByValue: true});
@@ -101,11 +145,11 @@ var getProcessedSignature = async function(Runtime, outDir){
     var errors = [];
     var processedSignature = {};
     // var expression = '__tracer.getInvocations();';
-    var expression = 'Object.keys(__tracer.getCustomCache())';
+    var expression = 'Object.keys(__tracer.getStoredSignature())';
     var cachedSignature;
 
     var _query = await Runtime.evaluate({expression:expression, returnByValue: true});
-    if (_query.code) {
+    if (_query.code || _query.exceptionDetails) {
         console.error("Error while fetching processed Signature length");
         errors.push(outDir);
         return;
@@ -126,7 +170,7 @@ var getProcessedSignature = async function(Runtime, outDir){
         key  = escapeBackSlash(key);
         var _query;
         try {
-           _query = await Runtime.evaluate({expression:`__tracer.getCustomCache()['${key}']`, returnByValue: true});
+           _query = await Runtime.evaluate({expression:`__tracer.getStoredSignature()['${key}']`, returnByValue: true});
         } catch (e) {
             console.log("error while fetching key " + key);
             continue;

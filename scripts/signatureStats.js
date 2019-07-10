@@ -1,48 +1,47 @@
 var fs = require('fs')
 var util = require('util')
+var program = require('commander');
 
-signature = JSON.parse(fs.readFileSync(process.argv[2], "utf-8"))
 
-stats = {}
+program
+	.option('-i, --input [input]', 'input signature file')
+	.option('--verbose','verbose output')
+	.parse(process.argv);
 	
+
+function parseSig(sig){
+	var parsed={};
+	Object.keys(sig).forEach((key)=>{
+		parsed[key] = JSON.parse(sig[key]);
+	})
+	return parsed;
+}
+
+function analyseState(stateKeys, sig){
+	var empty = [];
+	Object.keys(sig).forEach((nodeId)=>{
+		if (typeof sig[nodeId] == "string") return;
+		if (stateKeys.filter(e=>sig[nodeId][e].length>0).length == 0)
+			empty.push(nodeId);
+	})
+	return empty;
+}
 function computeStats(sig){
-	var numberOfFunctions = Object.keys(sig).length;
-	var functionsWithReads = 0;
-	var functionsWithWrites = 0;
-	var functionsWithArguments = 0;
-	var functionsWithReturn = 0;
+	var processed = parseSig(sig);
 
-	for (var node in sig){
-		if (sig[node].reads)
-			functionsWithReads++;
-		if (sig[node].writes)
-			functionsWithWrites++;
-		if (sig[node]["arguments"] && sig[node]["arguments"].before)
-			functionsWithArguments++;
-		if (sig[node].returnValue)
-			functionsWithReturn++;
-	}
+	var readKeys = Object.keys(processed[Object.keys(processed)[0]]).filter(e=>e.indexOf("read")>=0);
+	var writeKeys = Object.keys(processed[Object.keys(processed)[0]]).filter(e=>e.indexOf("read")>=0);
 	
-	stats["fWithReads"] = functionsWithReads/numberOfFunctions;
-	stats["fWithWrites"] = functionsWithWrites/numberOfFunctions;
-	stats["fWithArguments"] = functionsWithArguments/numberOfFunctions;
-	stats["fWithReturns"] = functionsWithReturn/numberOfFunctions;
-	stats["totalFuncs"] = numberOfFunctions;
-}
+	_emptyReads = analyseState(readKeys, processed);
+	_emptyWrites = analyseState(writeKeys, processed);
 
-computeStats(signature);
-switch (process.argv[3]) {
-	case 'r':
-		console.log(stats["fWithReads"]);
-		break;
-	case 'w':
-		console.log(stats["fWithWrites"]);
-		break;
-	case 'a':
-		console.log(stats["fWithArguments"]);
-		break;
-	case 're':
-		console.log(stats["fWithReturns"]);
-		break;
+	process.stdout.write(util.format(_emptyWrites.length, _emptyReads.length, Object.keys(processed).length,));
+	if (program.verbose) {
+		console.log("reads:" + JSON.stringify(_emptyReads));
+		console.log("writes:" + JSON.stringify(_emptyWrites));
+	}
+
 }
+signature = JSON.parse(fs.readFileSync(program.input, "utf-8"))
+computeStats(signature);
 

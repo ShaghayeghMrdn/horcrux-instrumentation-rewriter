@@ -27,14 +27,12 @@ var extractIdentifiers = function(node){
         if (node.type == "Identifier" || node.type == "ThisExpression") {
             readArray.push(node)
             return;
-        } /*else if (node.type == "BinaryExpression" || node.type == "LogicalExpression") {
-            readRecursively(node.left);
-            readRecursively(node.right);
-        }*/ /*else if (node.type == "MemberExpression") {
-            readRecursively(node.object);
-            if (node.computed)
-                readRecursively(node.property);
-        }*/ else if (node.type == "UnaryExpression") {
+        } else if (node.type == "ObjectPattern") {
+            node.properties.forEach((prop)=>{
+                readRecursively(prop.key);
+            })
+
+        } else if (node.type == "UnaryExpression") {
                 readRecursively(node.argument);
         } else if (node.type == "ConditionalExpression") {
             readRecursively(node.test);
@@ -88,10 +86,12 @@ var isParamOfFunction = function(node){
     }
     return isParam;
 }
-var handleReads = function(node) {
+var handleReads = function(node, haveIds) {
     // console.log("handling for reads: " +  node.source() + " " + node.type);
-
-    var readArray = extractIdentifiers(node);
+    var readArray;
+    if (haveIds)
+        readArray = [node];
+    else readArray = extractIdentifiers(node);
     if (readArray == null) return [];
     var globalReads = [];
     var argReads = [];

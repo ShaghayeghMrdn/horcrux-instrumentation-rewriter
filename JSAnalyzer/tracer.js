@@ -70,7 +70,9 @@ TODO
         - While trying to build the call graph, some nodes are not found: Is it because I am deleting nodes while stringifying? 
 */
 
-if (typeof {name} === 'undefined') {
+var proxyEncapsulation;
+
+if (typeof window.top.{name} === 'undefined') {
 {name} = new (function () {
     var e2eTesting = {e2eTesting};
     var trackOnlyLeaf = true;
@@ -99,13 +101,23 @@ if (typeof {name} === 'undefined') {
     var INVOCATION_LIMIT = 500;
 
     var omniStringifier = new Omni();
-    var stringify = omniStringifier.stringify;
     var parse = omniStringifier.parse;
+
+    window.objStrCount = {
+        argument_reads:0,
+        argument_writes:0,
+        closure_reads:0, 
+        closure_writes:0,
+        global_writes:0,
+        global_reads:0,
+        this_reads:0,
+        this_writes:0
+    };
 
     //Define all your custom methods, before they are overwritten
     //by user javascript
     // Declare all the custom prototype methods here
-    var customMethods = {getOwnPropertyDescriptor: Object.getOwnPropertyDescriptor}
+    var customMethods = {getOwnPropertyDescriptor: Object.getOwnPropertyDescriptor, getOwnProperyNames: Object.getOwnProperyNames, ownKeys: Reflect.ownKeys}
 
     //temporary hack to store non stringifiable functions
     // var nodesByProperties = {
@@ -118,16 +130,20 @@ if (typeof {name} === 'undefined') {
     }
 
     var fnCacheExists = false;
-    if (fnCacheExists = localStorage.getItem("fnCacheExists")){
-        console.log("Fn cache exists, skippping function executions..");
-        keysToStdKeys = JSON.parse(localStorage.getItem("keyMap"));
+    try {
+        if (fnCacheExists = localStorage.getItem("fnCacheExists")){
+            console.log("Fn cache exists, skippping function executions..");
+            keysToStdKeys = JSON.parse(localStorage.getItem("keyMap"));
 
-        var _processedSignature = JSON.parse(localStorage.getItem("signature"));
-        Object.keys(_processedSignature).forEach((key)=>{
-            processedSignature[key] = JSON.parse(_processedSignature[key], true);
-        })
-        console.log("Function signatures loaded..");
-        pageLoaded = true;
+            var _processedSignature = JSON.parse(localStorage.getItem("signature"));
+            Object.keys(_processedSignature).forEach((key)=>{
+                processedSignature[key] = JSON.parse(_processedSignature[key], true);
+            })
+            console.log("Function signatures loaded..");
+            pageLoaded = true;
+        }
+    } catch (e){
+        console.error("error while reading local storage " + e);
     }
 
     var getFunctionStat = function(key){
@@ -144,7 +160,7 @@ if (typeof {name} === 'undefined') {
             console.log("PROXY STATS");
             console.log(window.proxyReadCount, window.proxyWriteCount);
             window.{proxyName} = window;
-            pageLoaded = true;
+            pageLoaded = false;
 
             // processFinalSignature();
             // processInvocationProperties();
@@ -172,11 +188,16 @@ if (typeof {name} === 'undefined') {
         //Now individual iterate the invocations and convert object ids to strings
         Object.keys(invocationToArgProxy).forEach((invocationId)=>{
              // Return if not leaf node
-            if (trackOnlyLeaf &&  callGraph[invocationId].length) return;
+            if (trackOnlyLeaf &&  callGraph[invocationId].length) {
+                nonCacheableNodes[invocationId] = "non-leaf";
+                return;
+            }
+            if (invocationId in nonCacheableNodes) return;
             var argProxyHandler = invocationToArgProxy[invocationId];
             var proxyPrivates = argProxyHandler.accessToPrivates();
             var invocationSignature = {};
             invocationSignature[invocationId] = processedSignature[invocationId];
+            if (!invocationSignature[invocationId]) return;
             var sigProcessor = new SignatureProcessor(invocationSignature, proxyPrivates.ObjectTree, callGraph, "argument");
             sigProcessor.process();
             sigProcessor.postProcess();
@@ -186,10 +207,12 @@ if (typeof {name} === 'undefined') {
         Object.keys(invocationToThisProxy).forEach((invocationId)=>{
             // Return if not leaf node
             if (trackOnlyLeaf && callGraph[invocationId].length) return;
+            if (invocationId in nonCacheableNodes) return;
             var thisProxyHandler = invocationToThisProxy[invocationId];
             var proxyPrivates = thisProxyHandler.accessToPrivates();
             var invocationSignature = {};
             invocationSignature[invocationId] = processedSignature[invocationId];
+            if (!invocationSignature[invocationId]) return;
             var sigProcessor = new SignatureProcessor(invocationSignature, proxyPrivates.ObjectTree, callGraph, "this");
             sigProcessor.process();
             sigProcessor.postProcess();
@@ -199,10 +222,12 @@ if (typeof {name} === 'undefined') {
         Object.keys(invocationToClosureProxy).forEach((invocationId)=>{
             // Return if not leaf node
             if (trackOnlyLeaf && callGraph[invocationId].length) return;
+            if (invocationId in nonCacheableNodes) return;
             var closureProxyHandler = invocationToClosureProxy[invocationId];
             var proxyPrivates = closureProxyHandler.accessToPrivates();
             var invocationSignature = {};
             invocationSignature[invocationId] = processedSignature[invocationId];
+            if (!invocationSignature[invocationId]) return;
             var sigProcessor = new SignatureProcessor(invocationSignature, proxyPrivates.ObjectTree, callGraph, "closure");
             sigProcessor.process();
             sigProcessor.postProcess();
@@ -221,11 +246,13 @@ if (typeof {name} === 'undefined') {
 
     var storeSignature = function(){
         Object.keys(processedSignature).forEach((invocId)=>{
+            if (invocId in nonCacheableNodes) return;
             var strSig = JSON.stringify(processedSignature[invocId]);
             if (strSig && strSig instanceof Error) {
-                nonCacheableNodes[invocId.split("_count")[0]] = "stringify";
+                nonCacheableNodes[invocId] = "stringify";
                 return;
-            } else if (invocId.split("_count")[0] in nonCacheableNodes) return;
+            }
+            else if (processedSignature[invocId] == "NonLeafNode") return;
 
             //convert the original signature in the string format, to do a memory comparison
             processedSignature[invocId] = strSig;
@@ -297,7 +324,69 @@ if (typeof {name} === 'undefined') {
             prototype = prototype.__target;
         return _setProtoTypeof(obj, prototype);
     }
+
+    var _encodeURI = window.encodeURI;
+    window.encodeURI = function(uri){
+        var _t;
+        if (uri && (_t = uri.__target))
+            uri = _t;
+        return _encodeURI.call(this, uri);
+    }
+
+    var _encodeURIComponent = window.encodeURIComponent;
+    window.encodeURIComponent = function(uri){
+        var _t;
+        if (uri && (_t = uri.__target))
+            uri = _t;
+        return _encodeURIComponent.call(this, uri);
+    }
+
+    // Since we are modifying content of scripts, if scripts have dynamically created integrity attribute
+    // the script won't be fetch as the hash match would fail, therefore make the integrity field non writable
+    Object.defineProperty(HTMLScriptElement.prototype, "integrity",{value:"", writable:false})
+
+    if (Error.captureStackTrace){
+        var _captureStackTrace = Error.captureStackTrace;
+        Error.captureStackTrace = function(){
+            var args = arguments;
+            if (args[0] && args[0].__target)
+                args[0] = args[0].__target;
+            if (args[1] && args[1].__target)
+                args[1] = args[1].__target;
+            return _captureStackTrace.apply(this, args);
+        }
+    }
+
+    var _xmlSend = XMLHttpRequest.prototype.send;
+        // override the native send()
+    XMLHttpRequest.prototype.send = function(){
+        if (_shadowStackHead){
+            nonCacheableNodes[_shadowStackHead] = "xml";
+            // console.log("xml request sent from " + _shadowStackHead);
+        }
+        // call the native send()
+        _xmlSend.apply(this, arguments);
+    }
+
+    //Rewrite the encodeURI method as it doesn't support proxy objects
+
     /*Re write the bind method because the default bind might be overridden. */
+
+    // Object.getOwnProperyNames = function(arg){
+    //     var _ret = customMethods.getOwnProperyNames(arg);
+    //     var _omniId = _ret.indexOf("__Omni_id");
+    //     if (_omniId >=0 )
+    //         _ret.splice(_omniId,1);
+    //     return _ret;
+    // }
+
+    // Reflect.ownKeys = function(arg){
+    //     var _ret = customMethods.ownKeys(arg);
+    //     var _omniId = _ret.indexOf("__Omni_id");
+    //     if (_omniId >=0 )
+    //         _ret.splice(_omniId,1);
+    //     return _ret;
+    // }
 
     // var _eval = window.eval;
     // window.eval = function(arg){
@@ -312,14 +401,13 @@ if (typeof {name} === 'undefined') {
     // Function.prototype._call = function(thisArg, ...args){
     //     return Function.prototype.call.apply(thisArg, _thisArg, args);
     // }
-    // var origCall = Function.prototype.call;
-    // Function.prototype.call = function(thisArg, ...args) {
-    //     var vThisArg;
-    //     if (thisArg && thisArg.__isProxy)
-    //         vThisArg = proxyToMethod.get(thisArg)
-    //     else vThisArg = thisArg;
 
-    //     return origCall.apply(this, [vThisArg, ...args]);
+    // var origCall = Function.prototype.call;
+    // Function.prototype.call = function() {
+    //     var args = arguments;
+    //     if (args[0] && args[0].__isProxy)
+    //         args[0] = args[0].__target;
+    //     return origCall.apply(this, args);
     // }
 
     // Function.prototype.apply = function(thisArg, args) {
@@ -336,12 +424,14 @@ if (typeof {name} === 'undefined') {
     // for reasons unknown
     // Despite window satisfying this criteria have this function return false for window
     // object specifically
+    // Sometimes Node instances like character data or other nodes don't satisfy the instanceof check
+    // therefore use specific methods like click and appendata
     var isDOMInheritedProperty = function(method){
         return method && (method instanceof EventTarget || method instanceof HTMLCollection || method instanceof NodeList || method.readState
-            || method.click) /*&& (method && method.self != method)*/
+            || method.click || method.appendData) &&  !(method instanceof HTMLDocument) /*&& (method && method.self != method)*/
     }
 
-    function proxyEncapsulation(rootObject, type) {
+    proxyEncapsulation =  function(rootObject, type) {
 
         var ObjectTree = {};
         var objectIdCounter = 1;
@@ -411,17 +501,22 @@ if (typeof {name} === 'undefined') {
             return rootId;
         }
 
+        var redundantStateConsumed = ["__isProxy", "top", "parent","toString","toJSON"];
+
         var loggerFunction = function(target, key, value, logType){
-            if (key == "__isProxy" || key == "top" || key == "parent" || document.readyState == "complete") return;
+            var retCode = 0;
+
+            if (redundantStateConsumed.indexOf(key)>=0 /*|| document.readyState == "complete"*/)
+                return 0;
             // if ( value && value.self == value) return;
             if (value && value.__isProxy)
                 value = value.__target;
             var nodeId = _shadowStackHead ? _shadowStackHead : null;
-            // var nodeId = _nodeId + "_count" + invocationsIndName[_nodeId];
-            //TODO only storing signature of the first invocation and not including the signature of future 
-            //invocations. 
+            
+            var stringifier = logType.indexOf("read")>=0 ? {stringify:stringify} : omniStringifier;
             if ( (!nodeId && logType.indexOf("global")<0 ) || (nodeId && 
-                (functionsSeen.indexOf(nodeId) >= 0 || nonCacheableNodes[nodeId] || exceedsInvocationLimit(nodeId))) ) return;
+                nonCacheableNodes[nodeId]) ) 
+                return 1;
 
             if (logType.indexOf("argument")>=0 || logType.indexOf("this")>=0 || logType.indexOf("closure")>=0)
                 nodeId = parentFunctionId;
@@ -433,6 +528,7 @@ if (typeof {name} === 'undefined') {
             var currentObjectTree = null;
             var remoteLogType = "";
             if (_shadowStackHead != nodeId) {
+                // console.error("shadow stack head doesn't point to proxy creating head");
                 //Check how in the current function, it is being accessed: as closure,argument, or this
                 if ( invocationToArgProxy[_shadowStackHead] ){
                     var remotePrivates = invocationToArgProxy[_shadowStackHead].accessToPrivates();
@@ -470,34 +566,40 @@ if (typeof {name} === 'undefined') {
                     remotePrivates.appendObjectTree(remoteRootId, key, remoteChildId);
                 }
                 // Only read argument reads if they are primitives, ie the next else condition
-                if (logType == "argument_reads" && rootId == 0 ) return;
-                if (logType == "closure_reads" && rootId == 0 ) return;
-            } else {
-                if (typeof value == "symbol")
-                    var childId = 'p-'  + value.toString();
-                else var childId = 'p-' + value;
-            }
+                if ( (logType.indexOf("reads")>=0)) {
+                    return 0;
+                }
 
-            if (typeof value == "undefined" && logType == "argument_reads" && rootId == 0) return;
+                // window.objStrCount[logType]++;
+            }// } else {
+            //     if (typeof value == "symbol")
+            //         var childId = 'p-'  + value.toString();
+            //     else var childId = 'p-' + value;
+            // }
+
+            if (typeof value == "undefined" && logType == "argument_reads" && rootId == 0) return 0;
                
             // The only time when not having a nodeId is allowed, is when the logger function is closed for a 
             // global read or write. However since the nodeId is not there, we won't be adding to any signature
             //only appending the object in the tree. 
-            if (!nodeId) return;
+            if (!nodeId || (!value && logType.indexOf("read")>=0 ) ||  (_shadowStackHead != nodeId)) return 0;
 
             //Let's only store the child id and not worry about stringifying reads/writes
-            var childLogStr = omniStringifier.stringify(value);
+            var childLogStr = stringifier.stringify(value);
             if (childLogStr && childLogStr instanceof Error){
-                nonCacheableNodes[nodeId.split("_count")[0]] = "circular";
-                return;
+                nonCacheableNodes[nodeId] = "circular";
+                _shadowStackHead = null;
+                return 1;
             } else if (!childLogStr && logType.indexOf("reads")>=0)
-                return;
+                return 0;
 
             // if (!stateAlreadyLogged(nodeId, [rootId, key, childLogStr], logType))
+            
             customLocalStorage[nodeId][logType].push([rootId, key, childLogStr]);
             if (currentObjectTree) {
                 // customLocalStorage[_shadowStackHead][remoteLogType].push([remoteRootId, key, childId]);
             }
+            return 0;
         }
             
 
@@ -513,11 +615,9 @@ if (typeof {name} === 'undefined') {
 
         var handleNonConfigurableProperty = function(target, key){
             var method = Reflect.get(target,key);
-            /*if (typeof target[key] == "function"){
-                _thisArg = target;
-                method.call = method._call;
-                return method;
-            } else*/ return method;
+            // if (_shadowStackHead)
+            //     nonCacheableNodes[_shadowStackHead] = "non-configurable";
+             return method;
         } 
 
         var handleMetaProperties = function(target, key){
@@ -534,17 +634,22 @@ if (typeof {name} === 'undefined') {
             }
         }
 
-        var outOfScopeProperties = ["location", "body", "Promise", "top", "parent", "prototype", "__proto__","toJSON", "self"];
+        var outOfScopeProperties = [/*"location", "body", */"Promise", "top", "parent", "prototype", "__proto__", "self"];
 
-        var isWindow = function(obj){
+        var isWindow = function(obj,cors){
             if (obj && obj.self == obj){
-                if (obj.__isProxy) return obj;
-                var proxyPrivates = globalProxyHandler.accessToPrivates();
-                var _proxyMethod = proxyPrivates.methodToProxy.get(obj);
-                if (_proxyMethod) return _proxyMethod;
-                var proxyMethod = new Proxy(obj, handler);
-                proxyPrivates.methodToProxy.set(obj, proxyMethod);
-                return proxyMethod;
+                try{
+                    if (obj.__isProxy) return obj;
+                    var proxyPrivates = globalProxyHandler.accessToPrivates();
+                    var _proxyMethod = proxyPrivates.methodToProxy.get(obj);
+                    if (_proxyMethod) return _proxyMethod;
+                    var proxyMethod = new Proxy(obj, handler);
+                    proxyPrivates.methodToProxy.set(obj, proxyMethod);
+                    return proxyMethod;
+                } catch (e){
+                    cors.v = true;
+                    return obj;
+                }
             }
         }
 
@@ -554,17 +659,20 @@ if (typeof {name} === 'undefined') {
             if (key == "__isProxy") return rootType;
             if (key == "__target") return target;
             if (key == "__debug") return parentFunctionId;
-            
             var method = Reflect.get(target,key);
+
+            if (key == "toJSON") return function(){return target};
 
             if (outOfScopeProperties.includes(key)) return method;
             var desc = customMethods.getOwnPropertyDescriptor(target, key);
-            if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
-            var isWinObj;
-            if (isWinObj = isWindow(method))
+            // if (desc && !desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
+            var isWinObj,cors={};
+            if (isWinObj = isWindow(method,cors)){
+                if (!cors.v) loggerFunction(target, key, method, rootType+"_reads");
                 return isWinObj;
+            }
 
-            loggerFunction(target, key, method, rootType + "_reads");
+            _ret = loggerFunction(target, key, method, rootType + "_reads");
 
             if (method && method.__isProxy) {
                 if (rootType == "global" || method.__isProxy == "global") 
@@ -584,9 +692,14 @@ if (typeof {name} === 'undefined') {
                 // return method;
             }
             /* If method type if function, don't wrap in proxy for now */
-            if (method && (typeof method === 'object' || typeof method=== "function") && !outOfScopeProperties.includes(key) && !isDOMInheritedProperty(method)) {
+            if (method && (typeof method === 'object' || typeof method=== "function") && !outOfScopeProperties.includes(key) ) {
+              if (isDOMInheritedProperty(method)){
+                // if (_shadowStackHead)
+                //     nonCacheableNodes[_shadowStackHead] = "DOM";
+                return method;
+              }
               var desc = customMethods.getOwnPropertyDescriptor(target, key);
-              if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
+              // if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
               window.proxyReadCount++;
               // if (window.proxyReadCount % 1000000 == 0)
               //   alert("window.Proxyreadcount is " + window.proxyReadCount);
@@ -615,8 +728,14 @@ if (typeof {name} === 'undefined') {
             }
           },
           set (target, key, value, receiver) {
-            loggerFunction(target, key, value,rootType + "_writes");
+            var cors={};
+            if (!isWindow(value,cors))
+                loggerFunction(target, key, value,rootType + "_writes");
             window.proxyWriteCount++;
+            if (key == "prototype" && value && value.__isProxy){
+                value = value.__target;
+                return Reflect.set(target, key, value);
+            }
             return Reflect.set(target, key, value);
           },
 
@@ -632,18 +751,30 @@ if (typeof {name} === 'undefined') {
                     If the thisArg is a proxy object however it has no corresponding target method, call apply on the proxy object itself.
                     If the thisArg is not a proxy object, call the method on the thisArg itself. 
                 */
+
+                if (args.length){
+                    args.forEach((arg,_i)=>{
+                        if (arg && arg.__isProxy)
+                            args[_i] = arg.__target;
+                    })
+                }
                 if (Reflect.apply.__isProxy)
                     Reflect.apply = Reflect.apply.__target;
-                if (!thisArg) return Reflect.apply(target, thisArg, args);
-                else if (!thisArg.__isProxy)
-                 return Reflect.apply(target, thisArg, args);
-                else return Reflect.apply(target, thisArg.__target, args);
+                if ( ! Array.isArray(thisArg) ){
+                    if (thisArg && thisArg.__target)
+                        return Reflect.apply(target, thisArg.__target, args);
+                    else return Reflect.apply(target, thisArg, args);
+                }
+                return Reflect.apply(target, thisArg, args);
           },
-          construct (target, args) {
-              // return new target(...args);
-              return Reflect.construct(target, args);
+          construct (target, args, newPrototype) {
+              if (newPrototype && newPrototype.__target)
+                newPrototype = newPrototype.__target;
+              return Reflect.construct(target, args, newPrototype);
           },
           setPrototypeOf (target, prototype) {
+            if (prototype && prototype.__isProxy)
+                prototype = prototype.__target;
             return Reflect.setPrototypeOf(target, prototype);
           },
           getPrototypeOf (target) {
@@ -662,6 +793,10 @@ if (typeof {name} === 'undefined') {
             return Reflect.isExtensible(target)
           },
           defineProperty (target, propertyKey, attributes) {
+            // if (_shadowStackHead){
+            //     nonCacheableNodes[_shadowStackHead] = "defineProperty";
+            //     _shadowStackHead = null;
+            // }
             return Reflect.defineProperty(target, propertyKey, attributes);
           },
           deleteProperty (target, propertyKey) {
@@ -695,12 +830,12 @@ if (typeof {name} === 'undefined') {
 
     var {proxy, revoke} = Proxy.revocable(window, globalProxyHandler);
     // Flag to disable proxy
-    window.{proxyName} = proxy;
+    window.top.{proxyName} = proxy;
     // window.{proxyName} = window;
     globalProxyHandler.accessToPrivates().methodToProxy.set(window, proxy);
 
     if (pageLoaded){
-        window.{proxyName} = window;
+        window.top.{proxyName} = window;
     }
 
 
@@ -781,7 +916,7 @@ if (typeof {name} === 'undefined') {
     }
 
     this.handleProtoAssignments = function(targetPrototype) {
-        if (targetPrototype.__isProxy)
+        if (targetPrototype && targetPrototype.__isProxy)
             return targetPrototype.__target;
         else return targetPrototype;
     }
@@ -794,10 +929,13 @@ if (typeof {name} === 'undefined') {
     }
 
     this.isProxy = function(obj){
-        if (!obj || (typeof obj != "function" && typeof obj !="object")) return obj;
-        if (obj.self == obj) return obj;
-        if (obj.__isProxy) return obj.__target
-        else return obj;
+        try {
+            if (!obj || (typeof obj != "function" && typeof obj !="object")) return obj;
+            if (obj.__isProxy) return obj.__target
+            else return obj;
+        } catch (e){
+            return obj;
+        } 
     }
 
     this.logWrite = function(functionIdentifier, rhs, variableName, listOfProperties ){
@@ -829,9 +967,16 @@ if (typeof {name} === 'undefined') {
     }
 
     this.logReturnValue = function(functionIdentifier, returnValue, params) {
-        this.exitFunction(functionIdentifier, params);
-        if (pageLoaded) return returnValue;
-        if (functionsSeen.indexOf(functionIdentifier) >= 0 || exceedsInvocationLimit(functionIdentifier) ) return returnValue;
+        var cacheIndex = functionIdentifier + "_count" + invocationsIndName[functionIdentifier];
+        if (pageLoaded /*|| !returnValue*/) return returnValue;
+        // if (isDOMInheritedProperty(returnValue)){
+        //     nonCacheableNodes[cacheIndex] = "DOM";
+        //     //Don't need to reset shadow stack head as the exit function is already called
+        //     // hence the shadow stack head no longer points to the current function
+        //     // _shadowStackHead = null;
+        //     // this.exitFunction(functionIdentifier, params);
+        //     return returnValue;
+        // }
         // return returnValue;
         /* 
         Check in case there is a logreturn statement but the function was uncacheable
@@ -839,18 +984,21 @@ if (typeof {name} === 'undefined') {
         */ 
         if (invocationsIndName[functionIdentifier] == null){
             console.error("No invocation count for the nodeId " + functionIdentifier);
+            // this.exitFunction(functionIdentifier, params);
             return returnValue;
         }
-
-        var cacheIndex = functionIdentifier + "_count" + invocationsIndName[functionIdentifier];
         var _retString = omniStringifier.stringify(returnValue);
-        if (_retString && _retString.__proto__.__proto__ == "Error" || isDOMInheritedProperty(returnValue)) {
-                nonCacheableNodes[functionIdentifier] = "stringify";
+        if (_retString && _retString instanceof Error) {
+                nonCacheableNodes[cacheIndex] = "stringify";
             }
         if (customLocalStorage[cacheIndex]) customLocalStorage[cacheIndex]["returnValue"] = _retString;
-        if (returnValue && returnValue.__debug && returnValue.__debug != "global")
+        if (returnValue && returnValue.__debug && returnValue.__debug != "global"){
+            // this.exitFunction(functionIdentifier, params);
             return returnValue.__target;
-        else return returnValue;
+        } else {
+            // this.exitFunction(functionIdentifier, params);
+            return returnValue;
+        }
     }
 
     var logNonProxyParams = function(nodeId,params){
@@ -893,9 +1041,6 @@ if (typeof {name} === 'undefined') {
         else if (writeObj.__isClosureProxy)
             replay_closure(sig.closure_writes, writeObj);
         else replay_this(sig.this_writes, writeObj);
-
-        //use any of the above replay functions to replay global writes
-        replay_this(sig.global_writes);
     }
 
     var getArgTypes = function(args, delim){
@@ -915,8 +1060,7 @@ if (typeof {name} === 'undefined') {
         else invocationsIndName[nodeId] = 0;
 
         var cacheIndex = nodeId + "_count" + invocationsIndName[nodeId];
-
-        if (!callGraph[cacheIndex])
+        if (!(cacheIndex in callGraph))
             callGraph[cacheIndex] = [];
 
         // if (nonCacheableNodes[nodeId]) {
@@ -940,7 +1084,7 @@ if (typeof {name} === 'undefined') {
         
         let key = nodeId;
         const delim = ';;';
-        var _sig = getArgTypes(params,delim);
+        // var _sig = getArgTypes(params,delim);
 
         // if (_sig.indexOf("function") >= 0 ) {
         //     nonCacheableNodes[nodeId] = "arg";
@@ -956,14 +1100,18 @@ if (typeof {name} === 'undefined') {
 
         if (_shadowStackHead) {
             callGraph[_shadowStackHead].push(cacheIndex)
-            // nonCacheableNodes[nodeId] = "callee";
+            window.performance.clearMarks(_shadowStackHead);
         }
 
         shadowStack.push(cacheIndex);
         _shadowStackHead = cacheIndex;
 
-        if (invocationsIndName[nodeId] > INVOCATION_LIMIT)
+        if (invocationsIndName[nodeId] > INVOCATION_LIMIT){
+            nonCacheableNodes[cacheIndex] = "INVOCLIMIT";
+            _shadowStackHead = null;
+            window.performance.mark(cacheIndex);
             return;
+        }
 
         if (customLocalStorage[cacheIndex])
             console.error("Same function with same invocation id", cacheIndex);
@@ -977,6 +1125,7 @@ if (typeof {name} === 'undefined') {
         customLocalStorage[cacheIndex]["this_writes"] = [];
         customLocalStorage[cacheIndex]["closure_reads"] = [];
         customLocalStorage[cacheIndex]["closure_writes"] = [];
+        customLocalStorage[cacheIndex]["IBF"] = [];
         if (params && params.length != 0) {
             // customLocalStorage[cacheIndex]["arguments"] = {}
             // customLocalStorage[cacheIndex]["arguments"]["before"] = {};
@@ -984,6 +1133,7 @@ if (typeof {name} === 'undefined') {
             //Only for capturing the type of arguments:
             // customLocalStorage[cacheIndex]["argProp"] = _sig;
         }
+        window.performance.mark(cacheIndex);
     }
 
     this.cacheAndReplay = function(nodeId, ...params){
@@ -993,33 +1143,68 @@ if (typeof {name} === 'undefined') {
             return false;
         var sig;
         if (sig = processedSignature[keysToStdKeys[cacheIndex]]) {
-            if (sig == "NonLeafNode"){
-                cacheStats.misses.nonLeaf.push(cacheIndex);
+            // if (sig == "NonLeafNode"){
+            //     cacheStats.misses.nonLeaf.push(cacheIndex);
+            //     return false;
+            // }
+            cacheStats.hits.push(cacheIndex);
+            var emptyWrite = true;
+            try {
+            //Check if write array is not empty and then replay them 
+                if (sig.argument_writes.length)
+                    replay_arg(sig.argument_writes, params[0]) ,(emptyWrite = false);
+                if (sig.closure_writes.length)
+                    replay_closure(sig.closure_writes, params[1]),(emptyWrite = false);
+                if (sig.this_writes.length)
+                    replay_this(sig.this_writes, params[2]), (emptyWrite = false);
+                if (sig.global_writes)
+                    replay_this(sig.global_writes), (emptyWrite = false);
+                if (sig.IBF.length)
+                    replay_arg(sig.IBF);
+                var _ret = processedSignature[keysToStdKeys[cacheIndex]].returnValue;
+                // console.log("cache hit: " + cacheIndex);
+                if (_ret)
+                    return emptyWrite = false,omniStringifier.parse(_ret); 
+                if (emptyWrite){
+                    cacheStats.hits.pop();
+                    return false;
+                }
+                return true;
+            } catch (e) {
+                // if (e.message && e.message.indexOf("OMNI")<0) throw e;
+                cacheStats.hits.pop();
                 return false;
             }
-            cacheStats.hits.push(cacheIndex);
-            params.forEach((state)=>{
-                state && verifyAndReplayCache(keysToStdKeys[cacheIndex], state);
-            })
-            return omniStringifier.parse(processedSignature[keysToStdKeys[cacheIndex]].returnValue) || true
         }
         cacheStats.misses.empty.push(cacheIndex);
         return false;
     }
 
-    this.exitFunction = function(nodeId, params){
+    this.exitFunction = function(nodeId, closureObj){
         var cacheIndex = nodeId + "_count" + invocationsIndName[nodeId];
+        if (window.performance.getEntriesByName(cacheIndex).length)
+            window.performance.mark(cacheIndex + "_end");
         if (pageRecorded) return;
-        //TODO handle multiple invocations
-        if (functionsSeen.indexOf(nodeId) >= 0) return;
-        // functionsSeen.push(nodeId);
+        // if (closureObj)
+        //     this.updateClosureCache(cacheIndex, closureObj);
         shadowStack.pop();
         if (shadowStack.length) 
             _shadowStackHead = shadowStack[shadowStack.length - 1];
         else _shadowStackHead = null;
-
         // if (invocationToArgProxy[cacheIndex])
         //     invocationToArgProxy[cacheIndex][1] = invocationToArgProxy[cacheIndex][]
+        if (closureObj === null) return;
+        return closureObj
+    }
+
+    this.updateClosureCache = function(cacheIndex, closureObj){
+        Object.keys(closureObj).forEach((k)=>{
+            if (typeof closureObj[k] != "object"){
+                var writeAr = [0, k, closureObj[k]];
+                customLocalStorage[cacheIndex]["closure_writes"].push(writeAr);
+            }
+        })
+        return;
     }
 
     this.dumpArguments = function(nodeId, params) {
@@ -1031,10 +1216,28 @@ if (typeof {name} === 'undefined') {
         shadowStack.pop();
     }
 
+    this.logIBF = function(functionId, IBF, IBFStr, argStrs, argVals){
+        var ibfStr = "", argsConverted = [];
+        var cacheIndex = functionId + "_count" + invocationsIndName[functionId];
+        argVals.forEach((arg,i)=>{
+            var _argStr = omniStringifier.stringify(arg);
+            if (_argStr && _argStr instanceof Error){
+                nonCacheableNodes[cacheIndex] = _argStr.message;
+                return;
+            }
+            ibfStr += argStrs[i] + " = omniStringifier.parse(" + _argStr + ");\n"; 
+        })
+
+        ibfStr += IBFStr;
+        customLocalStorage[cacheIndex]["IBF"].push(ibfStr);
+
+        return IBF;
+    }
+
     this.createArgumentProxy = function(argObj){
         if (pageLoaded) return argObj;
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
-        if (!nodeId || (nodeId && (nonCacheableNodes[nodeId] || exceedsInvocationLimit(nodeId) ))) return argObj;
+        if (!nodeId) return argObj;
         if (!argObj.length) return argObj;
         if (argObj.__isProxy) argObj = argObj.__target;
         var proxyHandler = proxyEncapsulation(argObj,"argument");
@@ -1048,7 +1251,7 @@ if (typeof {name} === 'undefined') {
     this.createClosureProxy = function(closureObj){
         if (pageLoaded) return closureObj;
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
-        if (!nodeId || (nodeId && (nonCacheableNodes[nodeId] || exceedsInvocationLimit(nodeId) ) ) ) return closureObj;
+        if (!nodeId ) return closureObj;
         if (!Object.keys(closureObj).length) return closureObj;
         if (closureObj.__isProxy) closureObj = closureObj.__target;
         var proxyHandler = proxyEncapsulation(closureObj,"closure");
@@ -1067,7 +1270,7 @@ if (typeof {name} === 'undefined') {
     this.createThisProxy = function(thisObj){
         if (pageLoaded || !thisObj || (typeof thisObj != "function" && typeof thisObj != "object")) return thisObj;
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
-        if (!nodeId || (nodeId && (functionsSeen.indexOf(nodeId) >= 0 || nonCacheableNodes[nodeId]) || exceedsInvocationLimit(nodeId) ) ) return thisObj;
+        if (!nodeId) return thisObj;
         if (thisObj.__isProxy) thisObj = thisObj.__target;
         var proxyHandler = proxyEncapsulation(thisObj,"this");
         var thisProxy = new Proxy(thisObj, proxyHandler);
@@ -1085,68 +1288,68 @@ if (typeof {name} === 'undefined') {
         return (/\{\s*\[native code\]\s*\}/).test('' + fn);
     }
 
-    // function stringify(obj) {
-    //     try {
-    //         return JSON.stringify(obj, function (key, value) {
-    //           if (value && value.__isProxy)
-    //                 value = value.__target;
-    //           var fnBody;
-    //           if (value instanceof Function || typeof value == 'function') {
+    function stringify(obj) {
+        try {
+            return JSON.stringify(obj, function (key, value) {
+              if (value && value.__isProxy)
+                    value = value.__target;
+              var fnBody;
+              if (value instanceof Function || typeof value == 'function') {
+                return "";
+                if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
+                    return value.name;
+                }
+                fnBody = value.toString();
 
-    //             if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
-    //                 return value.name;
-    //             }
-    //             fnBody = value.toString();
+                if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { /*this is ES6 Arrow Function*/
+                  return '_NuFrRa_' + fnBody;
+                }
+                return fnBody;
+              }
+              if (value instanceof RegExp) {
+                return '_PxEgEr_' + value;
+              }
+              return value;
+            });
+        } catch(e){
+            return e;
+        }
+    };
 
-    //             if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { /*this is ES6 Arrow Function*/
-    //               return '_NuFrRa_' + fnBody;
-    //             }
-    //             return fnBody;
-    //           }
-    //           if (value instanceof RegExp) {
-    //             return '_PxEgEr_' + value;
-    //           }
-    //           return value;
-    //         });
-    //     } catch(e){
-    //         return e;
-    //     }
-    // };
+    function parse(str, date2obj) {
 
-    // function parse(str, date2obj) {
+    var iso8061 = date2obj ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/ : false;
 
-    // var iso8061 = date2obj ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/ : false;
+    return JSON.parse(str, function (key, value) {
+        var prefix;
 
-    // return JSON.parse(str, function (key, value) {
-    //     var prefix;
+        if (typeof value != 'string') {
+        return value;
+        }
+        if (value.length < 8) {
+        return value;
+        }
 
-    //     if (typeof value != 'string') {
-    //     return value;
-    //     }
-    //     if (value.length < 8) {
-    //     return value;
-    //     }
+        prefix = value.substring(0, 8);
 
-    //     prefix = value.substring(0, 8);
+        if (iso8061 && value.match(iso8061)) {
+            return new Date(value);
+        }
+        if (prefix === 'function') {
+            // if ((/\{\s*\[native code\]\s*\}/).test(value))
+            //     return nativeObjectsStore[key]
+            return eval('(' + value + ')');
+        }
+        if (prefix === '_PxEgEr_') {
+            return eval(value.slice(8));
+        }
+        if (prefix === '_NuFrRa_') {
+            return eval(value.slice(8));
+        }
 
-    //     if (iso8061 && value.match(iso8061)) {
-    //         return new Date(value);
-    //     }
-    //     if (prefix === 'function') {
-    //         // if ((/\{\s*\[native code\]\s*\}/).test(value))
-    //         //     return nativeObjectsStore[key]
-    //         return eval('(' + value + ')');
-    //     }
-    //     if (prefix === '_PxEgEr_') {
-    //         return eval(value.slice(8));
-    //     }
-    //     if (prefix === '_NuFrRa_') {
-    //         return eval(value.slice(8));
-    //     }
-
-    //     return value;
-    //     });
-    // };
+        return value;
+        });
+    };
 
     class SignatureProcessor{
 
@@ -1193,20 +1396,21 @@ if (typeof {name} === 'undefined') {
                         value = value.__target;
                       var fnBody;
                       if (value instanceof Function || typeof value == 'function') {
-                        return value.toString();
+                        return "";
+                      //   return value.toString();
 
-                        if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
-                            return {};
-                        }
-                        fnBody = value.toString();
+                      //   if ((/\{\s*\[native code\]\s*\}/).test(value.toString())) {
+                      //       return {};
+                      //   }
+                      //   fnBody = value.toString();
 
-                        if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { //this is ES6 Arrow Function
-                          return '_NuFrRa_' + fnBody;
-                        }
-                        return fnBody;
-                      }
-                      if (value instanceof RegExp) {
-                        return '_PxEgEr_' + value;
+                      //   if (fnBody.length < 8 || fnBody.substring(0, 8) !== 'function') { //this is ES6 Arrow Function
+                      //     return '_NuFrRa_' + fnBody;
+                      //   }
+                      //   return fnBody;
+                      // }
+                      // if (value instanceof RegExp) {
+                      //   return '_PxEgEr_' + value;
                       }
                       return value;
                     });
@@ -1246,7 +1450,7 @@ if (typeof {name} === 'undefined') {
                     for (var nodeId in objectTree){
                         for (var edge in objectTree[nodeId]) {
                             var _id = objectTree[nodeId][edge].indexOf(objectId);
-                            if (_id) {
+                            if (_id>=0) {
                                 var parentPath = constructPath(nodeId, OT);
                                 path = parentPath + "['" + edge.substr(2) + "']";
                                 objectToPathPerOT[OT][objectId] = path;
@@ -1303,7 +1507,7 @@ if (typeof {name} === 'undefined') {
                             else readString = read[1] + '';
                             var path = parentPath + "['" + readString + "']";
                             var readVal = read[2];
-                            readSignature = path + " = omniStringifier.parse('" + readVal +"')";
+                            readSignature = path + " = omniStringifier.parse(\"" + escapeRegExp(readVal) +"\")";
                         } catch (e) {
                             //TODO
                             //suppressing for now
@@ -1327,10 +1531,12 @@ if (typeof {name} === 'undefined') {
                             preProcess(OT);
                         var parentPath = objectToPathPerOT[OT][write[0]];
                         if (!parentPath) console.log("no parent path found for object id:" + JSON.stringify(write) + " " + nodeId);
-                        var path = parentPath + "['" + write[1] + "']"; 
+                        if (typeof write[1] == "symbol")
+                            var path = parentPath + "['" + write[1].toString() + "']"; 
+                        else var path = parentPath + "['" + write[1] + "']"; 
                         try {
                             var writeVal = write[2];
-                            writeSignature = path + " = omniStringifier.parse('" + writeVal +"')";
+                            writeSignature = path + " = omniStringifier.parse(\"" + escapeRegExp(writeVal) +"\")";
                         } catch (e) {
                             //TODO
                             //suppressing for now
@@ -1362,9 +1568,10 @@ if (typeof {name} === 'undefined') {
                 Object.keys(this.signature).forEach(function(nodeId){
                     // Return if not leaf node
                     if (trackOnlyLeaf &&  callGraph[nodeId].length) {
-                        processedSig[nodeId] = "NonLeafNode";
+                        // processedSig[nodeId] = "NonLeafNode";
                         return;
                     }
+                    if (nodeId in nonCacheableNodes) return;
                     processedSig[nodeId] = {};
                     if (signature[nodeId][logType+"_reads"] && signature[nodeId][logType+"_reads"].length)
                         processRead(nodeId)
@@ -1408,10 +1615,15 @@ if (typeof {name} === 'undefined') {
                     // });
                 }
 
+                var removeReduntantReadsSimple = function(nodeId){
+                    var readArray = processedSig[nodeId][logType+"_reads"];
+                    processedSig[nodeId][logType+"_reads"] = [...new Set(readArray.map(e=>JSON.stringify(e)))].map(e=>JSON.parse(e));
+                }
+
                 Object.keys(processedSig).forEach(function(nodeId){
                     if (trackOnlyLeaf && callGraph[nodeId].length) return;
                     if (processedSig[nodeId][logType+"_reads"])
-                        removeReduntantReads(nodeId);
+                        removeReduntantReadsSimple(nodeId);
                     // var readArray = processedSig[nodeId].reads;
                     // if (readArray && readArray.length) {
                     //     readArray = new Set(readArray);
@@ -1478,5 +1690,18 @@ if (typeof {name} === 'undefined') {
 
 });
 
+} else {
+    {name} = window.top.{name}
 }
+
+if (typeof {proxyName} === "undefined"){
+    var globalProxyHandler = window.top.proxyEncapsulation(window,"global");
+
+    var {proxy, revoke} = Proxy.revocable(window, globalProxyHandler);
+    // Flag to disable proxy
+    {proxyName} = proxy;
+}
+
 (function () { {name}.setGlobal(this); })();
+
+

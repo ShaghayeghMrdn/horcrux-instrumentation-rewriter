@@ -59,6 +59,24 @@ var removeLocalVariables = function(parentNode) {
 
 }
 
+var returnIdFromBindingPatterns = function(node){
+    var identifiers = [];
+    if (node.type == "ObjectPattern"){
+        node.properties.forEach((props)=>{
+            if (props.key.type == "Identifier")
+                identifiers.push(props.key);
+        })
+    } else if( node.type == "ArrayPattern"){
+        node.elements.forEach((elem)=>{
+            if (elem.type == "Identifier")
+                identifiers.push(elem);
+        })
+    } else if (node.type == "Identifier")
+        identifiers.push(node);
+
+    return identifiers;
+}
+
 var addLocalVariable = function (node) {
     parent = node.parent;
     while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
@@ -70,8 +88,12 @@ var addLocalVariable = function (node) {
         }
         if (node.source() == "" ) console.log("adding empty local vars");
         if (node.id){
-            if (parent.localVariables.map(function(e){return e.source()}).indexOf(node.id.name) < 0) 
-            parent.localVariables.push(node.id);
+            var candidates = returnIdFromBindingPatterns(node.id);
+            if (!candidates.length) console.error("[scopeAnalysis.js]Can't add empty identifiers");
+            candidates.forEach((candId)=>{
+                if (parent.localVariables.map(function(e){return e.source()}).indexOf(candId.name) < 0) 
+                    parent.localVariables.push(candId);
+            });
         } else {
             if (parent.localVariables.map(function(e){return e.source()}).indexOf(node.source()) < 0) 
                 parent.localVariables.push(node);

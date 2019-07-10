@@ -174,15 +174,16 @@ function topKRti(rti, k){
     return listOfIds;
 }
 
+//returns unique ids only those which have a url defined
 var getUniqueFunctions = function(ids){
     var callGraph = cpu.raw;
     var functionIds = [], seenCallFrame = [];
     var nnodes = callGraph._idToNode.size;
     for (var i=0;i<ids.length;i++){
         var node = callGraph._idToNode.get(ids[i]);
-        if (seenCallFrame.indexOf(JSON.stringify(node.callFrame))<0){
+        if (seenCallFrame.indexOf(JSON.stringify(node.callFrame))<0 && node.callFrame.url.startsWith("http")){
             seenCallFrame.push(JSON.stringify(node.callFrame));
-            functionIds.push(node.id);
+            functionIds.push(node.callFrame);
         }
     }
     return functionIds;
@@ -299,11 +300,15 @@ function main(){
     //print the BU time vs the total cpu time
     // const reducer = (accumulator, currentValue) => accumulator + currentValue.self;
     // console.log(cpu.parsed.children.reduce(reducer), cpuTime)
+    var allIdes = cpuRawInput.nodes.map(n=>n.id);
     fs.writeFileSync(program.output, JSON.stringify(leafNodesUser));
+    // process.stdout.write(util.format(getUniqueFunctions(allIdes).length))
     // console.log("Written " + top80percentRTIUser.length + " functions: " +  program.input);
-    process.stdout.write(util.format(timeInstrumented + " " + leafNodesTime + " " + leafNodes.length ));
+    process.stdout.write(util.format(cpuTime + " " + cpuTimeWoProgram));
 }
 
-main();
+// main();
+
+process.stdout.write(util.format(cpu.raw.programNode.self + " "));
 
 

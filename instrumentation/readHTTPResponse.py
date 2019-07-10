@@ -169,13 +169,13 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         TEMP_FILE = str(os.getpid())
         TEMP_FILE_zip = TEMP_FILE + ".gz"
         for header in http_response.response.header:
-            if header.key == "Content-Encoding":
+            if header.key.lower() == "content-encoding":
                 # print "GZIIPED FILE is " , file
                 gzip = True
                 gzipType = header.value
                 # markedToBeDeleted.append(header.key)
 
-            elif header.key == "Transfer-Encoding" and header.value == "chunked":
+            elif header.key.lower() == "transfer-encoding" and header.value == "chunked":
                 http_response.response.body = unchunk(http_response.response.body)
                 markedToBeDeleted.append(header.key)
 
@@ -200,9 +200,11 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         f.close()
         if (args.jsProfile):
         #Pass into the nodejs instrumentation script
-            command = " {} -i {} -n '{}' -t {} -j {}".format(instrumentation_plugins[args.instOutput], TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile)
+            command = " {} -i {} -n '{}' -t {} -j {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile)
+        elif (args.cgInfo):
+            command = " {} -i {} -n '{}' -t {} -c {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.cgInfo)
         else:
-            command = " {} -i {} -n '{}' -t {}".format(instrumentation_plugins[args.instOutput],TEMP_FILE, url + ";;;;" + origPath,fileType)
+            command = " {} -i {} -n '{}' -t {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType)
 
         if (args.debug) and fileType == "html":
             command = "node --inspect-brk={}".format(node_debugging_port) + command
@@ -218,11 +220,14 @@ def instrument(file,root, childPids, fileType, output_directory,args):
             cmd = subprocess.call(command, stdout=log_file, stderr =error_file, shell=True)
 
         # read the information returned from the script if inst type was recording
-        if args.instOutput == "record":
-            returnInfoFile = TEMP_FILE + ".info";
-            returnInfo = open(returnInfoFile,'r').readline();
+        if args.instOutput == "caching":
+            try:
+                returnInfoFile = TEMP_FILE + ".info";
+                returnInfo = open(returnInfoFile,'r').readline();
 
-            open(_log_path + "info","w").write(returnInfo)
+                open(_log_path + "info","w").write(returnInfo)
+            except IOError as e:
+                print "Error while reading info file" + str(e)
 
         if gzip:
             file_with_content = TEMP_FILE_zip
@@ -270,6 +275,8 @@ def instrument(file,root, childPids, fileType, output_directory,args):
                 length_header_exists = True
             if header.key.lower() == "content-security-policy" or header.key.lower() == "content-security-policy-report-only":
                 header.value = ""
+            if header.key == "Access-Control-Allow-Origin":
+                header.value = "*"
         if not length_header_exists:
             length_header = output_http_response.response.header.add()
             length_header.key = "Content-Length"
@@ -363,8 +370,9 @@ if __name__ == "__main__":
     parser.add_argument('input', help='path to input directory')
     parser.add_argument('output', help='path to output directory')
     parser.add_argument('instOutput', help='type of instrumentation to perform',
-     default="record", choices=["record","replay","ND"])
+     default="caching", choices=["cg","caching"])
     parser.add_argument('--jsProfile', help='path to the js profile')
+    parser.add_argument('--cgInfo',help="path to the cg info")
     parser.add_argument('--debug',help="enable node debugging using -inspect flag", 
         action='store_true')
     args = parser.parse_args()

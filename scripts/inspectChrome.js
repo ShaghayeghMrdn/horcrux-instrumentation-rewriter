@@ -30,7 +30,7 @@ program
     .option('--sim [sim]','enable network simulation')
     .option('--mem','extract heap memory trace')
     .option('--testing','testing means dont kill chrome after page load')
-    .option('--mode [mode]', "Can be run in record or replay mode")
+    .option('--mode [mode]', "Can be run in record or replay mode or std mode")
 	.parse(process.argv)
 
 pageLoadTime = {}
@@ -41,20 +41,120 @@ heapChunks = [];
 spinOnCustom = true;
 pageLoaded = false;
 
+
 loadErrors = [], fetchErrors = [];
+
+var fatalKill = function(){
+    if (program.mobile)
+        process.exit();
+    else spawnSync("ps aux | grep " +  program.port + " | grep chrom* | awk '{print $2}' | xargs kill -9",{shell:true});
+}
+
+var safeKill = function(){
+    spawnSync("ps aux | grep " +  program.port + " | grep chrom* | awk '{print $2}' | xargs kill -2",{shell:true});
+}
+
 function navigate(launcher){
 	let local = false;
     if (program.mobile)
         local = true;
 	Chrome({port:Number(program.port), local: local},async function (chrome) {
-		with (chrome) {
+        try {
+            console.log("Connected to remote chrome");
+		  with (chrome) {
 			await Page.enable();
 			await Profiler.enable();
 			await Runtime.enable();
 			await Network.enable();
 			await Log.enable();
-            await Debugger.enable();
+            // await Debugger.enable();
             // await HeapProfiler.enable();
+
+
+
+            Target.attachedToTarget(({sessionId, targetInfo: {url}}) => {
+                console.log(`ATTACHED ${sessionId}: ${url}`);
+                // enable networks events in this target, you can't use the regular API
+                // here, so you have to manually build the messages and take care of
+                // ids; it's not really a big deal unless you need to match commands and
+                // responses
+                Target.sendMessageToTarget({
+                    sessionId,
+                    message: JSON.stringify({ // <-- a JSON string!
+                        id: 1,
+                        method: 'Network.enable'
+                    })
+                });
+                Target.sendMessageToTarget({
+                    sessionId,
+                    message: JSON.stringify({ // <-- a JSON string!
+                        id: 2,
+                        method: 'Target.setAutoAttach',
+                        params: {autoAttach: true, waitForDebuggerOnStart:false}
+                    })
+                });
+            });
+
+            // Target.detachedFromTarget(({sessionId})=>{
+            //      console.log(`DETACHED ${sessionId}: ${url}`);
+            // })
+
+            Target.receivedMessageFromTarget(({sessionId, message}) => {
+                const {id, method, params} = JSON.parse(message); // <-- a JSON string!
+                // you can handle massages from the target here; the same apply about
+                // the fact that you can't use the regular API here
+                // console.log(message);
+                switch (method) {
+                case 'Network.responseReceived':
+                    {
+                        // const {request: {url}} = params;
+                        // console.log(params)
+                        NetworkLog.push(params)
+                        break;
+                    }
+                case "Target.attachedToTarget":{
+                    const childSessionId = params.sessionId;
+                    console.log("ATTACHED" + childSessionId);
+                    Target.sendMessageToTarget({
+                        sessionId,
+                        message: JSON.stringify({
+                            id:3,
+                            method: 'Target.sendMessageToTarget',
+                            params: {
+                                sessionId: childSessionId,
+                                message: JSON.stringify({                   
+                                    id:1,
+                                    method:'Network.enable'  
+                                })
+                            }
+                        })
+                    });
+                    break;
+                }
+                case "Target.receivedMessageFromTarget": {
+                    const childMsg = JSON.parse(params.message);
+                    // console.log(childMsg.method);
+                    switch (childMsg.method){
+                        case "Network.responseReceived" :{
+                            // console.log(childMsg.params.response.url)
+                            NetworkLog.push(childMsg.params);
+                            break;
+                        }
+                    }
+                    break;
+                }
+                default:
+                    // skip...
+                }
+            });
+
+            if (program.network){
+                await Target.setAutoAttach({autoAttach: true, waitForDebuggerOnStart:false});
+            }
+
+            // Target.attachedToTarget((d)=>{
+            //     console.log(d.targetInfo);
+            // })
 
             let errFile = null;
             if (program.error){
@@ -69,44 +169,34 @@ function navigate(launcher){
             Set time out to detect crashes.
             In case of a crash dump whatever information is available, specially crash logs
             */
+            var pltTimer;
             if (!program.testing) {
-                setTimeout(function(){
-                    if (!pageLoaded) {
-                        console.log("Timer fired, website crashed\n Collecting Profiler information");
-                        if (program.log) {
-                            fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
-                            console.log("Console data logged");
-                        };
+                pltTimer = setTimeout(function(){
+                    console.log("Timer fired before site could be loaded");
+                    if (program.log) {
+                        fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
+                        console.log("Console data logged");
+                    };
 
-                        fs.appendFileSync("./loadErrors", '\n' + program.url);
+                    fs.appendFileSync("./loadErrors", '\n' + program.url);
 
-                        chrome.close();
-                        spawnSync("ps aux | grep " +  program.port + " | awk '{print $2}' | xargs kill -9",{shell:true});
-
-                        // Push the url in the errFile before exiting
-                    }
-                }, 40000)
+                    chrome.close();
+                    fatalKill();
+                }, 35000)
             }
 
             if (program.sim){
                 var simConfig = JSON.parse(fs.readFileSync(program.sim, "utf-8"));
                 console.log("Loading sim data: " + JSON.stringify(simConfig))
                 Network.emulateNetworkConditions(simConfig);
-                if (!program.mobile) {
-                    console.log("emulating mobile on desktop")
-                    Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36"});
-                    Emulation.setDeviceMetricsOverride({width:411, height: 731, mobile:true, deviceScaleFactor:0 })
-                }
-
             }
 
-            // Network.emulateNetworkConditions({offline:false, latency:40, downloadThroughput:1000 * 1024/8, uploadThroughput:750 * 1024/8,connectionType: "cellular4g"})
-            //Fire a blank page first
-
-            // await Page.navigate({url:program.url});
-            // await Page.loadEventFired();
-            // console.log("Cold cache load fired first");
-            // await extractPageLoadTime(Runtime, "/plt_cold");
+            if (!program.mobile) {
+                console.log("emulating mobile on desktop")
+                // Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36"});
+                Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.90 Mobile Safari/537.36"}); 
+                Emulation.setDeviceMetricsOverride({width:411, height: 731, mobile:true, deviceScaleFactor:0 })
+            }
 
 			if (program.jsProfiling) 
 				await Profiler.start()
@@ -118,8 +208,14 @@ function navigate(launcher){
 				    });
 
 			if (program.network){
-				NetworkEventHandlers(Network, program.output + "/network");
-			}
+				
+                Network.responseReceived(function(data){
+                    // NetworkLog.push({"Network.requestWillBeSent":data});
+                    // console.log(data.response.url);
+                    NetworkLog.push(data);
+                    // fs.appendFileSync(file, JSON.stringify({"Network.requestWillBeSent":data})+"\n");
+                });
+            }
 
             if (program.coverage)
                 await Profiler.startPreciseCoverage({'callCount': false, 'detailed': true });
@@ -138,8 +234,8 @@ function navigate(launcher){
             })
 
             Runtime.consoleAPICalled((entry) =>{
-                //Don't log regular console messages
-                // consoleLog.push(entry);
+                if (entry.type == "error")
+                consoleLog.push(entry);
             })
 
 
@@ -162,9 +258,37 @@ function navigate(launcher){
             }
             // await Debugger.setBreakpointsActive({active:true});
             await Page.loadEventFired();
-            pageLoaded = true;
+            clearTimeout(pltTimer);
             console.log("Main load event fired");
-            await extractPageLoadTime(Runtime, "plt_cold");
+              // Pause the page is stop any further javascript computation
+            Runtime.evaluate({expression:"debugger;"});
+            console.log("Page has been paused");
+            if (program.custom) {
+                   await extractCustomInformation(Runtime, program,1);
+            }
+            // await Page.reload();
+            // await Page.loadEventFired();
+            // console.log("Page load fired again");
+            // if (program.custom) {
+            //     await extractCustomInformation(Runtime, program,2);
+            // }
+
+            if (!program.testing) {
+                pltTimer = setTimeout(function(){
+                    console.log("Timer fired before data could be fetched");
+                    if (program.log) {
+                        fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
+                        console.log("Console data logged");
+                    };
+
+                    fs.appendFileSync("./fetchErrors", '\n' + program.url + "\n");
+
+                    chrome.close();
+                    fatalKill();
+
+                }, 85000)
+            }
+            await extractPageLoadTime(Runtime, "plt");
             // const {result:result} = await Runtime.evaluate({expression: "ayush"});
             // console.log(result);
             // const {internalProperties:internalProperties} = await Runtime.getProperties({
@@ -178,28 +302,12 @@ function navigate(launcher){
             // console.log("debugger paused");
             // var bp = await Debugger.setBreakpoint({location:location.value.value});
             // await Debugger.resume();
-            if (program.mobile) {
-                await Page.reload();
+            // if (program.mobile) {
+            //     await Page.reload();
                 
-                await Page.loadEventFired();
-                await extractPageLoadTime(Runtime, "plt_warm")
-            }
-
-
-            if (!program.testing) {
-                setTimeout(function(){
-                        console.log("Timer fired, website crashed\n Collecting Profiler information");
-                        if (program.log) {
-                            fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
-                            console.log("Console data logged");
-                        };
-
-                        fs.appendFileSync("./fetchErrors"  , '\n' + program.url);
-                        chrome.close();
-                        spawnSync("ps aux | grep " +  program.port + " | awk '{print $2}' | xargs kill -9",{shell:true});
-
-                }, 100000);
-            }
+            //     await Page.loadEventFired();
+            //     await extractPageLoadTime(Runtime, "plt_warm")
+            // }
 
             if (program.coverage) {
                 var _coverageData = await Profiler.takePreciseCoverage();
@@ -216,32 +324,11 @@ function navigate(launcher){
                 fs.writeFileSync(program.output + '/Timeline.trace', JSON.stringify(rawEvents,null,2));
                 console.log("Tracing data logged");
             }
-
-            // if (program.network) 
-            //     fs.writeFileSync(program.output + "/network", JSON.stringify(NetworkLog));
-
-            var failedSignatures = [];
-            if (program.custom) {
-                   if (program.mode == "record") {
-                       var runPostLoadScripts = await customCodes.runPostLoadScripts(Runtime);
-                       if (runPostLoadScripts == 0){
-
-                         await customCodes.getCacheSize(Runtime, program.output);
-
-                        } else {
-                            fs.appendFileSync("./fetchErrors"  , '\n' + program.url + "\n" + runPostLoadScripts);
-                            consoleLog.push(runPostLoadScripts);
-                        }
-                       // await customCodes.getFunctionStats(Runtime, program.output);
-                       // await extractInvocationInformation(Runtime, chrome, launcher,Page, count);
-                       // await customCodes.getProcessedSignature(Runtime, program.output, failedSignatures);
-                       await customCodes.getInvocationProperties(Runtime, program.output  + "/invocProps", 'Object.keys(__tracer.getCustomCache())');
-                   } else {
-                        await customCodes.getInvocationProperties(Runtime, program.output  + "/cacheStats", '__tracer.getCacheStats()');
-                   }
-                   // await customCodes.getInvocationProperties(Runtime, program.output  + "/callgraph", 'Object.keys(__tracer.getCallGraph())');
-                   console.log("Custom data logged");
-               }
+    
+            if (program.network){
+                console.log("Network log length " + NetworkLog.length)
+                fs.writeFileSync(program.output +"/network", JSON.stringify(NetworkLog));
+            }
 
             if (program.log) {
                 fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
@@ -275,7 +362,7 @@ function navigate(launcher){
 
                 // var systemTarget = await Target.createTarget({url:"chrome://system"});
                 // var systemTargetId = systemTarget.targetId;
-                // var memMsg = "";
+            // var memMsg = "";
 
                 // var response =  Target.sendMessageToTarget({targetId:systemTargetId, 
                 //     message: JSON.stringify({id: 2, method: 'Runtime.evaluate', params: {expression: 'document.getElementById("mem_usage-value").innerText;'}}) })
@@ -290,18 +377,27 @@ function navigate(launcher){
 
                 fs.writeFileSync(program.output +"/mem", JSON.stringify(memData));
             }
-
+            clearTimeout(pltTimer);
             // a=spawnSync("ps aux | grep replayshell | awk '{print $2}' | xargs kill -9",{shell:true});
             // Don't immediately kill Chrome as it takes some time for the cache to be dumped on disk
             if (!program.testing) {
                 setTimeout(function(){
-                chrome.close();
-                spawnSync("ps aux | grep " +  program.port + " | awk '{print $2}' | xargs kill -9",{shell:true});
-                process.exit();
-            },8000);
+                    if (!program.mobile){
+                        chrome.close();
+                        safeKill();
+                    } else {
+                        Page.close();
+                        chrome.close();
+                    }
+                    process.exit();
+                },1000);
             }
+        }
 
-		}
+		} catch (e){
+            console.error(e);
+            launcher.kill();
+        }
 	}).on('error', function(er){
 		console.log("can't connect to chrome", er);
 	});
@@ -315,30 +411,64 @@ async function pausePage(Runtime){
 // async function getJSCoverage()
 
 async function NetworkEventHandlers(Network, file){
-    console.log("Network trace file: " + file)
     await mkdirp(file.split('/').slice(0,-1).join('/'));
     // Network.requestWillBeSent(function(data){
     //     NetworkLog.push(data);
     // });
     Network.requestWillBeSent(function(data){
-        fs.appendFileSync(file, JSON.stringify({"Network.requestWillBeSent":data})+"\n");
-    });
-    Network.requestServedFromCache(function(data){
-        fs.appendFileSync(file, JSON.stringify({"Network.requestServedFromCache":data})+"\n");
+        NetworkLog.push({"Network.requestWillBeSent":data});
+        // fs.appendFileSync(file, JSON.stringify({"Network.requestWillBeSent":data})+"\n");
     });
 
-    Network.responseReceived(function(data){
-        fs.appendFileSync(file, JSON.stringify({"Network.responseReceived":data})+"\n");
-    });
+    console.log("Network trace file: " + file);
+    // Network.requestServedFromCache(function(data){
+    //     // fs.appendFileSync(file, JSON.stringify({"Network.requestServedFromCache":data})+"\n");
+    // });
 
-    Network.dataReceived(function(data){
-        fs.appendFileSync(file, JSON.stringify({"Network.dataReceived":data})+"\n");
-    });
+    // Network.responseReceived(function(data){
+    //     NetworkLog.push({"Network.responseReceived":data});
+    //     // fs.appendFileSync(file, JSON.stringify({"Network.responseReceived":data})+"\n");
+    // });
 
-    Network.loadingFinished(function(data){
-        fs.appendFileSync(file, JSON.stringify({"Network.loadingFinished":data})+"\n");
-    });
+    // Network.dataReceived(function(data){
+    //     fs.appendFileSync(file, JSON.stringify({"Network.dataReceived":data})+"\n");
+    // });
 
+    // Network.loadingFinished(function(data){
+    //     fs.appendFileSync(file, JSON.stringify({"Network.loadingFinished":data})+"\n");
+    // });
+
+}
+
+async function extractCustomInformation(Runtime, program, path){
+    if (program.mode == "record") {
+       var runPostLoadScripts = await customCodes.runPostLoadScripts(Runtime);
+       if (runPostLoadScripts == 0){
+
+         // await customCodes.getCacheSize(Runtime, program.output);
+
+        } else {
+            fs.appendFileSync("./fetchErrors"  , '\n' + program.url + "\n" + runPostLoadScripts);
+            consoleLog.push(runPostLoadScripts);
+        }
+       await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, 'timingInfo',1);
+       await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
+       await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
+       await customCodes.getInvocationProperties(Runtime, program.output + "/noncacheable", '__tracer.getNonCacheableFunctions()');
+       // await customCodes.getProcessedSignature(Runtime, program.output);
+   } else if (program.mode == "replay"){
+        // await customCodes.getInvocationProperties(Runtime, program.output  + "/invocProps", 'Object.keys(__tracer.getCustomCache())');
+        await customCodes.getInvocationProperties(Runtime, program.output  + "/cacheStats", '__tracer.getCacheStats()');
+        await customCodes.getInvocationProperties(Runtime, program.output  + "/cacheExists", 'localStorage.getItem("fnCacheExists")');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, 'timingInfo',1);
+   } else {
+        await customCodes.getInvocationProperties(Runtime, program.output + "/leafNodes" + path, 'leafNodes',1);
+        await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, 'timingInfo',0);
+        await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
+   }
+   // await customCodes.getInvocationProperties(Runtime, program.output  + "/callgraph", 'Object.keys(__tracer.getCallGraph())');
+   console.log("Custom data logged");
 }
 
 
@@ -355,82 +485,6 @@ async function extractPageLoadTime(Runtime, outputFile){
 
     console.log("Dump performance timing information to file " + JSON.stringify(pageLoadTime));
     fs.writeFileSync(program.output + outputFile, JSON.stringify(pageLoadTime));
-}
-
-async function extractInvocationInformation(Runtime, chrome, launcher, Page,iter){
-	var keys = [];
-	var errors = [];
-	var processedSignature = {};
-    // var expression = '__tracer.getInvocations();';
-    var expression = 'Object.keys(__tracer.getProcessedSignature())';
-    var cachedSignature;
-    var _query = await Runtime.evaluate({'expression': 'Object.keys(JSON.parse(localStorage.getItem("PageLocalCache"))).length', returnByValue: true});
-    if (_query.result.exceptionDetails) {
-        console.error("Error while fetching page local cache");
-        return;
-    }
-
-    cachedSignature = _query.result.value;
-  
-    var _query = await Runtime.evaluate({expression:expression, returnByValue: true});
-    if (_query.result.exceptionDetails) {
-        console.error("Error while fetching processed Signature length");
-        return;
-    }
-
-    keys = _query.result.value;
-   
-   if (!keys.length) {
-    fs.writeFileSync(program.output + "/Signature", JSON.stringify({}, null, 4));
-    console.log("No entry in processed Signature");
-    return;
-   }
-
-    var signatureCallbackRegistered = false;
-
-    console.log("Starting to extract custom data of length "  + keys.length );
-
-    for (var index in keys){
-        var key = keys[index];
-        signatureCallbackRegistered = true;
-    	key  = escapeBackSlash(key);
-        var _query;
-        try {
-    	   _query = await Runtime.evaluate({expression:`__tracer.getProcessedSignature()['${key}']`, returnByValue: true});
-        } catch (e) {
-            console.log(e);
-            continue;
-        }
-
-        if (_query.result.exceptionDetails) {
-            errors.push(_query.result.exceptionDetails);
-            return;
-        }
-
-        processedSignature[key] = _query["result"]["value"];
-
-        if (processedSignature[key] && processedSignature[key].reads instanceof Set)
-            processedSignature[key].reads = [...processedSignature[key].reads]
-        if (processedSignature[key] && processedSignature[key].writes instanceof Set)
-            processedSignature[key].writes = [...processedSignature[key].writes]
-
-    	if (index % 100 == 0) {
-    		console.log(index/keys.length*100, "% done...");
-    	}
-
-    }
-
-    // console.log(processedSignature);
-    fs.writeFileSync(program.output + "/Signature", JSON.stringify(processedSignature, null, 4));
-    fs.writeFileSync(program.output + "/errors", JSON.stringify(errors));
-    fs.writeFileSync(program.output + "/sigstats", JSON.stringify([keys.length, cachedSignature]));
-    console.log("Done with signature extraction");
-
-    // setTimeout(function(){
-    //     spawnSync("ps aux | grep " +  program.port + " | awk '{print $2}' | xargs kill -9",{shell:true});
-    //     a=spawnSync("ps aux | grep replayshell | awk '{print $2}' | xargs kill -9",{shell:true});
-    //     chrome.close();
-    // }, 1000);
 
 }
 
@@ -453,8 +507,10 @@ if (program.launch) {
             process.exit();
         }
     } else {
-        console.error("invalid mode");
-        process.exit();
+        console.log("Running code without caching framework in place");
+        var chromeUserDirExt = (new Date).getTime();
+        fs.writeFileSync(chromeUserDir, chromeUserDirExt);
+        // process.exit();
     }
     chromeLauncher.launch({
 	 port:Number(program.port),
@@ -463,7 +519,11 @@ if (program.launch) {
         '--disable-web-security',
         '--disable-extensions ',
         // '--js-flags="--expose-gc"',
-        // '--auto-open-devtools-for-tabs',
+        '--auto-open-devtools-for-tabs',
+        // '--enable-devtools-experiments',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-site-isolation-trials',
+        '--allow-running-insecure-content',
 		 // '--headless',
          // '--v8-cache-options=off',
          // '--js-flags="--compilation-cache false"',
@@ -479,4 +539,9 @@ if (program.launch) {
 	console.log("chrome launched");
 	navigate(); 
 }
+
+/*
+Running chrome from android: run with the following runtime flags
+chrome --ignore-certificate-errors --allow-running-insecure-content --no-first-run --disable-fre --no-default-browser-check --remote-debugging-port=9222 --disable-web-security --disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingAlways,CrossSiteDocumentBlockingIfIsolating --disable-site-isolation-trials --no-sandbox --allow-file-access-from-files --allow-file-access --user-data-dir=/data/user/0/com.android.chrome/app_chrome/1557610171087306327
+*/
 

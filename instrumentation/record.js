@@ -1,6 +1,7 @@
 
 
 var fondue = require("../JSAnalyzer/index.js");
+var fondue_plugin = require("../JSAnalyzer/index_plugin.js");
 var staticInfo = fondue.staticInfo;
 staticInfo.staticUncacheableFunctions = {};
 var {spawnSync} = require('child_process');
@@ -14,12 +15,22 @@ var libxmljs = require("libxmljs");
 var deterministic = require('deterministic');
 var UglifyJS = require('uglify-es')
 
+spawnSync("ls ../JSAnalyzer",{shell:true});
+var OMNISTRINGIFYPATH = "../JSAnalyzer/omni.min.js";
+var omniStringify = fs.readFileSync(OMNISTRINGIFYPATH, "utf-8");
+
+var hostDir = "../tests/hostSrc/";
+var hostUrl = "http://goelayu4929.eecs.umich.edu:99/hostSrc/";
+
+var hostCounter = 0;
+
 program
     .version("0.1.0")
     .option("-i, --input [input]","path to the input file")
     .option("-n, --name [name]", "name of the file being instrumented")
     .option("-t , --type [type]", "[HTML | Javascript (js)]", "html")
     .option("-j, --js-profile [file]","profile containing js runtime information")
+    .option("-c, --cg-info [file]","profile containing call graph")
     .parse(process.argv)
 
 /* 
@@ -40,7 +51,7 @@ function instrumentHTML(src, fondueOptions) {
     try {
         libxmljs.parseXml(src);
         console.log("FOUND AN XML FILE");
-        // return src;
+        return src;
     } catch(e){
         //not an xml file so keep the instrumentation going
     }
@@ -52,6 +63,9 @@ function instrumentHTML(src, fondueOptions) {
         isHtml = true;
     }
 
+    if (IsJsonString(src))
+        return src;
+
     if (!isHtml)
         return instrumentJavaScript(src, fondueOptions);
 
@@ -62,14 +76,24 @@ function instrumentHTML(src, fondueOptions) {
     var scriptEndRegexp = /<\s*\/\s*script/i;
     var lastScriptEnd = 0;
     var match, newline = /\n/ig;
-    var integrityMatch;
+    var integrityMatch, integrityLocs = [], newLoc=0;
+
     //Traverse the matches to eliminate any integrity checks
     while (integrityMatch = scriptBeginRegexp.exec(src)){
         if (integrityMatch[0].indexOf("integrity")>=0){
-            src = src.slice(0,integrityMatch.index) + integrityMatch[0].replace(/integrity=[\"\'][^"^']*[\"\']/,'') +
-             src.slice(integrityMatch.index + integrityMatch[0].length,src.length);
+            integrityLocs.push(integrityMatch);
         }
     }
+
+    // newLoc is used to keep track of the new location after every splice
+    integrityLocs.forEach((integrity)=>{
+        var _initLen = src.length;
+        src = src.slice(0,integrity.index-newLoc) + integrity[0].replace(/integrity=[\"\'][^"^']*[\"\']/,'') +
+             src.slice(integrity.index-newLoc + integrity[0].length,src.length);
+        var _finalLen = src.length;
+        newLoc += _initLen -  _finalLen;
+    })
+
 
     while (match = scriptBeginRegexp.exec(src)) {
         var scriptOffset = 0;
@@ -120,13 +144,37 @@ function instrumentHTML(src, fondueOptions) {
         src = src.slice(doctypeMatch[1].length);
     }
     mergeStaticInformation_uncacheable(options);
-    var deterministicCode = '\n' + deterministic.header + '\n';
-    src = doctype + "\n<script>\n" + deterministicCode + fondue.instrumentationPrefix(options) + "\n</script>\n" + src;
+    if (!hostCounter){
+        hostCounter++;
+        var deterministicCode = '\n' + deterministic.header + '\n';
+        fs.writeFileSync(hostDir+"/deterministic.js", deterministicCode);
+        fs.writeFileSync(hostDir+"/tracer.js", fondue.instrumentationPrefix(options));
+        fs.writeFileSync(hostDir+"/omni.min.js", omniStringify);
+        ret = spawnSync("python ../instrumentation/genInstrumentationFiles.py tracer.js omni.min.js deterministic.js domJSON.js", {shell:true});
+        console.error(ret.stdout.toString());
+        console.log("updated instrumentation files");
+    }
+    src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js") +  createScriptTag("domJson.js") + createScriptTag("tracer.js")  + src;
+    // src = doctype + "\n<script>\n" + deterministicCode + omniStringify +  fondue.instrumentationPrefix(options) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
     computeRTITimeMatched();
     return src;
+}
+
+function createScriptTag(url){
+    var src = "\n<script src =" + hostUrl +  url + "></script>";
+    return src;
+}
+
+function IsJsonString(str) {
+    try {
+        JSON.parse(str);
+    } catch (e) {
+        return false;
+    }
+    return true;
 }
 
 function stringifyUncacheableFunctions(options){
@@ -168,13 +216,13 @@ function mergeStaticInformation_uncacheable(options){
 
 function computeRTITimeMatched(){
     var time = {};
-    Object.keys(staticInfo.rtiDebugInfo).forEach((type)=>{
-        if (type != "totalNodes" && type != "matchedNodes") return;
-        var _tmpTime = staticInfo.rtiDebugInfo[type].reduce((acc, cur)=>{return acc+cur.self},0);
-        time[type] = _tmpTime;
-    })
+    // Object.keys(staticInfo.rtiDebugInfo).forEach((type)=>{
+    //     if (type != "totalNodes" && type != "matchedNodes") return;
+    //     var _tmpTime = staticInfo.rtiDebugInfo[type].reduce((acc, cur)=>{return acc+cur.self},0);
+    //     time[type] = _tmpTime;
+    // })
     //Dump this time in a file
-    fs.writeFileSync(returnInfoFile, time.totalNodes + " " + time.matchedNodes + " " + staticInfo.rtiDebugInfo.ALL + " "+
+    fs.writeFileSync(returnInfoFile, /*time.totalNodes + " " + time.matchedNodes + " " + */ staticInfo.rtiDebugInfo.ALL + " "+
         // + JSON.stringify(staticInfo.rtiDebugInfo.ALLUrls) + " " + JSON.stringify(staticInfo.rtiDebugInfo.matchedUrls));
         staticInfo.rtiDebugInfo.totalNodes.length + " " + staticInfo.rtiDebugInfo.matchedNodes.length);
 }
@@ -190,9 +238,9 @@ function instrumentJavaScript(src, fondueOptions, jsInHTML) {
     console.log("Instrumenting a js file")
     var fondueOptions = mergeInto({include_prefix: false}, fondueOptions);
     // src = src.replace(/^\s+|\s+$/g, '');
-    if (jsInHTML){
-        // console.log("Instrumenting a snippet of js: ");
-    }
+    if (IsJsonString(src))
+        return src;
+    // src = fondue_plugin.instrument(src, fondueOptions).toString();
     src = fondue.instrument(src, fondueOptions).toString();
     if (program.type == "js") {
         console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
@@ -231,13 +279,32 @@ var main = function(){
         } catch (err){
             console.error("Error while reading the JS Profile " + err);
         }
+    } 
+    if (program.cgInfo){
+        try{
+            var _cg = JSON.parse(fs.readFileSync(program.cgInfo),"utf-8");
+            var cg = _cg.map(e=>e[0]).slice(0,10);
+            console.log(cg);
+            fondueOptions = mergeInto(fondueOptions, {cg: cg});
+            staticInfo.rtiDebugInfo.ALL = cg.length;
+            console.log("cg nodes:" + cg.length);
+        } catch (err){
+            // console.error("Error while reading the call graph Profile " + err);
+            fondueOptions = mergeInto(fondueOptions, {cg: []});
+            return;
+        }
     }
     src = fs.readFileSync(program.input,"utf-8")
 
     // filename = path.basename(program.input)
 
     if (program.type == "js"){
-        // fondueOptions = mergeInto(fondueOptions, {origPath: fondueOptions.path})
+        // Some js files are utf-16 encoded, therefore src might be an invalid file
+        try {
+            var script = new vm.Script(src);
+        } catch (e) {
+            src = fs.readFileSync(program.input,"ucs2")
+        }
         src = instrumentJavaScript(src, fondueOptions, false)
         // src = src
     } else {

@@ -1,6 +1,6 @@
 
 
-var javascriptReservedWords = ['amzn_aps_csm','Promise','XMLHttpRequest','$','Array','abstract','arguments','await','boolean','break','byte','this','case','catch','char','class','const','continue','Date','debugger','define','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','require','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
+var javascriptReservedWords = ['amzn_aps_csm','Promise','XMLHttpRequest','$','Array','abstract','arguments','await','boolean','break','byte','case','catch','char','class','const','continue','Date','debugger','define','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','require','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
 var uncacheableFunctions ={"RTI":[], "antiLocal":[], "DOM":[], "ND":[]};
 var options;
 
@@ -156,6 +156,9 @@ var getFunctionIdentifier = function(node) {
     return null;
 }
 
+/*
+Returns identifiers or thisexpression
+*/
 var getIdentifierFromGenericExpression = function (node) {
     if (node == null) return null;
     else if (node.type == "Identifier") {
@@ -166,6 +169,9 @@ var getIdentifierFromGenericExpression = function (node) {
             return getIdentifierFromGenericExpression(node.right);
     }
     else if (node.type == "CallExpression") return getIdentifierFromGenericExpression(node.callee);
+    else if (node.type == "UnaryExpression" || node.type == "UpdateExpression") return getIdentifierFromGenericExpression(node.argument);
+
+
 
 }
 
