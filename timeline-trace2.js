@@ -42,7 +42,7 @@ const CDP = require('chrome-remote-interface');
 
 
 function getChromeTrace(url,launcher){
-    Chrome({local:true, port:9222},function (chrome) {
+    Chrome({local:true, port:9224},function (chrome) {
         with (chrome) {
             Page.enable();
             Network.enable();
@@ -52,7 +52,7 @@ function getChromeTrace(url,launcher){
             Profiler.enable();
             // Disable cache (wonder if this works better than the browser...) 
             // Answer: it seems to work better from the eye ball test
-            // Network.emulateNetworkConditions({offline:false, latency:40, downloadThroughput:1000 * 1024/8, uploadThroughput:750 * 1024/8,connectionType: "cellular4g"})
+            Network.emulateNetworkConditions({offline:false, latency:100, downloadThroughput:750*1024/8, uploadThroughput:250*1024/8,connectionType: "cellular3g"})
             Network.setCacheDisabled({cacheDisabled: true});
             // Profiler.setSamplingInterval({interval: 1000});
             // extractPageInformation(Runtime, "beforeLoad");
@@ -108,7 +108,7 @@ function getChromeTrace(url,launcher){
                          fs.writeFileSync(file + "page_load_time", url + "\t" + JSON.stringify(pageLoadTime))
                          // console.log("javascript execution impact: " + windowDiff);
                          chrome.close();
-                         spawnSync("ps aux | grep 9222 | awk '{print $2}' | xargs kill -9",{shell:true});
+                         spawnSync("ps aux | grep 9224 | awk '{print $2}' | xargs kill -9",{shell:true});
                     }
                 })
             });

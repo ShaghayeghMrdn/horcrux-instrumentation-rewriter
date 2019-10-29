@@ -62,12 +62,17 @@ def main(args):
     # extract js Urls
     http_response = http_record_pb2.RequestResponse()
 
+    memoize_solutions = ["underscore","memoizee","iMemoized","lodash","fast-memoize"]
+
     for root, folder, files in os.walk(args.mahimahi):
         scriptsToInstrument = [];
         url = root.split('/')[-2]
         urls = []
+        memoizeFiles = 0
         for file in files:
                 isJs = False
+                gzip = False
+                gzipType = 0
                 f = open(os.path.join(root,file), "rb")
                 # print file
                 http_response.ParseFromString(f.read())
@@ -75,54 +80,46 @@ def main(args):
 
                 for header in http_response.response.header:
                     if header.key.lower() == "content-type":
-                        if "json" in header.value.lower():
-                            print http_response.response.body
-                            # print http_response.request.first_line.split()[1], header.value.lower(), file
-                #             isJs = True
+                        if "javascript" in header.value.lower() or "html" in header.value.lower():
+                            isJs = True
+                    if header.key.lower() == "content-encoding":
+                        # print "GZIIPED FILE is " , file
+                        gzip = True
+                        gzipType = header.value
+                        # markedToBeDeleted.append(header.key)
 
+                    if header.key.lower() == "transfer-encoding" and header.value == "chunked":
+                        http_response.response.body = unchunk(http_response.response.body)
 
-                # if file == "save.1rKexX":
-                #     print http_response.response.header
-                #     open("tmp","w").write(unchunk(http_response.response.body))
-                #     # print http_response.response.body
-                # # if i dsJs:
-                # for header in http_response.response.header:
-                #     # print header.key
-                #     if header.key.lower() == "content-security-policy":
-                #         print  header.value.lower()
-                url = http_response.request.first_line.split()[1]
-                # print url == "/"
-                urls.append(url)
-                # if url == "/":
-                # print http_response.request.first_line
-           
-                # print http_response.response.header
-                if "batch" in url:
-                    print url
-                # for header in http_response.response.header:
-                #     if "set-cookie" in header.key.lower():
-                #         print  url, header.value
-                if "mnet_session_depth" in http_response.response.body:
-                    print file, http_response.response.body.index("mnet")
-                # if url not in mahimahiUrls:
-                #     mahimahiUrls.append(http_response.request.first_line.split()[1])
+                if isJs:
+                    if gzip:
+                        try:
+                            # print "Decompressing {} ...with type {}".format(file, gzipType)
+                            if gzipType.lower() != "br":
+                                body = zlib.decompress(bytes(bytearray(http_response.response.body)), zlib.MAX_WBITS|32)
+                            else:
+                                body = brotli.decompress(http_response.response.body)
+                        except zlib.error as e:
+                            error=1
+                            # print "Corrupted decoding: " + file + str(e)
+                            # os._exit(0)
+                    else:
+                        body = http_response.response.body
+                    g = open(os.path.join(args.output,file),"w")
+                    g.write(body)
+                    g.close()
 
-    # extract rti Urls
-    # jsProfile = json.loads(open(args.jsProfile, 'r').readline())
-    # for rtiNode in jsProfile:
-    #     if rtiNode['url'] not in rtiUrls:
-    #         rtiUrls[rtiNode['url']] = []
-    #     rtiUrls[rtiNode['url']].append(rtiNode)
+          
 
-    # matchRtiWithMahimahi(rtiUrls, mahimahiUrls)
-    sys.stdout.write(str(len(urls)))
-    sys.stdout.flush()
+    # print memoizeFiles
+    # sys.stdout.write(str(len(urls)))
+    # sys.stdout.flush()
 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('mahimahi', help='path to input directory')
-    parser.add_argument('jsProfile',help='path to processed jsProfile')
+    parser.add_argument('output',help='path to output directory')
     args = parser.parse_args()
     main(args)

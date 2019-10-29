@@ -87,6 +87,26 @@ var getSubTree = function(rootNode){
     return listOfIds;
 }
 
+var getSubTreeSimple = function(rootNode){
+    var listOfIds = [];
+
+    function update(id){
+        listOfIds.push(id);
+    }
+
+    function recurseChildren(root){
+        console.log("list length: ",listOfIds.length," with root ", root.profileNode.UID)
+        root.profileNode.children.forEach((child)=>{
+            if (listOfIds.indexOf(child.UID)>=0) return;
+            update(child.UID);
+            recurseChildren(child);
+        });
+    }
+
+    recurseChildren(rootNode);
+    return listOfIds;
+}
+
 var getCorrespondingInvocationFromId = function(id){
     var nnodes = cpu.raw._idToNode.size;
     var matchedNodes =[];
@@ -110,7 +130,22 @@ var getTimeFromId = function( id){
         : cpu.raw._idToNode.get(id).self ;
         return ttime;
     }
+}
 
+var getTimeFromIdSimple = function(id){
+    var node = null, len = cpu.parsed.children.length;
+    for(var i=0;i<len;i++){
+        var _t = cpu.parsed.children[i];
+        if (_t.profileNode.UID == id){
+            node = _t;
+            break;
+        }
+    }
+    if (!node){
+        console.error("No node found with UID", id);
+        return 0;
+    }
+    return node.self;
 }
 
 var checkForExistenceOfId = function(idArr, dstArr){
@@ -132,8 +167,46 @@ var finalIDSanityCheck = function(idArr){
         seenUIDs.push(node.callUID);
     })
 }
+
+function topKRtiSimple(rti, k){
+    var a =sumTotalTime
+    var rti = rti.children;
+    var inbuiltRoots = []; 
+    var listOfIds = [];
+    var _sortedRTI = rti.filter((f)=>{return f.profileNode.depth!=0});
+    var sortedRTI = _sortedRTI.sort((a,b)=>{return b.self - a.self});
+    var threshhold = k*cpuTimeWoProgram/100, curTime = 0;
+    for (var rtiIter = 0; rtiIter < sortedRTI.length && curTime <= threshhold; rtiIter++){
+        var curFn = sortedRTI[rtiIter];
+        //If the same id has been added (via the children of one of the previous nodes)
+        // if (listOfIds.indexOf(curFn.profileNode.UID)>=0) continue;
+        // If a different invocation has been already via the children of the previous nodes
+        // if (listOfIds.map((id)=>{
+        //     return JSON.stringify(cpu.raw._idToNode.get(id).callFrame);
+        // }).indexOf(JSON.stringify(curFn.profileNode.callFrame))>=0)
+        //     continue;
+        //Test whether the root is inbuilt or not. 
+        if (!curFn.profileNode.callFrame.url.startsWith("http")) {
+            inbuiltRoots.push(curFn);
+            continue;
+        }
+        listOfIds.push(curFn.profileNode.UID);
+        // console.log(curFn.profileNode.callUID)
+        // var subTree = getSubTreeSimple(curFn);
+        // subTree = checkForExistenceOfId(listOfIds, getUniqueIds(subTree));
+        // listOfIds = listOfIds.concat(subTree);
+        var subtreeTimeBU = 0; 
+        // if (subTree.length) subTree.forEach((st)=>{
+        //     subtreeTimeBU+= getTimeFromIdSimple(st);
+        // })
+        // console.log("ASSERT : " +  (subtreeTime + curFn.self) == curFn.total);
+        curTime += subtreeTimeBU + curFn.self
+    }
+    // console.log(inbuiltRoots.length, listOfIds.length);
+    return listOfIds;
+}
 /*
-Returns list of node ids accounting for
+Returns list of node indexes accounting for
 k% of total runtime
 */
 function topKRti(rti, k){
@@ -147,18 +220,9 @@ function topKRti(rti, k){
     for (var rtiIter = 0; rtiIter < sortedRTI.length && curTime <= threshhold; rtiIter++){
         var curFn = sortedRTI[rtiIter];
         //If the same id has been added (via the children of one of the previous nodes)
-        if (listOfIds.indexOf(curFn.profileNode.id)>=0) continue;
-        // If a different invocation has been already via the children of the previous nodes
-        if (listOfIds.map((id)=>{
-            return JSON.stringify(cpu.raw._idToNode.get(id).callFrame);
-        }).indexOf(JSON.stringify(curFn.profileNode.callFrame))>=0)
-            continue;
-        //Test whether the root is inbuilt or not. 
-        if (!curFn.profileNode.callFrame.url.startsWith("http")) {
-            inbuiltRoots.push(curFn);
-            continue;
-        }
-        listOfIds.push(curFn.profileNode.id);
+        if (listOfIds.indexOf(curFn.profileNode.UID)>=0) continue;
+        
+        listOfIds.push(curFn.profileNode.UID);
         var subTree = getSubTree(curFn.profileNode);
         subTree = checkForExistenceOfId(listOfIds, getUniqueIds(subTree));
         listOfIds = listOfIds.concat(subTree);
@@ -254,6 +318,40 @@ var getLeafNodes = function(ids){
     return leafNodes;
 }
 
+var getLeafNodesUsingTime = function(){
+    var leafNodes = [];
+    var totalNodes = cpu.parsed.children;
+    var ibf = ["(program)","(idle)","(garbage collector)"]
+    totalNodes.forEach((node)=>{
+        if ( (node.self >= node.total) && ibf.indexOf(node.functionName)<0 && 
+                // && node.children.length == 0 && 
+                node.profileNode.callFrame.url.startsWith("http")){
+            /*Candidate for potential leaf node*/
+            if (node.children.length > 0)
+                console.log("Leaf node but has children");
+            leafNodes.push(node);
+        }
+    })
+    return leafNodes;
+}
+
+var instrumentationSrcs = ["tracer.js","omni.min"];
+var excludeFnNames = ["stringify","analyze","compare","cacheAnd","traverse","replay_arg"]
+var instrumentationOverhead = function(){
+    var instNodes = [];
+    var totalNodes = cpu.parsed.children;
+    totalNodes.forEach((node)=>{
+        var url = node.profileNode.callFrame.url,
+            fn = node.profileNode.callFrame.functionName;
+        if (instrumentationSrcs.find(e=>url.indexOf(e)>=0) && 
+            excludeFnNames.find(e=>fn.indexOf(e)>=0)==null) {
+            // console.log(node.profileNode.callFrame, node.self)
+            instNodes.push(node);
+        }
+    })
+    return instNodes;
+}
+
 function main(){
     // var totalTime = sumTotalTime(cpu, true);
     // var top20RTI = topKFnFromRTI(cpu, 20);
@@ -307,8 +405,21 @@ function main(){
     process.stdout.write(util.format(cpuTime + " " + cpuTimeWoProgram));
 }
 
-// main();
+var leafNodes = getLeafNodesUsingTime();
+// var topExpensiveNodes = topKRtiSimple(cpu.parsed, 80)
+// console.log(topExpensiveNodes.length, cpu.parsed.children.length)
+var leafTime = 0;
+var leafNodesUser = leafNodes.map((child)=>{
+        if (child.url.startsWith("http")) {
+            leafTime += child.self;
+            return {self:child.self, total: child.total, callUID: child.callUID, functionName: child.functionName,
+                url: child.url, raw: child.profileNode.callFrame};
+        }
+    }).filter(node => node);
 
-process.stdout.write(util.format(cpu.raw.programNode.self + " "));
+// var instNodes = instrumentationOverhead();
+// console.log(leafTime);
+program.output && fs.writeFileSync(program.output, JSON.stringify(leafNodesUser))
+process.stdout.write(util.format(cpuTimeWoProgram+ " "));
 
 

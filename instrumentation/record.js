@@ -2,10 +2,13 @@
 
 var fondue = require("../JSAnalyzer/index.js");
 var fondue_plugin = require("../JSAnalyzer/index_plugin.js");
-var staticInfo = fondue.staticInfo;
-staticInfo.staticUncacheableFunctions = {};
 var {spawnSync} = require('child_process');
 var makeId = fondue.makeId;
+var properties = require("properties");
+var config;
+
+const PATH_TO_PROPERTIES = "../JSAnalyzer/" + "/tracer.ini";
+properties.parse(PATH_TO_PROPERTIES, {path: true, sections: true}, function(err, obj){ config = obj ;})
 // var fondue = require("fondue");
 var fs =require("fs")
 var path = require("path")
@@ -18,6 +21,8 @@ var UglifyJS = require('uglify-es')
 spawnSync("ls ../JSAnalyzer",{shell:true});
 var OMNISTRINGIFYPATH = "../JSAnalyzer/omni.min.js";
 var omniStringify = fs.readFileSync(OMNISTRINGIFYPATH, "utf-8");
+var domJson = fs.readFileSync("../JSAnalyzer/domJson.js","utf-8");
+var worker = fs.readFileSync("../JSAnalyzer/worker.js","utf-8");
 
 var hostDir = "../tests/hostSrc/";
 var hostUrl = "http://goelayu4929.eecs.umich.edu:99/hostSrc/";
@@ -31,12 +36,19 @@ program
     .option("-t , --type [type]", "[HTML | Javascript (js)]", "html")
     .option("-j, --js-profile [file]","profile containing js runtime information")
     .option("-c, --cg-info [file]","profile containing call graph")
+    .option("-p, --pattern [pattern]","instrumentation pattern, either cg, or signature")
     .parse(process.argv)
 
 /* 
 Instrument any scripts tags inside 
 HTML pages
 */
+
+var instrumentor = program.pattern == "signature" ? fondue : fondue_plugin;
+
+var staticInfo = instrumentor.staticInfo;
+staticInfo.staticUncacheableFunctions = {};
+
 
 //Create file for communicating information back to the python script
 var returnInfoFile = program.input + ".info";
@@ -48,13 +60,15 @@ function instrumentHTML(src, fondueOptions) {
     // certain javascript files have the header "doc"
     var isHtml, isXML;
 
-    try {
-        libxmljs.parseXml(src);
-        console.log("FOUND AN XML FILE");
-        return src;
-    } catch(e){
-        //not an xml file so keep the instrumentation going
-    }
+    // try {
+    //     var validHTML = spawnSync("python html_validator.py " + program.input,{shell:true});
+    //     // libxmljs.parseXml(src);
+    //     // console.log("FOUND AN XML FILE");
+    //     console.log(validHTML);
+    //     return src;
+    // } catch(e){
+    //     //not an xml file so keep the instrumentation going
+    // }
 
     try {
         var script = new vm.Script(src);
@@ -69,6 +83,9 @@ function instrumentHTML(src, fondueOptions) {
     if (!isHtml)
         return instrumentJavaScript(src, fondueOptions);
 
+    //set instrumentor for testing phase which doesn't call the main script
+    instrumentor = fondueOptions.pattern == "signature" ? fondue : fondue_plugin;
+    console.log("Pattern for current instrumentation: " + fondueOptions.pattern);
 
     console.log("Instrumenting a html file");
     var scriptLocs = [];
@@ -77,6 +94,7 @@ function instrumentHTML(src, fondueOptions) {
     var lastScriptEnd = 0;
     var match, newline = /\n/ig;
     var integrityMatch, integrityLocs = [], newLoc=0;
+    var asyncMatch, asyncLocs = [], nLoc = 0;
 
     //Traverse the matches to eliminate any integrity checks
     while (integrityMatch = scriptBeginRegexp.exec(src)){
@@ -93,6 +111,21 @@ function instrumentHTML(src, fondueOptions) {
         var _finalLen = src.length;
         newLoc += _initLen -  _finalLen;
     })
+
+    while (asyncMatch = scriptBeginRegexp.exec(src)){
+        if (asyncMatch[0].indexOf("async")>=0){
+            asyncLocs.push(asyncMatch);
+        }
+    }
+
+    //Commenting as simply replacing async with defer gives runtime errors
+    // asyncLocs.forEach((asyn)=>{
+    //     var _initLen = src.length;
+    //     src = src.slice(0,asyn.index-newLoc) + asyn[0].replace(/async/,'defer') +
+    //          src.slice(asyn.index-nLoc + asyn[0].length,src.length);
+    //     var _finalLen = src.length;
+    //     nLoc += _initLen -  _finalLen;
+    // })
 
 
     while (match = scriptBeginRegexp.exec(src)) {
@@ -117,15 +150,16 @@ function instrumentHTML(src, fondueOptions) {
             lastScriptEnd = scriptEnd;
         }
     }
-    // console.log("The location of scripts in html: " + JSON.stringify(scriptLocs));
+
     // process the scripts in reverse order
     for (var i = scriptLocs.length - 1; i >= 0; i--) {
         var loc = scriptLocs[i];
         var script = src.slice(loc.start, loc.end);
         // console.log("Script to be instrumented: " + script)
-        var options = mergeInto(fondueOptions, {});
+        
         //use to store the original value of path
         //since its value is modify to unqiue identify every in html script
+        var options = mergeInto(fondueOptions, {});
         options.origPath = options.path;
         options.path = options.path + "-script-" + i;
         //Add the script offset to be sent to the instrumentation script
@@ -135,6 +169,9 @@ function instrumentHTML(src, fondueOptions) {
         src = src.slice(0, loc.start) + instrumentJavaScript(prefix + script, options, true) + src.slice(loc.end);
         // console.log("And the final src is :" + src)
     }
+
+    if (!scriptLocs.length)
+        var options = mergeInto(fondueOptions, {});
     // remove the doctype if there was one (it gets put back below)
     var doctype = "";
     // var doctypeMatch = /^(<!doctype[^\n]+\n)/i.exec(src);
@@ -150,12 +187,16 @@ function instrumentHTML(src, fondueOptions) {
         fs.writeFileSync(hostDir+"/deterministic.js", deterministicCode);
         fs.writeFileSync(hostDir+"/tracer.js", fondue.instrumentationPrefix(options));
         fs.writeFileSync(hostDir+"/omni.min.js", omniStringify);
-        ret = spawnSync("python ../instrumentation/genInstrumentationFiles.py tracer.js omni.min.js deterministic.js domJSON.js", {shell:true});
+        fs.writeFileSync(hostDir+"/domJson.js", domJson);
+        fs.writeFileSync(hostDir+"/signatureWorker.js",worker);
+        ret = spawnSync("python ../instrumentation/genInstrumentationFiles.py tracer.js omni.min.js deterministic.js domJson.js signatureWorker.js", {shell:true});
         console.error(ret.stdout.toString());
+        console.error(ret.stderr.toString());
         console.log("updated instrumentation files");
     }
-    src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js") +  createScriptTag("domJson.js") + createScriptTag("tracer.js")  + src;
-    // src = doctype + "\n<script>\n" + deterministicCode + omniStringify +  fondue.instrumentationPrefix(options) + "\n</script>\n" + src;
+    src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js")
+        /*+ createScriptTag("signatureWorker.js")*/  + src;
+    // src = doctype + "\n<script>\n" + deterministicCode + omniStringify +  fondue.instrumentationPrefix(options) + domJson + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
@@ -241,13 +282,14 @@ function instrumentJavaScript(src, fondueOptions, jsInHTML) {
     if (IsJsonString(src))
         return src;
     // src = fondue_plugin.instrument(src, fondueOptions).toString();
-    src = fondue.instrument(src, fondueOptions).toString();
+    src = instrumentor.instrument(src, fondueOptions).toString();
     if (program.type == "js") {
         console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
         dumpStaticInformation_uncacheable(fondueOptions);
         computeRTITimeMatched();
     }
+    // fs.writeFileSync(fondueOptions.path.replace(/\//g,'_') + "DEBUG", src);
     src = src.replace(/^\s+|\s+$/g, '');
     return src;
 }
@@ -268,7 +310,10 @@ var main = function(){
     var origPath = program.name.split(';;;;')[1];
     origPath = origPath == "/" ? url + origPath : origPath;
     var path = origPath.length>50?origPath.substring(origPath.length-50,origPath.length) : origPath;
-    var fondueOptions = mergeInto({}, {useProxy: true, caching: false,  include_prefix: false, path: path, origPath: origPath, e2eTesting: false });
+    var fondueOptions = mergeInto({}, {useProxy: true, caching: false,  include_prefix: false, path: path, origPath: origPath, 
+        e2eTesting: false, pageLoaded: config[program.pattern].pageLoaded, invocation_limit:config[program.pattern].invocation_limit,
+         pattern:program.pattern});
+    console.log("Options are " + JSON.stringify(fondueOptions))
 
     if (program.jsProfile) {
         try {
@@ -283,8 +328,8 @@ var main = function(){
     if (program.cgInfo){
         try{
             var _cg = JSON.parse(fs.readFileSync(program.cgInfo),"utf-8");
-            var cg = _cg.map(e=>e[0]).slice(0,10);
-            console.log(cg);
+            var cg = _cg.map(e=>e[0]);
+            // console.log(cg);
             fondueOptions = mergeInto(fondueOptions, {cg: cg});
             staticInfo.rtiDebugInfo.ALL = cg.length;
             console.log("cg nodes:" + cg.length);
@@ -301,9 +346,17 @@ var main = function(){
     if (program.type == "js"){
         // Some js files are utf-16 encoded, therefore src might be an invalid file
         try {
-            var script = new vm.Script(src);
+            new vm.Script(src);
         } catch (e) {
-            src = fs.readFileSync(program.input,"ucs2")
+            var _ucs2_ = fs.readFileSync(program.input,"ucs2")
+            /*If still invalid just return the actual source*/
+            try {
+                new vm.Script(_ucs2_);
+                src = _ucs2_;
+            } catch (e){
+
+            }
+
         }
         src = instrumentJavaScript(src, fondueOptions, false)
         // src = src

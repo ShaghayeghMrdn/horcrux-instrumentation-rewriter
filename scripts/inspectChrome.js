@@ -31,6 +31,7 @@ program
     .option('--mem','extract heap memory trace')
     .option('--testing','testing means dont kill chrome after page load')
     .option('--mode [mode]', "Can be run in record or replay mode or std mode")
+    .option('--correctness',"Eval string to check for correctness post replay")
 	.parse(process.argv)
 
 pageLoadTime = {}
@@ -40,6 +41,10 @@ NetworkLog = [];
 heapChunks = [];
 spinOnCustom = true;
 pageLoaded = false;
+dataReceived = false;
+alldataReceived = false;
+
+evalStringFile = "./EVALFile"
 
 
 loadErrors = [], fetchErrors = [];
@@ -150,6 +155,7 @@ function navigate(launcher){
 
             if (program.network){
                 await Target.setAutoAttach({autoAttach: true, waitForDebuggerOnStart:false});
+                await Network.setCacheDisabled( {"cacheDisabled": true});
             }
 
             // Target.attachedToTarget((d)=>{
@@ -178,11 +184,11 @@ function navigate(launcher){
                         console.log("Console data logged");
                     };
 
-                    fs.appendFileSync("./loadErrors", '\n' + program.url);
+                    fs.appendFileSync("./loadErrors", '\n' + program.output);
 
                     chrome.close();
                     fatalKill();
-                }, 35000)
+                }, 50000)
             }
 
             if (program.sim){
@@ -235,9 +241,28 @@ function navigate(launcher){
 
             Runtime.consoleAPICalled((entry) =>{
                 if (entry.type == "error")
-                consoleLog.push(entry);
-            })
+                    consoleLog.push(entry);
+                if (entry.type == "log" && entry.args[0].value == "Cache saved.."){
+                    console.log("Alert received from web worker, finishing...")
+                    dataReceived = true;
+                    if (alldataReceived && !program.testing) {
+                        collectLogs(program);
+                        // if (program.mode == "record")
+                        //     customCodes.getStorageOverhead(Runtime, program.output + "/cacheSize");
+                        // setTimeout(function(){
+                            if (!program.mobile){
+                                chrome.close();
+                                safeKill();
+                            } else {
+                                Page.close();
+                                chrome.close();
+                            }
+                            process.exit();
+                        // },1000);
+                    }
 
+                }
+            })
 
             // HeapProfiler.addHeapSnapshotChunk((chunk)=>{
             //     heapChunks.push(chunk.chunk);
@@ -258,20 +283,26 @@ function navigate(launcher){
             }
             // await Debugger.setBreakpointsActive({active:true});
             await Page.loadEventFired();
-            clearTimeout(pltTimer);
-            console.log("Main load event fired");
-              // Pause the page is stop any further javascript computation
-            Runtime.evaluate({expression:"debugger;"});
-            console.log("Page has been paused");
-            if (program.custom) {
-                   await extractCustomInformation(Runtime, program,1);
+            if (program.jsProfiling) {
+                var _profilerData = await Profiler.stop(); 
+                fs.writeFileSync(program.output + "/jsProfile", JSON.stringify(_profilerData.profile));
+                console.log("Profiler data logged")
             }
             // await Page.reload();
             // await Page.loadEventFired();
-            // console.log("Page load fired again");
-            // if (program.custom) {
-            //     await extractCustomInformation(Runtime, program,2);
-            // }
+            clearTimeout(pltTimer);
+            console.log("Main load event fired");
+            pageLoaded = true;
+              // Pause the page is stop any further javascript computation
+            // Runtime.evaluate({expression:"debugger;"});
+            console.log("Page has been paused");
+            
+            if (program.correctness){
+                var evalString = fs.readFileSync(evalStringFile,"utf-8");
+                console.log("Evalling the following expression" + evalString)
+                var correctnessCheck = await Runtime.evaluate({expression: evalString, returnByValue:true}).value;
+                fs.writeFileSync(program.output + "/correctness", JSON.stringify(correctnessCheck));
+            }
 
             if (!program.testing) {
                 pltTimer = setTimeout(function(){
@@ -281,33 +312,18 @@ function navigate(launcher){
                         console.log("Console data logged");
                     };
 
-                    fs.appendFileSync("./fetchErrors", '\n' + program.url + "\n");
+                    fs.appendFileSync("./fetchErrors", '\n' + program.output + "\n");
 
                     chrome.close();
                     fatalKill();
 
-                }, 85000)
+                }, 45000)
+            }
+
+            if (program.custom) {
+                   await extractCustomInformation(Runtime, program,1);
             }
             await extractPageLoadTime(Runtime, "plt");
-            // const {result:result} = await Runtime.evaluate({expression: "ayush"});
-            // console.log(result);
-            // const {internalProperties:internalProperties} = await Runtime.getProperties({
-            //     objectId: result.objectId
-            //   });
-            // var location = internalProperties.find(prop => prop.name == "[[FunctionLocation]]");
-            // console.log(internalProperties.find(prop => prop.name == "[[FunctionLocation]]"));
-            // await extractPageLoadTime(Runtime, "/plt_warm");
-
-            // await Debugger.pause();
-            // console.log("debugger paused");
-            // var bp = await Debugger.setBreakpoint({location:location.value.value});
-            // await Debugger.resume();
-            // if (program.mobile) {
-            //     await Page.reload();
-                
-            //     await Page.loadEventFired();
-            //     await extractPageLoadTime(Runtime, "plt_warm")
-            // }
 
             if (program.coverage) {
                 var _coverageData = await Profiler.takePreciseCoverage();
@@ -330,35 +346,32 @@ function navigate(launcher){
                 fs.writeFileSync(program.output +"/network", JSON.stringify(NetworkLog));
             }
 
-            if (program.log) {
-                fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
-                console.log("Console data logged");
-            }
+            // if (program.jsProfiling) {
+                // var _profilerData = await Profiler.stop(); 
+                // fs.writeFileSync(program.output + "/jsProfile", JSON.stringify(_profilerData.profile));
+                // console.log("Profiler data logged")
+            // }
 
-            if (program.jsProfiling) {
-                var _profilerData = await Profiler.stop(); 
-                fs.writeFileSync(program.output + "/jsProfile", JSON.stringify(_profilerData.profile));
-                console.log("Profiler data logged")
-            }
+            // var h = await HeapProfiler.takeHeapSnapshot({reportProgess: false});
 
              if (program.mem){
 
-                var newTab = await Chrome.New({port:Number(program.port), local: local});
-                var newClient = await Chrome({port:Number(program.port), local: local},newTab);
-                with (newClient){
-                    await Page.enable();
-                    await Page.navigate({url:"chrome://system"});
-                    await Page.loadEventFired();
+                // var newTab = await Chrome.New({port:Number(program.port), local: local});
+                // var newClient = await Chrome({port:Number(program.port), local: local},newTab);
+                // with (newClient){
+                //     await Page.enable();
+                //     await Page.navigate({url:"chrome://system"});
+                //     await Page.loadEventFired();
 
-                    var _query = await Runtime.evaluate({expression:'document.getElementById("mem_usage-value").innerText;', returnByValue: true})
-                    var memData = _query.result.value;
-                    // var memoryUsageInfo = memData.split('\n')[0]
-                    console.log(memData);
+                //     var _query = await Runtime.evaluate({expression:'document.getElementById("mem_usage-value").innerText;', returnByValue: true})
+                //     var memData = _query.result.value;
+                //     // var memoryUsageInfo = memData.split('\n')[0]
+                //     console.log(memData);
 
 
-                }
+                // }
 
-                await Chrome.Close({port:Number(program.port), local: local,id:newTab.id});
+                // await Chrome.Close({port:Number(program.port), local: local,id:newTab.id});
 
                 // var systemTarget = await Target.createTarget({url:"chrome://system"});
                 // var systemTargetId = systemTarget.targetId;
@@ -374,13 +387,20 @@ function navigate(launcher){
                 // // data = await resp;
                 // console.log(resp);
                 // console.log("memory message received is " + memMsg);
+                await customCodes.getInvocationProperties(Runtime, program.output + "/mem", 'performance.memory.usedJSHeapSize');
 
-                fs.writeFileSync(program.output +"/mem", JSON.stringify(memData));
+                // fs.writeFileSync(program.output +"/mem", JSON.stringify(memData));
             }
-            clearTimeout(pltTimer);
+            //mark all data received
+            alldataReceived = true;
+            if (program.mode != "record" || dataReceived)
+                clearTimeout(pltTimer);
             // a=spawnSync("ps aux | grep replayshell | awk '{print $2}' | xargs kill -9",{shell:true});
             // Don't immediately kill Chrome as it takes some time for the cache to be dumped on disk
-            if (!program.testing) {
+            if (!program.testing && (program.mode != "record" || dataReceived) ) {
+                collectLogs(program);
+                // if (program.mode == "record")
+                //     await customCodes.getStorageOverhead(Runtime, program.output + "/cacheSize");
                 setTimeout(function(){
                     if (!program.mobile){
                         chrome.close();
@@ -401,6 +421,13 @@ function navigate(launcher){
 	}).on('error', function(er){
 		console.log("can't connect to chrome", er);
 	});
+}
+
+function collectLogs(program){
+    if (program.log) {
+        fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
+        console.log("Console data logged");
+    }
 }
 
 async function pausePage(Runtime){
@@ -451,21 +478,31 @@ async function extractCustomInformation(Runtime, program, path){
             fs.appendFileSync("./fetchErrors"  , '\n' + program.url + "\n" + runPostLoadScripts);
             consoleLog.push(runPostLoadScripts);
         }
-       await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, 'timingInfo',1);
-       await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
-       await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
-       await customCodes.getInvocationProperties(Runtime, program.output + "/noncacheable", '__tracer.getNonCacheableFunctions()');
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/dc" + path, '__tracer.getDC()',0);
+       // await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, '__tracer.getTimingInfo()',);
+       // await customCodes.getInvocationProperties(Runtime, program.output + "/reads", 'node2reads');
+       await customCodes.getInvocationProperties(Runtime, program.output + "/mem", 'performance.memory.usedJSHeapSize');
+       // await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
+       // await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
+       // await customCodes.getInvocationProperties(Runtime, program.output + "/noncacheable", '__tracer.getNonCacheableFunctions()');
+       await customCodes.getInvocationProperties(Runtime, program.output + "/signature", '__tracer.getProcessedSignature()');
+       dataReceived = true
        // await customCodes.getProcessedSignature(Runtime, program.output);
    } else if (program.mode == "replay"){
         // await customCodes.getInvocationProperties(Runtime, program.output  + "/invocProps", 'Object.keys(__tracer.getCustomCache())');
         await customCodes.getInvocationProperties(Runtime, program.output  + "/cacheStats", '__tracer.getCacheStats()');
         await customCodes.getInvocationProperties(Runtime, program.output  + "/cacheExists", 'localStorage.getItem("fnCacheExists")');
         await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
-        await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, 'timingInfo',1);
+        await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, '__tracer.getTimingInfo()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/setupStateTime", 'window.top.setupStateTime');
    } else {
         await customCodes.getInvocationProperties(Runtime, program.output + "/leafNodes" + path, 'leafNodes',1);
-        await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, 'timingInfo',0);
-        await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, '__tracer.getTimingInfo()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/parentNodes", '__tracer.getParentNodes()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/nonLeafNodes", '__tracer.getNonLeafNodes()');
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/minHeap", 'minHeap');
    }
    // await customCodes.getInvocationProperties(Runtime, program.output  + "/callgraph", 'Object.keys(__tracer.getCallGraph())');
    console.log("Custom data logged");
@@ -519,11 +556,11 @@ if (program.launch) {
         '--disable-web-security',
         '--disable-extensions ',
         // '--js-flags="--expose-gc"',
-        '--auto-open-devtools-for-tabs',
+        // '--auto-open-devtools-for-tabs',
         // '--enable-devtools-experiments',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-site-isolation-trials',
-        '--allow-running-insecure-content',
+        // '--disable-features=IsolateOrigins,site-per-process',
+        // '--disable-site-isolation-trials',
+        // '--allow-running-insecure-content',
 		 // '--headless',
          // '--v8-cache-options=off',
          // '--js-flags="--compilation-cache false"',

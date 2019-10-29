@@ -1,6 +1,6 @@
 
 
-var javascriptReservedWords = ['amzn_aps_csm','Promise','XMLHttpRequest','$','Array','abstract','arguments','await','boolean','break','byte','case','catch','char','class','const','continue','Date','debugger','define','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','require','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
+var javascriptReservedWords = ['__tracer','__tracerPROXY','console','amzn_aps_csm','Promise','XMLHttpRequest','$','Array','abstract','arguments','await','boolean','break','byte','case','catch','char','class','const','continue','Date','debugger','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','require','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
 var uncacheableFunctions ={"RTI":[], "antiLocal":[], "DOM":[], "ND":[]};
 var options;
 
@@ -156,6 +156,18 @@ var getFunctionIdentifier = function(node) {
     return null;
 }
 
+/*Returns the final variable which is the actual
+function inside a call expresson
+eg: a.b -> b
+(a+b).s[2].d -> d*/
+var getFinalObjectFromCallee = function(node){
+    if (node.type == "Identifier" || node.type == "thisexpression")
+        return node;
+    if (node.type == "MemberExpression" && !node.computed)
+        return getFinalObjectFromCallee(node.property);
+    return node;
+}
+
 /*
 Returns identifiers or thisexpression
 */
@@ -275,7 +287,7 @@ var escapeRegExp2 = function(str) {
 }
 
 var escapeRegExp = function(str) {
-    return str.replace(/[\`]/g, "\\$&");
+    return str.replace(/[\`{}]/g, "\\$&");
 }
 
 var overWriteToString = function () {
@@ -341,6 +353,7 @@ module.exports = {
     getIdentifierFromGenericExpression: getIdentifierFromGenericExpression,
     getFunctionIdentifier: getFunctionIdentifier,
     escapeRegExp2: escapeRegExp2,
+    escapeRegExp: escapeRegExp,
     containsRange: containsRange,
     customMergeDeep: customMergeDeep,
     checkForWindowObject: checkForWindowObject,
@@ -348,5 +361,6 @@ module.exports = {
     matchASTNodewithRTINode:matchASTNodewithRTINode,
     uncacheableFunctions: uncacheableFunctions,
     isChildOfCallExpression:isChildOfCallExpression,
-    isArgofCallExpression: isArgofCallExpression
+    isArgofCallExpression: isArgofCallExpression,
+    getFinalObjectFromCallee:getFinalObjectFromCallee
 }

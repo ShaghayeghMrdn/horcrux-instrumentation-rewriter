@@ -68,7 +68,7 @@ var returnIdFromBindingPatterns = function(node){
         })
     } else if( node.type == "ArrayPattern"){
         node.elements.forEach((elem)=>{
-            if (elem.type == "Identifier")
+            if (elem && elem.type == "Identifier")
                 identifiers.push(elem);
         })
     } else if (node.type == "Identifier")
@@ -170,7 +170,7 @@ var IsLocalVariable = function (node){
                     return -2;
                 else return -1; 
             }
-            if (parent.localVariables.map(function(e){return e.source()}).includes(identNode.name) /*|| isGlobalAlias(identNode)*/) { /* Removed checking if the variable exists inside params or not as params also considered global*/
+            if (parent.localVariables.map(function(e){return e.source() || e.name}).includes(identNode.name) /*|| isGlobalAlias(identNode)*/) { /* Removed checking if the variable exists inside params or not as params also considered global*/
                 if (foundInImmediateParent == 1)
                     return -2;
                 else return -1;

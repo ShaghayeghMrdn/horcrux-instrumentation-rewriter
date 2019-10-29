@@ -256,6 +256,22 @@ var processLeafNodes = function(cg){
     return leafGraph;
 }
 
+var getLeafNodesFromProfiler = function(){
+    var leafNodes = [];
+    var totalNodes = cpu.parsed.children;
+    var ibf = ["(program)","(idle)","(garbage collector)"]
+    totalNodes.forEach((node)=>{
+        if ( (node.self >= node.total) && ibf.indexOf(node.functionName)<0
+                && node.children.length == 0 && 
+                node.profileNode.callFrame.url.startsWith("http")){
+            /*Candidate for potential leaf node*/
+            // console.log(node.functionName, node.depth)
+            leafNodes.push(node);
+        }
+    })
+    return leafNodes;
+}
+
 var handleLeafNodes = function(ln, cpu){
     var _profileRTIs = cpu.parsed.children.filter(e=>e.profileNode.callFrame.url.indexOf("http")>=0);
     var  profileRTIs = _profileRTIs.map(e=>e.profileNode);
@@ -352,5 +368,30 @@ function fn2time(){
     console.log("Done processing " + program.callgraph)
 }
 
-fn2time();
+// fn2time();
+var cpuRawInput = JSON.parse(fs.readFileSync(program.rti, "utf-8"));
+cpu = cpuProfileParser(cpuRawInput);
+var cpuTimeWoProgram = cpu.raw.total - (cpu.raw.idleNode.self + cpu.raw.programNode.self);
+var cpuTime = cpu.raw.total - cpu.raw.idleNode.self;
+var leaf = getLeafNodesFromProfiler();
+var leafTime, _leafTime = 0;
+leaf.forEach((lNode)=>{
+    _leafTime+=lNode.self;
+})
+
+process.stdout.write(util.format(_leafTime, leaf.length));
+// console.log(cpuTime, cpuTimeWoProgram);
+program.output && fs.writeFileSync(program.output, JSON.stringify(cpu.parsed.children.sort((a,b)=>{return b.self - a.self}).slice(0,10).map((e)=>{return {f:e.profileNode.callFrame.functionName, t:e.self}})));
+// JSON.stringify(cpu.parsed.children.sort((a,b)=>{return b.self - a.self}).slice(0,10).map((e)=>{return {f:e.profileNode.callFrame.functionName, t:e.self}}))
+
+
+
+
+
+
+
+
+
+
+
 // main();

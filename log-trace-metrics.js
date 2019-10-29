@@ -11,7 +11,7 @@ program
     .option('-o , --output [output-dir]','path to the output directory for results','./parsedTrace')
     .parse(process.argv)
 
-
+// console.log(process.argv);
 var filename = program.path;
 
 function dumpTree(tree, timeValue) {
@@ -25,7 +25,7 @@ function report(filename) {
 
   var model = new DevtoolsTimelineModel(events);
 
-  console.group(filename);
+  // console.group(filename);
 
   // console.log('Timeline model events:\n', model.timelineModel().mainThreadEvents().length);
   // console.log('IR model interactions\n', model.interactionModel().interactionRecords().length);
@@ -52,8 +52,11 @@ function report(filename) {
   mkdirp(program.output , function(err) {
         if (err) console.log("Error file creating directory",err)
         else {
-          fs.writeFileSync(program.output + "/PerCategory", util.inspect(dumpTree(model.bottomUpGroupBy('Category'), 'selfTime')))
-          fs.writeFileSync(program.output + "/PerActivity", util.inspect(dumpTree(model.bottomUpGroupBy('EventName'), 'selfTime')))
+          program.output && fs.writeFileSync(program.output + "/PerCategory", util.inspect(dumpTree(model.bottomUpGroupBy('Category'), 'selfTime')))
+          program.output && fs.writeFileSync(program.output + "/PerActivity", util.inspect(dumpTree(model.bottomUpGroupBy('EventName'), 'selfTime')))
+          var map = dumpTree(model.bottomUpGroupBy('Category'), 'selfTime');
+          var total = Array.from(map.values()).reduce((curr,acc)=>{return parseFloat(acc) + parseFloat(curr)},0);
+          process.stdout.write(util.format(total));
       }
     });
   console.groupEnd(filename);

@@ -200,11 +200,11 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         f.close()
         if (args.jsProfile):
         #Pass into the nodejs instrumentation script
-            command = " {} -i {} -n '{}' -t {} -j {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile)
+            command = " {} -i {} -n '{}' -t {} -j {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile, args.instOutput)
         elif (args.cgInfo):
-            command = " {} -i {} -n '{}' -t {} -c {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.cgInfo)
+            command = " {} -i {} -n '{}' -t {} -c {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.cgInfo, args.instOutput)
         else:
-            command = " {} -i {} -n '{}' -t {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType)
+            command = " {} -i {} -n '{}' -t {} -p {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType, args.instOutput)
 
         if (args.debug) and fileType == "html":
             command = "node --inspect-brk={}".format(node_debugging_port) + command
@@ -215,19 +215,19 @@ def instrument(file,root, childPids, fileType, output_directory,args):
 
         log_file=open(_log_path+"logs","w")
         error_file=open(_log_path+"errors","w")
-        if (args.instOutput != "ND" or fileType == "html"):
-            print "Executing ", command
-            cmd = subprocess.call(command, stdout=log_file, stderr =error_file, shell=True)
+        # if (args.instOutput != "ND" or fileType == "html"):
+        print "Executing ", command
+        cmd = subprocess.call(command, stdout=log_file, stderr =error_file, shell=True)
 
         # read the information returned from the script if inst type was recording
-        if args.instOutput == "caching":
-            try:
-                returnInfoFile = TEMP_FILE + ".info";
-                returnInfo = open(returnInfoFile,'r').readline();
+        # if args.instOutput == "caching":
+        try:
+            returnInfoFile = TEMP_FILE + ".info";
+            returnInfo = open(returnInfoFile,'r').readline();
 
-                open(_log_path + "info","w").write(returnInfo)
-            except IOError as e:
-                print "Error while reading info file" + str(e)
+            open(_log_path + "info","w").write(returnInfo)
+        except IOError as e:
+            print "Error while reading info file" + str(e)
 
         if gzip:
             file_with_content = TEMP_FILE_zip
@@ -370,7 +370,7 @@ if __name__ == "__main__":
     parser.add_argument('input', help='path to input directory')
     parser.add_argument('output', help='path to output directory')
     parser.add_argument('instOutput', help='type of instrumentation to perform',
-     default="caching", choices=["cg","caching"])
+     default="signature", choices=["cg","signature"])
     parser.add_argument('--jsProfile', help='path to the js profile')
     parser.add_argument('--cgInfo',help="path to the cg info")
     parser.add_argument('--debug',help="enable node debugging using -inspect flag", 

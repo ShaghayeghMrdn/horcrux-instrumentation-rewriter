@@ -36,6 +36,14 @@ var getNonCacheable = async function(Runtime, outDir){
     console.log("Done fetching non-cache statistics");
 }
 
+var getMinHeap = function getMinHeap(){
+    var minHeap = {};
+    for (i in window){
+        minHeap[i] = window[i] + "";
+    }
+    return minHeap;
+}
+
 var processLeafNodes = function(cg){
     var leafGraph = [];
     var nonLeafs = [];
@@ -64,12 +72,17 @@ var getNodeTimingInfo = function(leafNodes){
 
 var runCodeOnClient = async function(Runtime){
     var cmd = `
-        var processLeafNodes = ${processLeafNodes};
-        var leafNodes = processLeafNodes(__tracer.getCallGraph());
-    
-        var timingInfo = performance.getEntriesByType("mark").filter(e=>e.name.indexOf("-function-")>=0).map((e)=>{return { n:e.name, t:e.startTime} });
+        // var timingInfo = performance.getEntriesByType("mark").filter(e=>e.name.indexOf("-function-")>=0).map((e)=>{return { n:e.name, t:e.startTime} });
+        var timingInfo = performance.getEntriesByType("mark").map((e)=>{return { n:e.name, t:e.startTime} });
+
+        var node2reads = {};
+        var _a = __tracer.getCustomCache();
+        Object.keys(_a).forEach((node)=>{
+            node2reads[node] = Object.entries(_a[node]).filter(e=>e[0].indexOf("reads")>=0).map(e=>e[1]).reduce((acc, curr)=>{return acc + curr.length},0)
+        })
     `;
     await Runtime.evaluate({expression : cmd, returnByValue: true});
+    // console.log(ret);
     console.log("Done computing expensive leaf nodes")
 
 }
@@ -95,6 +108,9 @@ var getFunctionStats = async function(Runtime, outDir) {
 var getInvocationProperties = async function(Runtime, outFile, fetchCommand, preProcess){
     if (preProcess)
         await runCodeOnClient(Runtime);
+    if (fetchCommand == "minHeap") {
+        fetchCommand=getMinHeap.toString()+";getMinHeap()"
+    }
     var _fnStats = await Runtime.evaluate({expression : fetchCommand, returnByValue: true});
     var stats = _fnStats.result;
     if (_fnStats.code || _fnStats.exceptionDetails){
@@ -112,7 +128,17 @@ function escapeBackSlash(str){
 var runPostLoadScripts = async function(Runtime){
     console.log("Running postload scripts..");
     //process final signature
-    var processCommand = '__tracer.processFinalSignature()'
+    var processCommand = `
+    for (i=0;i<window.frames.length;i++){
+    win = window.frames[i];
+        if (win.__tracer && win.__tracer != window.top.__tracer) {
+                win.__tracer.processFinalSignature();
+                // win.__tracer.storeSignature();
+    }}
+    __tracer.processFinalSignature();
+    // __tracer.storeSignature();
+
+`;
     var cmdOutput = await Runtime.evaluate({expression : processCommand, returnByValue: true});
 
     if (cmdOutput.exceptionDetails){
@@ -123,15 +149,15 @@ var runPostLoadScripts = async function(Runtime){
     }
 
     //stringify the final signature
-    processCommand = '__tracer.storeSignature()'
-    var cmdOutput = await Runtime.evaluate({expression : processCommand, returnByValue: true});
+    // processCommand = '__tracer.storeSignature()'
+    // var cmdOutput = await Runtime.evaluate({expression : processCommand, returnByValue: true});
 
-    if (cmdOutput.exceptionDetails){
-        console.error("Error while processing final signature: " + 
-            cmdOutput.exceptionDetails.exception.description);
-        // errors.push(outDir);
-        return cmdOutput.exceptionDetails.exception.description;
-    }
+    // if (cmdOutput.exceptionDetails){
+    //     console.error("Error while processing final signature: " + 
+    //         cmdOutput.exceptionDetails.exception.description);
+    //     // errors.push(outDir);
+    //     return cmdOutput.exceptionDetails.exception.description;
+    // }
 
     console.log("successfully ran the post load scripts");
 
@@ -249,6 +275,15 @@ var getCacheSize = async function(Runtime, outDir) {
 
 }
 
+var getStorageOverhead = async function(Runtime,outFile){
+    var overHead = 0;
+    var sigSize = await Runtime.evaluate({expression : "localStorage.getItem('signature')", returnByValue: true});
+    overHead += sigSize.result.value.length*2;
+    var mapSize = await  Runtime.evaluate({expression : "localStorage.getItem('keyMap')", returnByValue: true});
+    overHead += mapSize.result.value.length*2;
+    fs.writeFileSync(outFile, overHead);
+}
+
 
 module.exports = {
     getCacheStats : getCacheStats,
@@ -257,5 +292,6 @@ module.exports = {
     getCustomStat: getCustomStat,
     getInvocationProperties: getInvocationProperties,
     getProcessedSignature : getProcessedSignature,
-    runPostLoadScripts: runPostLoadScripts 
+    runPostLoadScripts: runPostLoadScripts,
+    getStorageOverhead:getStorageOverhead 
 }

@@ -12,6 +12,10 @@ var signature = require('./signature.js');
 var e2eTesting = false;
 var anonCounter = 0;
 var node2index = new Map();
+var staticInfo = {};
+var uncacheableFunctions = util.uncacheableFunctions;
+staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matchedUrls: []};
+staticInfo.uncacheableFunctions = uncacheableFunctions;
 
 
 function mergeInto(options, defaultOptions) {
@@ -83,8 +87,24 @@ function instrument(src, options) {
     if (options.cg){
         console.log("List of functions to be instrumented: " + options.cg.length);
         options.myCg = options.cg.filter(node=>node.indexOf(options.path)>=0);
-        // staticInfo.rtiDebugInfo.totalNodes = options.myCg;
+        if (options.e2eTesting) options.myCg = options.cg;
         console.log("Only instrumenting the following functions from the current script " + options.myCg.length);
+    } else if (options.rti){
+        var percent = 20;
+        console.log("[instrument] List of functions to be instrumented " + JSON.stringify(options.rti.map(el=> el.functionName)));
+        //Need exact url match, hence append path with ".com"
+        var urlMatchEndRegex = new RegExp("\\..{2,3}" + util.escapeRegExp2(options.origPath),'g');
+        var urlMatchExactRegex = new RegExp("https?\:\/\/" + options.origPath);
+        var _logStringRTI = options.rti.map((el)=>{ if(el.url.match(urlMatchEndRegex) || el.url.match(urlMatchExactRegex))return el.functionName}).filter(fn => fn != null);
+        options.myRti = options.rti.map((el)=>{ if(el.url.match(urlMatchEndRegex) || el.url.match(urlMatchExactRegex)) return el}).filter(fn => fn != null);
+        console.log("[instrument] Only instrumenting the following functions from the current script: " + options.origPath + " : " + JSON.stringify(_logStringRTI));
+
+        // Logging matching information
+        staticInfo.rtiDebugInfo.totalNodes = options.myRti
+        var ALLUrls = options.rti.map((el)=>{return el.url}).filter((el,ind,self)=>self.indexOf(el)==ind);
+        var matchedUrls = options.myRti.map((el)=>{return el.url}).filter((el,ind,self)=>self.indexOf(el)==ind);
+        staticInfo.rtiDebugInfo.ALLUrls = ALLUrls;
+        staticInfo.rtiDebugInfo.matchedUrls = staticInfo.rtiDebugInfo.matchedUrls.concat(matchedUrls);
     }
 
     if (src.indexOf("/*theseus" + " instrument: false */") !== -1) {
@@ -134,6 +154,7 @@ var traceFilter = function (content, options) {
         var functionToCallees = {};
         var functionsContainingThis = [];
         var functionToNonLocals = {};
+        var inBuiltOverrides = ["tostring", "tojson", "toprimitive","typeof"];
         var fala = function () {
             var m = falafel.apply(this, arguments);
             return {
@@ -149,6 +170,16 @@ var traceFilter = function (content, options) {
             return node.source();
         };
 
+        var markFunctionUnCacheable = function(node, reason){
+            var functionNode = util.getFunctionIdentifier(node);
+            if (functionNode){
+                if(!uncacheableFunctions[reason])
+                    uncacheableFunctions[reason]=[];
+                if (uncacheableFunctions[reason].indexOf(functionNode)<0)
+                    uncacheableFunctions[reason].push(functionNode);
+            }
+        }
+
         m = fala({
             source: content,
             loc: true,
@@ -157,17 +188,71 @@ var traceFilter = function (content, options) {
             generatedFilename: options.generatedFilename || options.path,
             // tolerant: true,
         }, function (node) {
+            ASTNodes.push(node);
+            ASTSourceMap.set(node,node.source());
+        });
+
+        if (options.rti) {
+            var instrumentedNodes = [], remainingRTINodes =[];
+            options.myRti.forEach((rtiNode)=>{
+                var matchedNode = util.matchASTNodewithRTINode(rtiNode, ASTNodes, options, ASTSourceMap);
+                if (matchedNode){
+                    instrumentedNodes.push(matchedNode);
+                    staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
+                } else
+                remainingRTINodes.push(rtiNode);
+            })
+        } else if (options.cg) {
+            var instrumentedNodes = [], remainingRTINodes =[];
+            ASTNodes.forEach((node)=>{
+                if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
+                    var index = makeId('function', options.path, node);
+                    if (options.myCg.indexOf(index)>=0){
+                        // staticInfo.rtiDebugInfo.matchedNodes.push(node);
+                        instrumentedNodes.push(node);
+                    } else {
+                        markFunctionUnCacheable(node,"RTI");
+                    }
+                }
+
+            });
+        }
+
+        ASTNodes.forEach((node)=>{
+            if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression"){
+                if ( (options.rti || options.cg) && (instrumentedNodes.indexOf(node)<0 || (node.id && inBuiltOverrides.indexOf(node.id.name.toLowerCase())>=0)) )
+                    markFunctionUnCacheable(node,"RTI");
+            }
+        })
+
+
+        var interceptDecl = "___tracerINT";
+        total = 0
+        totalInJs = 0
+
+        var insideFunction = function(node){
+            var parent = node.parent;
+            while (parent){
+                if ((parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"))
+                    return true;
+                parent = parent.parent;
+            }
+            return false;
+        }
+
+        ASTNodes.forEach((node)=>{
             if (node.type === "Program") { 
+                total += node.source().length;
                 /*
                 Some JS files don't have access to the global execution context and they have a dynamically generated
                 html file, therefore create dummy tracer functions, just to avoid runtime errors. 
                 */
-                var tracerCheck = `\n(function(){if (typeof __tracer == 'undefined')
+                var tracerCheck = `\n(function(){if (typeof __tracer == 'undefined' && typeof window != 'undefined')
                  { __tracer = {cacheInit:(arg)=>{}, 
                     exitFunction: (arg,ret)=>{return ret}};
                  }
                 })();\n`;
-                var tracerCheck = `\n(function(){if (typeof __tracer == 'undefined')
+                var tracerCheck = `\n(function(){if (typeof __tracer == 'undefined' && typeof window != 'undefined')
                  { __tracer = window.top.__tracer;
                  }
                 })();\n`;
@@ -175,15 +260,44 @@ var traceFilter = function (content, options) {
                     update(node, options.prefix,tracerCheck,sourceNodes(node))
                 else 
                     update(node, options.prefix,sourceNodes(node))
-            } else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
+            } else if (node.type == "CallExpression" || node.type == "NewExpression") {
+                var _functionId = util.getFunctionIdentifier(node);
+                if (_functionId) {
+                    // var finalCallee = util.getFinalObjectFromCallee(node.callee);
+                    if (node.callee.type == "MemberExpression"){
+                        update(node.callee.object, interceptDecl);
+                        update(node, "( (" + interceptDecl + " = (",ASTSourceMap.get(node.callee.object),")) , ",options.tracer_name,
+                        '.logCallee(', node.callee.source(),',',node.source(),"))");
+                    } else if (node.callee.type =="Identifier" || node.callee.type == "ThisExpression"){
+                        update(node, ' ',options.tracer_name+".logCallee(",node.callee.source(),',',node.source(),")");
+                    } else {
+                        update(node.callee, interceptDecl);
+                        update(node, "( (" + interceptDecl + " = (",ASTSourceMap.get(node.callee),")) , ",options.tracer_name,
+                        '.logCallee(', node.callee.source(),',',node.source(),"))");
+                    }
+
+                    // if (node.callee.type == "SequenceExpression")
+                    //     update(node, ' ',options.tracer_name+".logCallee((",node.callee.source(),'),',node.source(),")");
+                    // else 
+                    //     update(node, ' ',options.tracer_name+".logCallee(",node.callee.source(),',',node.source(),")");
+                }
+            } 
+
+
+            else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
+
+                if (!insideFunction(node))
+                    totalInJs += node.source().length;
+
                 var containsReturn = false;
                 var index = makeId('function', options.path, node);
-                // if (options.myCg.indexOf(index)<0) return;
+                if ( (options.myRti || options.myCg)&& uncacheableFunctions["RTI"].indexOf(node)>=0)
+                    return;
                 if (node.containsReturn) containsReturn = true;
                 var nodeBody = node.body.source().substring(1, node.body.source().length-1);
 
-                update(node.body, '{ \n try {',options.tracer_name,'.cacheInit(',JSON.stringify(index),',arguments);\n',
-                    node.body.source().substring(1, node.body.source().length-1));
+                update(node.body, '{ \n try {',options.tracer_name,'.cacheInit(',JSON.stringify(index),',arguments);\n var ',interceptDecl,'\n;',
+                    node.body.source().substring(1, node.body.source().length-1),'\n');
 
                 var _traceEnd = options.tracer_name + ".exitFunction(";// + args + ");";
                 // if (options.myRti && instrumentedNodes.indexOf(node)<0){
@@ -192,8 +306,8 @@ var traceFilter = function (content, options) {
                 // }
 
                 // if (!containsReturn)
-                    update(node.body, node.body.source(),' \n } catch (e){ console.error("[ERROR]" + ', JSON.stringify(index) + '+ " " + e.message', ')}  finally {',
-                         _traceEnd, JSON.stringify(index), ');\n }}');
+                    update(node.body, node.body.source(),' \n } finally {',
+                         _traceEnd, JSON.stringify(index), ',true);\n }}');
                 // else 
                     // update(node.body, node.body.source(),'}');
                 
@@ -219,6 +333,7 @@ var traceFilter = function (content, options) {
             }*/
         });
         processed = m;
+        console.log("[STATIC] " , total, totalInJs )
         return processed
     } catch (e) {
         return processed;
@@ -227,5 +342,6 @@ var traceFilter = function (content, options) {
 }
 
 module.exports = {
-    instrument: instrument
+    instrument: instrument,
+    staticInfo: staticInfo
 };

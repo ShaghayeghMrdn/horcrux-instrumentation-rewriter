@@ -74,7 +74,9 @@ function matchingExceptions(log1, log2){
             //Either there is an exceptions object or the description is contained inside the text object
             if (l.exceptionDetails.exception) {
                 var exception = l.exceptionDetails.exception.description || "";
-                exceptions1.push(exception.substr(0, exception.indexOf("at")));
+                if (exception.indexOf("at")>=0)
+                	exceptions1.push(exception.substr(0, exception.indexOf("at")));
+                else exceptions1.push(exception);
             } else {
                 exceptions1.push(l.exceptionDetails.text);
             }
@@ -85,7 +87,9 @@ function matchingExceptions(log1, log2){
 	    if (l.exceptionDetails){
 	            if (l.exceptionDetails.exception) {
 	                var exception = l.exceptionDetails.exception.description || "";
-	                exceptions2.push(exception.substr(0, exception.indexOf("at")));
+	                if (exception.indexOf("at")>=0)
+	                	exceptions2.push(exception.substr(0, exception.indexOf("at")));
+	                else exceptions2.push(exception);
 	            } else {
 	                exceptions2.push(l.exceptionDetails.text);
 	            }
@@ -98,17 +102,22 @@ function matchingExceptions(log1, log2){
 		// console.log("exception1" + exceptions1[ex1]);
 		for (var ex2 in exceptions2){
 			// console.log("exceptions2" + exceptions2[ex2]);
-			if (exceptions1[ex1] == exceptions2[ex2]) {
+			if ( (exceptions1[ex1] == exceptions2[ex2]) || exceptions1[ex1].indexOf("DOMException")>=0 ) {
 				exceptionCount++;
 				foundMatch = true;
 				break;
 			}
 		}
+		/*if logs2 is empty*/
+		if (exceptions1[ex1].indexOf("DOMException")>=0 ) {
+			exceptionCount++;
+			foundMatch=true;
+		}
 		if (!foundMatch)
 			unmatches.push(exceptions1[ex1]);
 	}
-	//console.log(exceptions1);
-	//console.log(exceptions2);
+	console.error(exceptions1);
+	console.error(exceptions2);
 	console.error(unmatches);
 	return exceptionCount;
 

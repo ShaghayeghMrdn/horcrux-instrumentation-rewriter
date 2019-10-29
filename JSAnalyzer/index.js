@@ -95,12 +95,15 @@ function instrumentationPrefix(options) {
 		nodejs: options.nodejs,
 		maxInvocationsPerTick: options.maxInvocationsPerTick,
 		e2eTesting: options.e2eTesting,
-		proxyName: options.proxyName
+		proxyName: options.proxyName,
+		pageLoaded: options.pageLoaded,
+		invocation_limit:options.invocation_limit,
+		instrumentationPattern:JSON.stringify(options.pattern) 
 	});
 
-	Object.keys(uncacheableFunctions).forEach((reason)=>{
-		s = s.replace(new RegExp('{'+reason+'}', 'g'), JSON.stringify(staticInfo.staticUncacheableFunctions[reason]));
-	});
+	// Object.keys(uncacheableFunctions).forEach((reason)=>{
+	// 	s = s.replace(new RegExp('{'+reason+'}', 'g'), JSON.stringify(staticInfo.staticUncacheableFunctions[reason]));
+	// });
 
 	return s;
 }
@@ -139,6 +142,7 @@ function instrument(src, options) {
 	} else if (options.cg){
 		console.log("List of functions to be instrumented: " + options.cg.length);
 		options.myCg = options.cg.filter(node=>node.indexOf(options.path+"-")>=0);
+		if (options.e2eTesting) options.myCg = options.cg;
 		staticInfo.rtiDebugInfo.totalNodes = staticInfo.rtiDebugInfo.totalNodes.concat(options.myCg);
 		console.log("Only instrumenting the following functions from the current script " + options.myCg.length);
 	}
@@ -246,7 +250,8 @@ var traceFilter = function (content, options) {
 		var functionToCallees = {};
 		var functionsContainingThis = [];
 		var functionToNonLocals = {}, functionAliasMap = {}, functionIBFArgs = {}, functionIBFArgsCounter = 0,
-			functionsVarDecl = {};
+			functionsVarDecl = {}, ceToFinalExpression = new Map()
+			functionToDOMtracking = {};
 		var fala = function () {
 			var m = falafel.apply(this, arguments);
 			return {
@@ -349,12 +354,11 @@ var traceFilter = function (content, options) {
 		}
 
 		var rewriteArguments = function(argReads){
-			return;
 			argReads.forEach((arg)=>{
-				var proxyPrefix = "argP";
+				var proxyPrefix = "argumentProxy[";
 				var argIndex = arg.ind;
 				var argNode = arg.val;
-				update(argNode, "argP"+argIndex);
+				update(argNode, proxyPrefix+argIndex+ "]");
 			})
 		}
 
@@ -383,17 +387,17 @@ var traceFilter = function (content, options) {
 
 		var _insertArgumentProxy = function(argumentObj){
 			var outStr ='var argumentProxy = ' + options.tracer_name +'.createArgumentProxy(arguments);\n';
-			for (var i=0;i<argumentObj.length;i++){
-				let argProxyStr =  argumentObj[i].source() + " = argumentProxy[" + i + "];\n"
-				outStr+=argProxyStr;
-			}
+			// for (var i=0;i<argumentObj.length;i++){
+			// 	let argProxyStr =  argumentObj[i].source() + " = argumentProxy[" + i + "];\n"
+			// 	outStr+=argProxyStr;
+			// }
 			return outStr;
 		}
 
 		var insertArgumentProxy = function(fnNode){
-			// if (!fnNode.params.length) return;
+			var nodeBody = fnNode.body.source().substring(1, fnNode.body.source().length-1);
 			var argProxyStr = _insertArgumentProxy(fnNode.params);
-			update(fnNode.body, argProxyStr, fnNode.body.source());
+			update(fnNode.body, argProxyStr, nodeBody);
 		}
 
 		var insertThisProxy = function(){
@@ -419,6 +423,7 @@ var traceFilter = function (content, options) {
 				'.createClosureProxy(';
 			var closureObjStr = "var __closureObj = { ";
 			var closureVarStr = "";
+			var closureArray = [];
 			//Remove duplocates
 			var nonLocalsSrc = functionToNonLocals[fnIndex].map((el)=>{return ASTSourceMap.get(el)});
 			var uniqIdsSet = new Set(nonLocalsSrc);
@@ -428,7 +433,7 @@ var traceFilter = function (content, options) {
 				closureObjStr += idsrc;
 				closureObjStr += ":"
 				closureObjStr += idsrc;
-				// if (ind != functionToNonLocals[fnIndex].length -1)
+				closureArray.push(idsrc);
 				closureObjStr += ",";
 
 				closureVarStr += idsrc + " = closureProxy." + idsrc + "\n";
@@ -436,15 +441,21 @@ var traceFilter = function (content, options) {
 			closureObjStr += "}\n"
 			closurePrefixStr += "__closureObj);\n";
 
-			update(fnNode.body, closureObjStr, closurePrefixStr , closureVarStr, fnNode.body.source());
-			return closureObjStr + closurePrefixStr;
+			// update(fnNode.body, closureObjStr, closurePrefixStr , closureVarStr, fnNode.body.source());
+			return [closureObjStr,closurePrefixStr, closureArray];
 
 		}
 
+		/*
+		Arguments: <AST node, string>
+		returns <AST node> 
+		*/
 		var getOriginalFromAlias = function(alias, functionId){
-			var original = functionAliasMap[functionId][alias];
-			if (original in functionAliasMap[functionId])
-				return getOriginalFromAlias(original);
+			if (!functionAliasMap[functionId]) return alias;
+			var original = functionAliasMap[functionId][alias.source()];
+			if (!original) return alias;
+			if (original.source() != alias && original.source() in functionAliasMap[functionId])
+				return getOriginalFromAlias(original, functionId);
 			return original;
 		}
 
@@ -459,31 +470,97 @@ var traceFilter = function (content, options) {
 			return astArr;
 		}
 
-		var processFinalCallExprs = function(CENode){
-			var returnStr = "";
+		var modifyNode = function(ceNode, srcStr, dstStr){
+			return fala({
+					source:ceNode
+				}, function(node){
+					if (node.source() == srcStr)
+						update(node, dstStr)
+				}).toString();
+		}
+
+		/*
+		Arguments: CENode: Node to be statically analysed
+		localDeclHolder: local declarations 
+		isAA: Is alias analysis or not, if yes, also statically analysis the arguments
+		if not, they would be taken care as a part of the dynamic analysis at runtime. 
+		*/
+		var getCompleteExpression = function(CENode, localDeclHolder, isAA){
+			var localDecls = "";
+			if (!localDeclHolder) localDeclHolder = "";
+			var callee = CENode.source();
 			var _functionId = util.getFunctionIdentifier(CENode);
 			if (_functionId){
 				var functionId = makeId('function', options.path, _functionId);
-				var ids = util.getIdentifierFromGenericExpression(CENode.callee);
-				var {readArray, local,argReads, antiLocal} = signature.handleReads(ids, true);
+				var id = util.getIdentifierFromGenericExpression(CENode);
+				var {readArray, local,argReads, antiLocal} = signature.handleReads(CENode, false, 1, isAA);
 				if (!functionsVarDecl[functionId])
 					functionsVarDecl[functionId] = []
 				local.forEach((l)=>{
-					var _l = getOriginalFromAlias(l.source(), functionId);
-						if (l.source() != _l && functionsVarDecl[functionId].indexOf(l.source())<0) {
-							returnStr += "var " + l.source() + " = " + _l + ";\n";
-							functionsVarDecl[functionId].push(l.source());
+					var _l = getOriginalFromAlias(l, functionId);
+						if (l.source() != _l.source() && localDeclHolder.indexOf(l.source() + " = ")<0) {
+							functionsVarDecl[functionId].push(ASTSourceMap.get(l));
+							localDeclHolder += l.source() + " = ; "
+							var _cmpltAliasExpression = getCompleteExpression(_l, localDeclHolder,true);
+							var cmpltAliasExpression = _cmpltAliasExpression.join("") === _l.source() ? ["",_l.source()] : _cmpltAliasExpression;
+							localDecls += cmpltAliasExpression[0] + " if (typeof  " + l.source() + " == 'undefined' || ( window." + l.source() + "==" + l.source()+ ")) var " +
+							 l.source() + " = " + cmpltAliasExpression[1] + ";\n";
 						}
  						// update(_cloneNode, getOriginalFromAlias(_cloneNode.source(), functionId));
-				})
+				});
+				[...new Set(readArray.map(e=>e.source()))].forEach((read)=>{
+					if (read == "this")
+						callee = modifyNode(callee, read,"thisObj");
+				});
+				[...new Set(argReads.map((e)=>{e.val = e.val.source(); return e}))].forEach((arg)=>{
+					callee = modifyNode(callee, arg.val, "arg["+arg.ind+"]");
+				});
 
-				return returnStr+CENode.source();
+				[...new Set(antiLocal.map(e=>e.source()))].forEach((cl)=>{
+					callee = modifyNode(callee, cl, "closure."+cl);
+				});
+
+				/*This is specially for handling dom arguments statically
+				 and also arguments which are a part of the alias analysis*/
+				if (CENode.type == "CallExpression" && CENode.arguments){
+					CENode.arguments.forEach((argument)=>{
+						var {readArray, local,argReads, antiLocal} = signature.handleReads(argument, false, 1,isAA);
+						local.forEach((l)=>{
+							var _l = getOriginalFromAlias(l, functionId);
+							if (l.source() != _l.source() && localDeclHolder.indexOf(l.source() + " = ")<0 && (_l.source().indexOf("create")>=0) ) {
+								functionsVarDecl[functionId].push(ASTSourceMap.get(l));
+								localDeclHolder += l.source() + " = ; "
+								var _cmpltAliasExpression = getCompleteExpression(_l, localDeclHolder, true);
+								var cmpltAliasExpression = _cmpltAliasExpression.join("") === _l.source() ? ["",_l.source()] : _cmpltAliasExpression;
+								localDecls += cmpltAliasExpression[0] + " if (typeof  " + l.source() + " == 'undefined' || ( window." + l.source() + "==" + l.source()+ ")) var " +
+								 l.source() + " = " + cmpltAliasExpression[1] + ";\n";
+								 //Check if the local declared is a dom local, in which case, assign properties
+							}
+						});
+						[...new Set(readArray.map(e=>e.source()))].forEach((read)=>{
+							if (read == "this")
+								callee = modifyNode(callee, read,"thisObj");
+						});
+						[...new Set(argReads.map((e)=>{e.val = e.val.source(); return e}))].forEach((arg)=>{
+							callee = modifyNode(callee, arg.val, "arg["+arg.ind+"]");
+						});
+
+						[...new Set(antiLocal.map(e=>e.source()))].forEach((cl)=>{
+							callee = modifyNode(callee, cl, "closure."+cl);
+						});
+					})
+				}
+				if (callee.indexOf("setTimeout")>=0)
+					return ["",""];
+				return [localDecls,callee];
 
 				// functionEvalList[functionId].push(cloneNodeArr[cePos].source());
 			}
+			return ["",""];
 		}
 
 		// console.log(esprima.parse(content));
+		var instrumentedNodes = [];
 		m = fala({
 			source: content,
 			loc: true,
@@ -500,6 +577,43 @@ var traceFilter = function (content, options) {
 			// Add every node to the list
 			ASTNodes.push(node);
 			ASTSourceMap.set(node, node.source());
+		})
+
+		if (options.rti) {
+			var remainingRTINodes =[];
+			options.myRti.forEach((rtiNode)=>{
+				var matchedNode = util.matchASTNodewithRTINode(rtiNode, ASTNodes, options, ASTSourceMap);
+				if (matchedNode){
+					instrumentedNodes.push(matchedNode);
+					staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
+				} else
+				remainingRTINodes.push(rtiNode);
+			})
+
+			// if (remainingRTINodes.length){
+			// 	//Throw error since not all rti nodes found a match. 
+			// 	console.error("Match not found for " + remainingRTINodes.length + " number of RTI nodes");
+			// 	console.error("Quiting instrumentation");
+			// 	return processed;
+			// }
+		} else if (options.cg) {
+			var remainingRTINodes =[];
+			ASTNodes.forEach((node)=>{
+				if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
+					var index = makeId('function', options.path, node);
+					if (options.myCg.indexOf(index)>=0){
+						// staticInfo.rtiDebugInfo.matchedNodes.push(node);
+						console.log("[Static analyzer] Function matching reported a match")
+						instrumentedNodes.push(node);
+					} else {
+						markFunctionUnCacheable(node,"RTI");
+					}
+				}
+
+			});
+		}
+
+		ASTNodes.forEach((node) => {
 
 			if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration') {
 				if (options.timing) {
@@ -536,8 +650,9 @@ var traceFilter = function (content, options) {
 				// }	
 
 			} else if (node.type == "ForInStatement" || node.type == "ForOfStatement"){
-				if (node.left.type == "Identifier")
+				if (node.left.type == "Identifier"){
 					scope.addLocalVariable(node.left);
+				}
 
 			} else if (node.type == "ClassDeclaration"){
 				scope.addLocalVariable(node);
@@ -561,8 +676,11 @@ var traceFilter = function (content, options) {
 							var functionId = makeId('function', options.path, _functionId);
 							if (!functionAliasMap[functionId])
 								functionAliasMap[functionId] = {};
-
-							functionAliasMap[functionId][node.id.source()] = node.init.source();
+							if (!functionToDOMtracking[functionId])
+								functionToDOMtracking[functionId] = {};
+							functionAliasMap[functionId][node.id.source()] = node.init;
+							if (node.init.source().indexOf("create")>=0)
+								functionToDOMtracking[functionId][node.id.source()] = "";
 						}
 
 			// Handles any global variable being assigned any value
@@ -581,8 +699,8 @@ var traceFilter = function (content, options) {
 						var functionId = makeId('function', options.path, _functionId);
 						if (!functionAliasMap[functionId])
 							functionAliasMap[functionId] = {};
-
-						functionAliasMap[functionId][node.left.source()] = node.right.source();
+						// if (!functionAliasMap[functionId][node.id.source()])
+						functionAliasMap[functionId][node.left.source()] = node.right;
 
 					}
 				}
@@ -600,8 +718,7 @@ var traceFilter = function (content, options) {
 				var {readArray,local,argReads, antiLocal} = signature.handleReads(node.argument);
 				if (antiLocal.length)
 					markFunctionUnCacheable(node, "antiLocal");
-			}
-			else if (node.type == "CallExpression") {
+			} else if (node.type == "CallExpression") {
 				
 				// Check if the arguments passed are global or not
 				if (node.arguments) {
@@ -616,17 +733,6 @@ var traceFilter = function (content, options) {
 					scope.addGlobalReads(globalReads);
 				}
 
-				// add global arguments to the write set as well (conservative approach) - the value may or may not be written to
-				// globalReads.forEach(function(read){
-				// 	scope.addGlobalWrites(read);
-				// });
-
-				// addCalleesToCaller(node);
-
-				/*
-				Handle DOM standalone expressions which have expression statement as their parent
-				or sequence expression as their parent. 
-				*/
 				var globalDOMMethods = Object.keys(propertyObj.global);
 				var localDOMMethods = Object.keys(propertyObj.local);
 				var isLocal = false;
@@ -645,39 +751,31 @@ var traceFilter = function (content, options) {
 							}
 					});
 				}
-			} 
-		});
+				// if ( (node.parent.type == "ExpressionStatement" || node.parent.type == "SequenceExpression" || node.parent.type == "ConditionalExpression")
+				// 		&& node.callee.type != "FunctionExpression" ) {
+				// 	var _functionId = util.getFunctionIdentifier(node);
+				// 	if (_functionId) {
+				// 		var functionId = makeId('function', options.path, _functionId);
+				// 		var evalString = getCompleteExpression(node);
+				// 		ceToFinalExpression.set(node, evalString);
+				// 	}
+				// }
+			} else if (node.type == "MemberExpression") {
+				var _functionId = util.getFunctionIdentifier(node);
+				//Either the member expression is inside a function, or passed as an argument to a call expression outside function
+				if (_functionId) {
+					if ( (node.object.type == "Identifier" || node.object.type == "ThisExpression")) {
+						var functionId = makeId('function', options.path, _functionId);
+						//check if the member expression object is defined using DOM create methods
+						if (functionToDOMtracking[functionId] && functionToDOMtracking[functionId][node.object.source()]!= null
+							&& node.parent.type == "AssignmentExpression"){
 
-		if (options.rti) {
-			var instrumentedNodes = [], remainingRTINodes =[];
-			options.myRti.forEach((rtiNode)=>{
-				var matchedNode = util.matchASTNodewithRTINode(rtiNode, ASTNodes, options, ASTSourceMap);
-				if (matchedNode){
-					instrumentedNodes.push(matchedNode);
-					staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
-				} else
-				remainingRTINodes.push(rtiNode);
-			})
 
-			// if (remainingRTINodes.length){
-			// 	//Throw error since not all rti nodes found a match. 
-			// 	console.error("Match not found for " + remainingRTINodes.length + " number of RTI nodes");
-			// 	console.error("Quiting instrumentation");
-			// 	return processed;
-			// }
-		} else if (options.cg) {
-			var instrumentedNodes = [], remainingRTINodes =[];
-			ASTNodes.forEach((node)=>{
-				if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
-					var index = makeId('function', options.path, node);
-					if (options.myCg.indexOf(index)>=0){
-						staticInfo.rtiDebugInfo.matchedNodes.push(node);
-						instrumentedNodes.push(node);
+						}
 					}
 				}
-
-			});
-		}
+			}
+		});
 
 		/* In this second iteration of the AST we will freeze the debug info 
 		ie all the global writes, reads and aliases 
@@ -696,11 +794,37 @@ var traceFilter = function (content, options) {
 				if (isNonDeterminist(node.source()) && uncacheableFunctions["ND"].indexOf(node) < 0)
 					markFunctionUnCacheable(node, "ND");
 
-				if ( (options.rti || options.cg) && (instrumentedNodes.indexOf(node)<0 || (node.id && inBuiltOverrides.indexOf(node.id.name.toLowerCase())>=0)) )
+				if ( (options.rti || options.cg) && (instrumentedNodes.indexOf(node)>=0 && (node.id && inBuiltOverrides.indexOf(node.id.name.toLowerCase())>=0)) ) {
+					console.log("[Static Analyzer] Unhandled: in built overrides in source code");
 					markFunctionUnCacheable(node,"RTI");
+				}
 
 				if (node.source().indexOf("this")>=0)
 					functionsContainingThis.push(index);
+				/*Moved this in the second loop, so that the first loop can take care of hoisting first, before you analyse IBF*/
+			} else if (node.type == "CallExpression"){
+				var getIBFSource = ["get",".push"];
+				if ( (node.parent.type == "ExpressionStatement" || node.parent.type == "SequenceExpression" || node.parent.type == "LogicalExpression" || node.parent.type == "ConditionalExpression")
+						&& node.callee.type != "FunctionExpression" && getIBFSource.filter(e=>node.source().indexOf(e)<0).length > 1) {
+					var _functionId = util.getFunctionIdentifier(node);
+					if (_functionId) {
+						var functionId = makeId('function', options.path, _functionId);
+						if (node.source().indexOf("setTimeout")>=0){
+							markFunctionUnCacheable(_functionId,"RTI");
+							console.log("[Static Analyzer] Unhandled: setTimeout in source code");
+							return;
+						}
+						var evalString = getCompleteExpression(node);
+						ceToFinalExpression.set(node, evalString);
+					}
+				}
+			} else if (node.type == "AssignmentExpression"){
+				if (node.parent.type == "AssignmentExpression" || (node.parent.type == "VariableDeclarator") || node.parent.type == "ConditionalExpression")
+					var _functionId = util.getFunctionIdentifier(node);
+					if (_functionId) {
+						markFunctionUnCacheable(_functionId, "RTI");
+						console.log("[Static Analyzer] Unhandled: multi assignment in source code");
+					}
 			}
 		});
 
@@ -709,15 +833,24 @@ var traceFilter = function (content, options) {
 			logging code
 		*/
 		ASTNodes.forEach(function(node) {
-			if (node.type === "Program") { 
+			if (node.type === "Program" && false == true) { 
 				/*
 				Some JS files don't have access to the global execution context and they have a dynamically generated
 				html file, therefore create dummy tracer functions, just to avoid runtime errors. 
 				*/
 				var tracerCheck = `\n(function(){if (typeof __tracer == 'undefined' && typeof window != 'undefined')
-				 { __tracer = window.top.__tracer;
-				 } if (typeof __tracerPROXY == 'undefined' && typeof window != 'undefined')
-				   __tracerPROXY = window.top.__tracerPROXY;
+				 { __tracer = new window.top.__declTracerObject__(window);
+				 	// if (!window.___ranCUSTOMSHIMS___  && !__tracer.isPageLoaded()) {
+				 	// 	__tracer.createShimForDOMMethods(window);
+				 	// 	__tracer.customShims(window);
+				 	// }
+				 	// Object = window.top.Object;
+				 // } if (typeof __tracerPROXY == 'undefined' && typeof window != 'undefined')
+				 //   __tracerPROXY = window.top.__tracerPROXY;
+				    }
+				   if (self.window != self){
+				   	__tracer = {isProxy:function(e){return e}, handleProtoAssignments: function(e){return e}}
+				   }
 				})();\n`;
 				if (node.source().indexOf("__tracer") >=0)
 					update(node, options.prefix,tracerCheck,sourceNodes(node))
@@ -738,7 +871,12 @@ var traceFilter = function (content, options) {
 							var {readArray, local, argReads, antiLocal} = signature.handleReads(node.init);
 							if (options.useProxy) {
 								antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-								// argReads.length && node.init.type != "FunctionExpression" && rewriteArguments(argReads);
+								antiLocal.forEach(function(read){
+									if (options.useProxy){
+											update(read, 'closureProxy.',read.source());
+									}
+								});
+								argReads.length && node.init.type != "FunctionExpression" && rewriteArguments(argReads);
 								readArray.forEach(function(read){
 									if (read.source() == "arguments"){
 										if (_functionId)
@@ -770,8 +908,14 @@ var traceFilter = function (content, options) {
 				if (_functionId) {
 
 					var {readArray,local,argReads, antiLocal} = signature.handleReads(node.right);
-					
+
+					argReads.length && rewriteArguments(argReads);
 					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+					antiLocal.forEach(function(read){
+						if (options.useProxy){
+								update(read, 'closureProxy.',read.source());
+						}
+					});
 					readArray.forEach(function(read){
 						var newRead = util.logReadsHelper(read, scope.checkAndReplaceAlias(read));
 						// console.log(read.source());
@@ -803,14 +947,19 @@ var traceFilter = function (content, options) {
 					// if (node.type == "AssignmentExpression" && node.left.type == "Identifier") return;
 					var {readArray, local,argReads, antiLocal} = signature.handleReads(node.left);
 					/*
-					If writing to anti local, mark the function as uncacheable.
+					Don't rewrite arguments if the argument gets rewritten, because then the reference is broken. 
+					Can;t really do this, because the subsequent uses have been modified, and therefore will result in error
 					*/
-					// if (node.type == "AssignmentExpression" && antiLocal.length) {
-					// 	uncacheableFunctions.push(functionId);
-					// 	return;
+					// if (!(node.type == "AssignmentExpression" && node.left.type == "Identifier")) {
+					// 	argReads.length && rewriteArguments(argReads);
 					// }
-					// argReads.length && rewriteArguments(argReads);
+					argReads.length && rewriteArguments(argReads);
 					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+					antiLocal.forEach(function(read){
+						if (options.useProxy){
+								update(read, 'closureProxy.',read.source());
+						}
+					});
 					readArray.forEach(function(read){
 						if (util.checkIfReservedWord(read)) return;
 						if (read.source() == "this") {
@@ -823,20 +972,44 @@ var traceFilter = function (content, options) {
 							update(read, options.proxyName, '.', read.source());
 					});
 
-				}
+			}
 
-					if (node.operator == "==" || node.operator == "===" || node.operator == "!==" || node.operator == "!="){
-						if (node.left.type != "Literal") update(node.left, ' ',options.tracer_name,'.isProxy(', node.left.source(), ')');
-						if (node.right.type != "Literal") update(node.right, ' ',options.tracer_name,'.isProxy(', node.right.source(), ')');
+				if (node.operator == "==" || node.operator == "===" || node.operator == "!==" || node.operator == "!="
+					|| node.operator == "instanceof"){
+					if (node.left.type != "Literal" || node.right.type != "Literal"){
+						if (node.left.type != "Literal" && node.right.type != "Literal"){
+							update(node.left, ' ',options.tracer_name,'.isProxy(', node.left.source(), ')');
+							update(node.right, ' ',options.tracer_name,'.isProxy(', node.right.source(), ')');
+						} else {
+							var ident = node.left.type == "Literal" ? node.right : node.left;
+							var lit = ident == node.left ? node.right.value : node.left.value;
+							if (typeof lit == "string" || lit == null)
+								lit = JSON.stringify(lit);
+							if (_functionId)
+								update(ident, options.tracer_name,'.handleComparison(',ident.source(),',',JSON.stringify(node.operator), ',',lit,')');
+							else 
+								update(ident, ' ',options.tracer_name,'.isProxy(', ident.source(), ')');
+						}
 					}
+					// if (node.left.type != "Literal") update(node.left, ' ',options.tracer_name,'.isProxy(', node.left.source(), ')');
+					// if (node.right.type != "Literal") update(node.right, ' ',options.tracer_name,'.isProxy(', node.right.source(), ')');
+				}
 
 				// Detect if the __proto__ is being set to a proxy object
 				var groupingRegex = new RegExp("\\s*=\\s*\\(");
 				var containsParens = groupingRegex.exec(node.source());
-				if (node.type == "AssignmentExpression" &&  ( node.left.source().indexOf("__proto__") >= 0  || node.left.source().indexOf("prototype") >= 0 )) {
-					if (containsParens)
-						update(node, node.left.source(), node.operator, options.tracer_name, '.handleProtoAssignments((', node.right.source(), '))');
-					else update(node, node.left.source(), node.operator, options.tracer_name, '.handleProtoAssignments(', node.right.source(), ')');
+				if (node.type == "AssignmentExpression") {
+					if ( ( node.left.source().indexOf("__proto__") >= 0  || node.left.source().indexOf("prototype") >= 0 )
+						&& node.right.type != "FunctionExpression") {
+						// if (containsParens)
+						// 	update(node, options.tracer_name,'.handleAssignments(' ,node.left.source(), node.operator, options.tracer_name, '.handleProtoAssignments((', node.right.source(), '))',',',node.left.source(),')');
+						// else update(node, options.tracer_name,'.handleAssignments(' ,node.left.source(), node.operator, options.tracer_name, '.handleProtoAssignments(', node.right.source(), ')',',',node.left.source(),')');
+						if (containsParens)
+							update(node, node.left.source(), node.operator, options.tracer_name, '.handleProtoAssignments((', node.right.source(), '))');
+						else update(node, node.left.source(), node.operator, options.tracer_name, '.handleProtoAssignments(', node.right.source(), ')');
+					} else if (_functionId) {
+						// update(node, options.tracer_name, '.handleAssignments(',node.source(),',',node.left.source(),')');
+					}
 				}
 				// Handle object comparisons if one of the object is wrapped in a proxy
 				// if (node.type == "BinaryExpression" && (node.operator == "==" || node.operator == "!=" || node.operator == "===" || node.operator == "!==")){
@@ -855,6 +1028,40 @@ var traceFilter = function (content, options) {
 					
 				}
 
+			}  else if (node.type == "ConditionalExpression") {
+				var _functionId = util.getFunctionIdentifier(node);
+				if (_functionId) {
+					var readArrayT = [], localT = [], argReadsT = [], antiLocalT = [];
+					var {readArray,local,argReads, antiLocal} = signature.handleReads(node.test);
+					readArrayT = readArrayT.concat(readArray),  argReadsT = argReadsT.concat(argReads)
+						antiLocalT = antiLocalT.concat(antiLocal);
+					var {readArray,local,argReads, antiLocal} = signature.handleReads(node.consequent);
+					readArrayT = readArrayT.concat(readArray),  argReadsT = argReadsT.concat(argReads)
+						antiLocalT = antiLocalT.concat(antiLocal);
+					var {readArray,local,argReads, antiLocal} = signature.handleReads(node.alternate);
+					readArrayT = readArrayT.concat(readArray),  argReadsT = argReadsT.concat(argReads)
+						antiLocalT = antiLocalT.concat(antiLocal);
+
+					argReadsT.length && rewriteArguments(argReadsT);
+					antiLocalT.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocalT);
+					antiLocalT.forEach(function(read){
+						if (options.useProxy){
+								update(read, 'closureProxy.',read.source());
+						}
+					});
+					readArrayT.forEach((read) => {
+						if (util.checkIfReservedWord(read)) return;
+						if (read.source() == "this") {
+							update(read, "thisProxy");
+							return
+						}
+						if (read.source() == "window")
+							update(read, options.proxyName)
+						else
+							update(read, options.proxyName, '.', read.source());
+					});
+				}
+
 			} else if (node.type == "UpdateExpression") {
 				var _functionId = util.getFunctionIdentifier(node);
 				if (_functionId) {
@@ -864,8 +1071,13 @@ var traceFilter = function (content, options) {
 					// 	uncacheableFunctions.push(functionId);
 					// 	return;
 					// }
-					// argReads.length && rewriteArguments(argReads);
+					argReads.length && rewriteArguments(argReads);
 					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+					antiLocal.forEach(function(read){
+						if (options.useProxy){
+								update(read, 'closureProxy.',read.source());
+						}
+					});
 					readArray.forEach((read) => {
 						if (util.checkIfReservedWord(read)) return;
 						if (read.source() == "this") {
@@ -878,6 +1090,41 @@ var traceFilter = function (content, options) {
 							update(read, options.proxyName, '.', read.source());
 					});
 				}
+			} else if (node.type == "UnaryExpression" && node.operator == "typeof") {
+				var _functionId = util.getFunctionIdentifier(node), argType;
+				if (_functionId){
+					var functionId = makeId('function', options.path, _functionId);
+					var {readArray,local, argReads, antiLocal} = signature.handleReads(node.argument);
+					readArray.forEach(function(read){
+						if (options.useProxy){
+							if (util.checkIfReservedWord(read)) return;
+							if (read.source() == "this") {
+								update(read, "thisProxy");
+								return
+							}
+							if (read.source() == "window") {
+								update(read, options.proxyName)
+							}
+							else{
+								update(read, options.proxyName, '.', read.source());
+							}
+						}
+					});
+					argReads.forEach(function(read){
+						if (options.useProxy){
+								update(read.val, 'argumentProxy[',read.ind, ']');
+						}
+					});
+					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+					antiLocal.forEach(function(read){
+						if (options.useProxy){
+								update(read, 'closureProxy.',read.source());
+						}
+					});
+
+					update(node.argument,' ', options.tracer_name, '.handleTypeOf(',node.argument.source(),')');
+				}
+
 			} else if (node.type == "MemberExpression") {
 				var _functionId = util.getFunctionIdentifier(node);
 				//Either the member expression is inside a function, or passed as an argument to a call expression outside function
@@ -887,14 +1134,26 @@ var traceFilter = function (content, options) {
 					if ( (node.object.type == "Identifier" || node.object.type == "ThisExpression") /*&& !util.isChildOfCallExpression(node)*/) {
 						var {readArray,local, argReads, antiLocal} = signature.handleReads(node.object);
 						if (_functionId) argReads.length && rewriteArguments(argReads);
-						if (_functionId) 
+						if (_functionId){ 
 							antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+							antiLocal.forEach(function(read){
+								if (options.useProxy){
+										update(read, 'closureProxy.',read.source());
+								}
+							});
+						}
 						readArray.length && rewriteGlobals(readArray, _functionId);
 					}
 					if (_functionId && node.computed){
 						var {readArray,local, argReads, antiLocal} = signature.handleReads(node.property);
-						// argReads.length && rewriteArguments(argReads);
+						argReads.length && rewriteArguments(argReads);
 						readArray.length && rewriteGlobals(readArray);
+						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						antiLocal.forEach(function(read){
+							if (options.useProxy){
+									update(read, 'closureProxy.',read.source());
+							}
+						});
 					}
 				}
 			}
@@ -904,8 +1163,13 @@ var traceFilter = function (content, options) {
 					if (_functionId) {
 						// 	var functionId = makeId('function', options.path, _functionId);
 						// 	if (uncacheableFunctions.indexOf(functionId) >= 0) return;
-						// argReads.length && rewriteArguments(argReads);
+						argReads.length && rewriteArguments(argReads);
 						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						antiLocal.forEach(function(read){
+							if (options.useProxy){
+									update(read, 'closureProxy.',read.source());
+							}
+						});
 						readArray.forEach(function(read){
 							var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
 							if (options.caching)
@@ -952,7 +1216,7 @@ var traceFilter = function (content, options) {
 
 					var functionId = makeId('function', options.path, _functionId);
 
-					// argReads.length && node.callee.type != "FunctionExpression" && rewriteArguments(argReads);
+					argReads.length && node.callee.type != "FunctionExpression" && rewriteArguments(argReads);
 					readArray.forEach(function(read){
 						if (options.useProxy){
 							if (util.checkIfReservedWord(read) || read.source() == "this") return;
@@ -965,19 +1229,27 @@ var traceFilter = function (content, options) {
 						}
 					});
 
-					var globalReads = [], args = [], antiLocals = [], locals = [];
+					var globalReads = [], args = [], antiLocals = [], locals = [], IBFlocals = [];
 					node.arguments.forEach(function(param){
+						var {readArray, local,argReads, antiLocal} = signature.handleReads(param,null,1);
+						IBFlocals = IBFlocals.concat(local);
 						var {readArray, local,argReads, antiLocal} = signature.handleReads(param);
+
 						globalReads = globalReads.concat(readArray);
 						args = args.concat(argReads);
 						antiLocals = antiLocals.concat(antiLocal);
 						locals = locals.concat(local);
 					});
 					/* Either the call expression is inside a function or it is a self invoking call expression in the global scope*/
-					// if (_functionId) {
-					// 	args.length && rewriteArguments(args);
-					// }
+					if (_functionId) {
+						args.length && rewriteArguments(args);
+					}
 					antiLocals.length && Array.prototype.push.apply(functionToNonLocals[functionId], antiLocals);
+					antiLocals.forEach(function(read){
+						if (options.useProxy){
+								update(read, 'closureProxy.',read.source());
+						}
+					});
 					globalReads.forEach(function(read){
 						var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
 						if (options.caching)
@@ -1000,22 +1272,50 @@ var traceFilter = function (content, options) {
 					if (!functionIBFArgs[functionId][functionIBFArgsCounter])
 						functionIBFArgs[functionId][functionIBFArgsCounter] = [];
 
-					if (node.parent.type == "ExpressionStatement" || node.parent.type == "SequenceExpression" || node.parent.type == "ConditionalExpression"){
-						var evalString = processFinalCallExprs(node);
+					if (!functionsVarDecl[functionId])
+						functionsVarDecl[functionId] = [];
+					var varsDecl = functionsVarDecl[functionId];
 
-						if (evalString) {
-							var argVals = [];
+
+					/*
+					If an inbuilt function is a part of conditional expression, only log it if its not the test part of the expression
+					because the test returns a value which is used to make future decisions. Same as my logic for not logging call expressions
+					which are child of variable declarations. 
+					Also make sure that despite being inside conditional expression, it is not a child of the return statement, because it was would redundant
+					*/
+					/*
+					Certain functions should not be tracked, for example if the function has a getter, or if the function is a method of an array 
+					objects, because it will be tracked anyway. 
+					*/
+					var getIBFSource = ["get",".push"];
+					if ( (node.parent.type == "ExpressionStatement" || node.parent.type == "SequenceExpression" || node.parent.type == "LogicalExpression" || (
+						node.parent.type == "ConditionalExpression" && node.parent.test != node && (!node.parent.parent || node.parent.parent.type != "ReturnStatement")) )
+						&& node.callee.type != "FunctionExpression" && getIBFSource.filter(e=>node.source().indexOf(e)<0).length > 1) {
+						var evalString = ceToFinalExpression.get(node)
+
+						if (evalString.join("") != "") {
+							var ibfArgs = [], ibfArgStrs, ibfArgVals = [];
 							functionIBFArgs[functionId][functionIBFArgsCounter] = 
-									functionIBFArgs[functionId][functionIBFArgsCounter].concat(locals.map(e=>e.source())); 
-							argVals = functionIBFArgs[functionId][functionIBFArgsCounter];
-							update(node, options.tracer_name,".logIBF(",JSON.stringify(functionId),',', node.source(),',`',evalString, '`,',
-								 JSON.stringify(argVals), ',[', ...(argVals.map(e=>e+",")) ,'])');
+									functionIBFArgs[functionId][functionIBFArgsCounter].concat(IBFlocals.map((e)=>{ if (varsDecl.indexOf(ASTSourceMap.get(e))<0) return ASTSourceMap.get(e)}).filter(e=>e));
+							functionsVarDecl[functionId] = functionsVarDecl[functionId].concat(IBFlocals.map(e=>e.source())); 
+							ibfArgs = functionIBFArgs[functionId][functionIBFArgsCounter];
+							ibfArgVals = ibfArgVals.concat(ibfArgs);
+							// ibfArgs = ibfArgs.concat(args.map(e=>e.val.source()))
+							// ibfArgVals = ibfArgVals.concat(args.map((e)=>{return '"arg['+e.ind+']"'}))
+							// ibfArgs = ibfArgs.concat(antiLocals.map(e=>e.source()))
+							// ibfArgVals = ibfArgVals.concat(antiLocals.map((e)=>{return '"closure.'+e.source()+'"'}))
+							//add locals, closures and argument variables to argStr 
+							ibfArgStrs = JSON.stringify(ibfArgs);
+
+							update(node, options.tracer_name,".logIBF(",JSON.stringify(functionId),',', node.source(),',`',util.escapeRegExp(evalString[0]), '`,`',
+								 util.escapeRegExp(evalString[1]),'`,',ibfArgStrs, ',[', ...(ibfArgVals.map(e=>e+",")) ,'])');
 							functionIBFArgsCounter++;
 						}
 					}
 					if (node.parent.type == "CallExpression" || node.parent.type == "MemberExpression"){
 						functionIBFArgs[functionId][functionIBFArgsCounter] = 
-								functionIBFArgs[functionId][functionIBFArgsCounter].concat(locals.map(e=>e.source())); 
+								functionIBFArgs[functionId][functionIBFArgsCounter].concat(IBFlocals.map((e)=>{ if (varsDecl.indexOf(ASTSourceMap.get(e))<0) return ASTSourceMap.get(e)}).filter(e=>e)); 
+						functionsVarDecl[functionId] = varsDecl.concat(IBFlocals.map(e=>ASTSourceMap.get(e)));
 					}
 
 				}
@@ -1046,12 +1346,43 @@ var traceFilter = function (content, options) {
 						}
 					});
 				}
+			} else if (node.type == "ThrowStatement"){
+				var _functionId = util.getFunctionIdentifier(node);
+				if (_functionId) {
+					update(node, "throw ", options.tracer_name,'.logThrowStatement(',node.argument.source(),');',);
+				}
 			} else if (node.type == "ReturnStatement") {
 				var _functionId = util.getFunctionIdentifier(node);
 				if (_functionId) {
 					node.containsReturn = true;
 					var functionId = makeId('function', options.path, _functionId);
 					var _traceEnd = options.tracer_name + ".exitFunction(";
+					if (node.argument){
+						var functionId = makeId('function', options.path, _functionId);
+						var {readArray,local, argReads, antiLocal} = signature.handleReads(node.argument);
+						readArray.forEach(function(read){
+							if (options.useProxy){
+								if (util.checkIfReservedWord(read) || read.source() == "this") return;
+								if (read.source() == "window") {
+									update(read, options.proxyName)
+								}
+								else{
+									update(read, options.proxyName, '.', read.source());
+								}
+							}
+						});
+						argReads.forEach(function(read){
+							if (options.useProxy){
+									update(read.val, 'argumentProxy[',read.ind, ']');
+							}
+						});
+						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						antiLocal.forEach(function(read){
+							if (options.useProxy){
+									update(read, 'closureProxy.',read.source());
+							}
+						});
+					}
 					if (node.argument && node.argument.type == "SequenceExpression" ) {
 						var returnValue = node.argument.expressions[node.argument.expressions.length - 1];
 						var preReturns = node.argument.expressions.slice(0,-1).map(function(e){return e.source()}).join();
@@ -1079,13 +1410,20 @@ var traceFilter = function (content, options) {
 			/* This function expression might be a part of the call expression as well however that will be taken care of inside the call expression check itself. */
 			} else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
 				functionIBFArgsCounter = 0;
-				var containsReturn = false, closures;
+				var containsReturn = false, closures = [];
 				var index = makeId('function', options.path, node);
 				if (node.containsReturn) containsReturn = true;
-				if ( (options.myRti || options.myCg)&& uncacheableFunctions["RTI"].indexOf(node)>=0) return
+				if ( (options.myRti || options.myCg)){
+					if (uncacheableFunctions["RTI"].indexOf(node)>=0) 
+						return
+				}
 				var isCacheable = true;
-				var nodeBody = node.body.source().substring(1, node.body.source().length-1);
+
+				// Make sure the length of the source is atleast 
 				//Start modifiying the function 
+				staticInfo.rtiDebugInfo.matchedNodes.push(index);
+
+				var nodeBody = node.body.source().substring(1, node.body.source().length-1);
 				var replayObjects = ",arguments,";
 				if (functionToNonLocals[index].length)
 					replayObjects+="__closureObj,";
@@ -1094,19 +1432,24 @@ var traceFilter = function (content, options) {
 					replayObjects+="this";
 				else replayObjects += "null";
 				var _traceBegin = "" + options.tracer_name + ".cacheAndReplay(";
-				update(node.body, '\n', ' var __tracerRet; \nif ( __tracerRet = ', _traceBegin, JSON.stringify(index) ,replayObjects,
-					 ')) \n return __tracerRet; \n',
-					 nodeBody,' \n');
+				// update(node.body, '\n', ' var __tracerRet; \nif ( __tracerRet = ', _traceBegin, JSON.stringify(index) ,replayObjects,
+				// 	 ')) \n return __tracerRet; \n',
+				// 	 nodeBody,' \n');
 
 				insertArgumentProxy(node);
 				if (functionsContainingThis.indexOf(index)>=0) {
 					var proxyStr = 'var thisProxy = ' + options.tracer_name + '.createThisProxy(this);\n';
 					update(node.body, '\n',proxyStr, node.body.source());
 				}
-				if (functionToNonLocals[index].length)
+				if (functionToNonLocals[index].length) {
 					closures = insertClosureProxy(node, index);
+					if (closures[1]) update(node.body, closures[1], node.body.source());
+				}
 
-				update(node.body, '{ \ntry {\n',options.tracer_name,'.cacheInit(', JSON.stringify(index),',arguments);\n',
+				update(node.body, '\n', closures[0] ? closures[0] : '' ,' var __tracerRet; \n __tracerRet = ', _traceBegin, JSON.stringify(index) ,replayObjects,
+					 ') \n if (__tracerRet[0]) return __tracerRet[1]; \n',
+					 node.body.source(),' \n');
+				update(node.body, '{ \ntry {\n',options.tracer_name,'.cacheInit(', JSON.stringify(index),',arguments, new.target);\n',
 					node.body.source());
 
 				var args = node;
@@ -1119,20 +1462,23 @@ var traceFilter = function (content, options) {
 				serializedArgs.returnValue = returnValue;
 				// serializedArgs = {};
 				var _traceEnd = options.tracer_name + ".exitFunction(";// + args + ");";
-				// if (options.myRti && instrumentedNodes.indexOf(node)<0){
-				// 	update(node.body,'{\n' ,node.body.source(),'\n', _traceEnd, JSON.stringify(index),',arguments);\n}\n');
-				// 	return;
-				// }
+				
+				var closureRestoreStr = "";
+				closures[2] && closures[2].forEach((obj)=>{
+					closureRestoreStr += "if (!(" + obj + " instanceof Object)) " 
+					+ obj  + "= __closureObj." + obj + ";\n";
+				})
+				var argumentRestoreStr = "";
+				node.params.length && node.params.forEach((obj,ind)=>{
+					argumentRestoreStr += "if (!(" + ASTSourceMap.get(obj) + " instanceof Object)) " 
+					+ ASTSourceMap.get(obj)  + "= arguments[" + ind + "];\n";
+				})
 
-				if (functionToNonLocals[index].length){
-					closureVarsInd = closures.indexOf("=");
-					closureVars = closures.substr(closureVarsInd+1) + "}";
-					update(node.body, node.body.source(),' \n} catch (e){ console.error("[ERROR] " + ', JSON.stringify(index) + '+ " " + e.message', ')} finally {',
-						 _traceEnd, JSON.stringify(index),',__closureObj', ');\n }}');
-				}
-				else 
-					update(node.body, node.body.source(),' \n} catch (e){ console.error("[ERROR]" + ', JSON.stringify(index) + '+ " " + e.message', ')} finally {',
-						 _traceEnd, JSON.stringify(index),',null', ');\n }}');
+				update(node.body, node.body.source(),' \n} catch (e){ throw e} finally {',
+					closureRestoreStr ?  closureRestoreStr :null, 
+					argumentRestoreStr ? argumentRestoreStr :null,
+					 _traceEnd, JSON.stringify(index),JSON.stringify(), ');\n }}');
+				
 				
 				//This is only to add performance api calls to the functions. 
 				// update(node.body, '{', 'try { \n performance.now();\n', sourceNodes(node.body), '\n} finally {performance.now();}}',)
@@ -1173,7 +1519,7 @@ var traceFilter = function (content, options) {
 		processed = m;
 
 	} catch (e) {
-		console.error('[PARSING EXCEPTION]' + e + e.stack);
+		console.error('[PARSING EXCEPTION]' + options.path + ": " + e + e.stack);
 		// mostly exception imples that it is a json file. 
 		return content;
 	}
