@@ -2,6 +2,7 @@
 
 var fondue = require("../JSAnalyzer/index.js");
 var fondue_plugin = require("../JSAnalyzer/index_plugin.js");
+var fondue_replay = require("../JSAnalyzer/index_replay.js");
 var {spawnSync} = require('child_process');
 var makeId = fondue.makeId;
 var properties = require("properties");
@@ -44,7 +45,12 @@ Instrument any scripts tags inside
 HTML pages
 */
 
-var instrumentor = program.pattern == "signature" ? fondue : fondue_plugin;
+var instrumentor;
+if (program.pattern == "record")
+    instrumentor = fondue;
+else if (program.pattern == "cg")
+    instrumentor = fondue_plugin;
+else instrumentor = fondue_replay;
 
 var staticInfo = instrumentor.staticInfo;
 staticInfo.staticUncacheableFunctions = {};
@@ -84,8 +90,12 @@ function instrumentHTML(src, fondueOptions) {
         return instrumentJavaScript(src, fondueOptions);
 
     //set instrumentor for testing phase which doesn't call the main script
-    instrumentor = fondueOptions.pattern == "signature" ? fondue : fondue_plugin;
-    console.log("Pattern for current instrumentation: " + fondueOptions.pattern);
+    if (program.pattern == "record")
+        instrumentor = fondue;
+    else if (program.pattern == "cg")
+        instrumentor = fondue_plugin;
+    else instrumentor = fondue_replay;
+        console.log("Pattern for current instrumentation: " + fondueOptions.pattern);
 
     console.log("Instrumenting a html file");
     var scriptLocs = [];
@@ -194,9 +204,9 @@ function instrumentHTML(src, fondueOptions) {
         console.error(ret.stderr.toString());
         console.log("updated instrumentation files");
     }
-    src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js")
-        /*+ createScriptTag("signatureWorker.js")*/  + src;
-    // src = doctype + "\n<script>\n" + deterministicCode + omniStringify +  fondue.instrumentationPrefix(options) + domJson + "\n</script>\n" + src;
+    // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
+    // src = doctype + src;
+    src = doctype + "\n<script>\n" + deterministicCode + omniStringify +  fondue.instrumentationPrefix(options) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
@@ -265,7 +275,8 @@ function computeRTITimeMatched(){
     //Dump this time in a file
     fs.writeFileSync(returnInfoFile, /*time.totalNodes + " " + time.matchedNodes + " " + */ staticInfo.rtiDebugInfo.ALL + " "+
         // + JSON.stringify(staticInfo.rtiDebugInfo.ALLUrls) + " " + JSON.stringify(staticInfo.rtiDebugInfo.matchedUrls));
-        staticInfo.rtiDebugInfo.totalNodes.length + " " + staticInfo.rtiDebugInfo.matchedNodes.length);
+        staticInfo.rtiDebugInfo.totalNodes.length + " " + staticInfo.rtiDebugInfo.matchedNodes.length
+        + " " + staticInfo.rtiDebugInfo.matchedNodes.reduce((acc,cur)=>{return cur[1] + acc},0));
 }
 
 function dumpStaticInformation_uncacheable(options){
@@ -303,6 +314,10 @@ function mergeInto(options, defaultOptions) {
     return defaultOptions;
 }
 
+var unique = function(arr){
+    return [...new Set(arr) ]; 
+}
+
 var main = function(){
     //Required for the fondue library, to determine how to instrument
     // create obfuscate path name for readability purposes
@@ -329,13 +344,15 @@ var main = function(){
         try{
             var _cg = JSON.parse(fs.readFileSync(program.cgInfo),"utf-8");
             var cg = _cg.map(e=>e[0]);
+            // cg = unique(cg);
+            var cgTime = _cg.map(e=>e[2]);
             // console.log(cg);
-            fondueOptions = mergeInto(fondueOptions, {cg: cg});
+            fondueOptions = mergeInto(fondueOptions, {cg: cg, cgTime:cgTime});
             staticInfo.rtiDebugInfo.ALL = cg.length;
-            console.log("cg nodes:" + cg.length);
+            // console.log("cg nodes:" + cg);
         } catch (err){
-            // console.error("Error while reading the call graph Profile " + err);
-            fondueOptions = mergeInto(fondueOptions, {cg: []});
+            console.error("Error while reading the call graph Profile " + err);
+            fondueOptions = mergeInto(fondueOptions, {cg: [], cgTime:[]});
             return;
         }
     }
