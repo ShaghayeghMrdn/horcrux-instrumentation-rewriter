@@ -1,6 +1,6 @@
 
 
-var javascriptReservedWords = ['__tracer','__tracerPROXY','console','amzn_aps_csm','Promise','XMLHttpRequest','$','Array','abstract','arguments','await','boolean','break','byte','case','catch','char','class','const','continue','Date','debugger','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','require','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
+var javascriptReservedWords = ['__tracer','__tracerPROXY','console','amzn_aps_csm','Promise','XMLHttpRequest','Array','abstract','arguments','await','boolean','break','byte','case','catch','char','class','const','continue','Date','debugger','default','delete','do','double','else','enum','eval','export','extends','false','Function','final','finally','float','for','Function','function','goto','if','implements','iframe','import','in','instanceof','int','interface','let','long','Map','native','new','null','Object','package','private','protected','public','RegExp','return','short','static','super','String','switch','Scanner','synchronized','throw','throws','transient','true','try','typeof','Uint8Array','var','void','volatile','while','with','yield', 'Maps', 'Sets', 'WeakMaps', 'WeakSets', 'Int8Array', 'Uint8Array','Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array','Number', 'Math','Date', 'JSON', 'PROXY','Reflect', 'ArrayBuffer','Symbol','Error'];
 var uncacheableFunctions ={"RTI":[], "antiLocal":[], "DOM":[], "ND":[]};
 var options;
 
@@ -142,12 +142,15 @@ var logWritesHelper = function(node, aliasValue) {
     return outputString;
 }
 
-var getFunctionIdentifier = function(node) {
+/*If cacheable is true, only returns identifiers
+for cacheable functions, otherwise returns the identifier
+of the first parent function*/
+var getFunctionIdentifier = function(node, notCacheable) {
     if (node == null) return null;
     parent = node;
     while (parent != undefined){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression") {
-            if (uncacheableFunctions["RTI"] && uncacheableFunctions["RTI"].indexOf(parent)>=0) return null
+            if (uncacheableFunctions["RTI"] && uncacheableFunctions["RTI"].indexOf(parent)>=0 && !notCacheable) return null
             else return parent;
         } else if (parent.type == "ArrowFunctionExpression")
         return null;
@@ -163,9 +166,9 @@ eg: a.b -> b
 var getFinalObjectFromCallee = function(node){
     if (node.type == "Identifier" || node.type == "thisexpression")
         return node;
-    if (node.type == "MemberExpression" && !node.computed)
-        return getFinalObjectFromCallee(node.property);
-    return node;
+    if (node.type == "MemberExpression")
+        return getFinalObjectFromCallee(node.object);
+    return null;
 }
 
 /*
@@ -224,6 +227,81 @@ var isChildOfCallExpression = function(node){
     return false;
 }
 
+/*node -> input node, x -> array of types*/
+var isChildOfX = function(node,...x){
+    if (node == null) return false;
+    var parent = node;
+    while (parent != null && parent.type != "BlockStatement") {
+        if (x.filter(e=>e == parent.type).length > 0)
+            return parent;
+        parent = parent.parent;
+    }
+    return false
+}
+
+var isChildOfNode = function(node,p){
+    if (node == null) return false;
+    var parent = node;
+    while (parent != null) {
+        if (parent == p)
+            return true;
+        parent = parent.parent;
+    }
+    return false
+}
+
+var isChildOfVarDecl = function(node){
+    if (node == null) return false;
+    var parent = node;
+    while (parent != null && parent.type != "BlockStatement") {
+        if (parent.type == "VariableDeclarator")
+            return true;
+        parent = parent.parent;
+    }
+    return false
+}
+
+var isChildOfSeqCondExpression = function(node){
+    if (node == null) return false;
+    var parent = node;
+    while (parent != null && parent.type != "BlockStatement") {
+        if (parent.type == "SequenceExpression" || parent.type == "ConditionalExpression")
+            return true;
+        parent = parent.parent;
+    }
+    return false
+}
+
+var isArgOfFunction = function(node){
+    if (node.parent.type != "FunctionDeclaration" && node.parent.type != "FunctionExpression")
+        return false;
+
+    var params = node.parent.params; 
+    if (!params.length) return false;
+    if (params.indexOf(node)>=0) return true;
+    return false;
+}
+
+var isArgOfCE = function(node){
+    if (node.parent.type != "CallExpression")
+        return false;
+
+    if (node.parent.arguments.indexOf(node)>=0)
+        return true;
+    return false;
+}
+
+var isChildOfFor = function(node){
+    if (node == null) return false;
+    var parent = node;
+    while (parent != null && parent.type != "BlockStatement") {
+        if (parent.type == "ForStatement")
+            return true;
+        parent = parent.parent;
+    }
+    return false
+}
+
 var isArgofCallExpression = function(node){
     var ce = node;
     var findCE = function(n){
@@ -269,6 +347,28 @@ var getIdentifierFromMemberExpression = function (node) {
     } else {
         return node;
     }
+}
+
+/*Node is of the type functionDeclaration*/
+var isClosureFunction = function(node){
+    var parent = node.parent;
+    while (parent != null){
+        if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression")
+            return true;
+        parent = parent.parent;
+    }
+    return false;
+}
+
+var getNameFromFunction = function(node){
+    if (node.id)
+        return node.id.source();
+    if (node.parent.id)
+        return node.parent.id.source()
+    if (node.parent.type == "AssignmentExpression")
+        return node.parent.left.source();
+    return null;
+
 }
 
 var getIdentifierFromAssignmentExpression = function (node) {
@@ -362,5 +462,11 @@ module.exports = {
     uncacheableFunctions: uncacheableFunctions,
     isChildOfCallExpression:isChildOfCallExpression,
     isArgofCallExpression: isArgofCallExpression,
-    getFinalObjectFromCallee:getFinalObjectFromCallee
+    getFinalObjectFromCallee:getFinalObjectFromCallee,
+    isClosureFunction: isClosureFunction,
+    getNameFromFunction:getNameFromFunction,
+    isArgOfFunction:isArgOfFunction,
+    isChildOfX: isChildOfX,
+    isArgOfCE:isArgOfCE,
+    isChildOfNode: isChildOfNode
 }
