@@ -29,9 +29,9 @@ yaxis=${device[${2}Yaxis]}
 
 serverVPNID=
 
-nodeTIMEOUT=100
+nodeTIMEOUT=130
 
-echo "received arguments: " $@
+# echo "received arguments: " $@
 
 # $1 -> port for the device
 adb_prefix="adb </dev/null -s ${id}"
@@ -54,6 +54,7 @@ fi
 #Gives root access to the emulator
 init(){
     eval $adb_prefix forward tcp:$port localabstract:chrome_devtools_remote
+    # disableCPU
     # eval $adb_prefix shell pm clear com.android.chrome
     # eval $adb_prefix shell pm clear jackpal.androidterm
     # enableSUAccess
@@ -74,8 +75,8 @@ killProcess(){
 cleanUp(){
     # sudo pkill openvpn
     # sudo pkill mm-phone-webrecord-using-vpn
-    eval $adb_prefix shell pm clear com.android.chrome
-    # eval $adb_prefix shell pm clear jackpal.androidterm
+    # eval $adb_prefix shell pm clear com.android.chrome
+    eval $adb_prefix shell pm clear org.chromium.chrome
 
     # sudo iptables -t nat -F
     killProcess openvpn
@@ -87,7 +88,7 @@ cleanUp(){
 
 vpnIsRunning(){
 
-    adb </dev/null shell ifconfig tun0
+    eval $adb_prefix shell ifconfig tun0
     vpnstatus=`echo $?`
     echo "vpnstatus is " $vpnstatus
     retryCount=0
@@ -95,7 +96,7 @@ vpnIsRunning(){
         retryCount=`expr $retryCount + 1`
         echo "Current retryCount " $retryCount
         toggleClientVpn
-        adb </dev/null shell ifconfig tun0
+        eval $adb_prefix shell ifconfig tun0
         vpnstatus=`echo $?`
         if [[ $retryCount -gt 11 ]]; then
             exit 1
@@ -126,6 +127,9 @@ startServerVPN(){
 }
 
 toggleClientVpn(){
+    # unlock the phone in case its already locked
+    # adb shell input keyevent 82
+    # adb shell input keyevent 82
     echo "Toggling client vpn"
     eval $adb_prefix shell "am start -a android.intent.action.VIEW -n net.openvpn.openvpn/net.openvpn.unified.MainActivity" 1>/dev/null
     sleep 1 #wait for the app to be displayed
@@ -141,7 +145,7 @@ startChrome() {
     # eval $adb_prefix shell pm clear com.android.chrome
     # sleep 1
     echo "Starting Chrome on Client"
-    eval $adb_prefix shell $stock_chrome 1>/dev/null
+    eval $adb_prefix shell $custom_chrome 1>/dev/null
     sleep 1
     if [[ "$2" -eq "moto" ]]; then
         skipWelcomePage
@@ -217,8 +221,8 @@ rotateConfigs(){
         ;;
     3) 
         echo "Loading page in RT config"
-        path=${3}/rt/
-        mkdir -p $path
+        # path=${3}/rt/
+        mkdir -p $3
         startChrome
         # node inspectChrome.js -u $2 -m -n --log -j -o $3 -p $4 --mode $5 &
         node inspectChrome.js -u $2 -m -o $3 -p $4 --mode $5 $DATAFLAGS &
@@ -226,11 +230,11 @@ rotateConfigs(){
         ;;
     4)
         echo "Loading page in CPU disabled config"
-        path=${3}/cpuDis4/
-        mkdir -p $path
+        # path=${3}/cpuDis4/
+        mkdir -p $3
         # disableCPU
         startChrome
-        node inspectChrome.js -u $2 -m -t -o $path -p $4 --sim 4g.config &
+        node inspectChrome.js -u $2 -m -o $3 -p $4 --mode $5 $DATAFLAGS &
         waitForNode $4
         # enableCPU
         ;;
@@ -245,7 +249,7 @@ waitForNode(){
     count=0
     start_time=`date +'%s'`
     while [[ $count != 1 ]]; do
-        count=`ps aux | grep $1 | wc | awk '{print $1}'` 
+        count=`ps aux | grep -w $1 | wc | awk '{print $1}'` 
         echo "Current count is", $count
         curr_time=`date +'%s'`
         elapsed=`expr $curr_time - $start_time`
@@ -292,20 +296,24 @@ ctrl_c(){
 # masquerade
 # toggleClientVpn
 init
-if [[ $5 == "record" || $5 == "std" ]]; then
-    echo "Record mode"
-    toggleClientVpn
-    vpnIsRunning
-fi
-sleep 1
+# if [[ $5 == "record" || $5 == "std" ]]; then
+#     echo "Record mode"
+#     # if [[ $DATAFLAGS != *"testing"* ]]; then 
+#     #     export DATAFLAGS=" --mode std -n --log -j"
+#     # fi
+#     toggleClientVpn
+# fi
+toggleClientVpn
+sleep 2
+vpnIsRunning
 rotateConfigs $1 $3 $4 $port $5
 sleep 1
-# toggleClientVpn
+toggleClientVpn
 # cleanUp
-if [[ $5 == "replay" ]]; then
-    echo "Replay mode"
-    toggleClientVpn
-fi
+# if [[ $5 == "replay" ]]; then
+#     echo "Replay mode"
+#     toggleClientVpn
+# fi
 
 
 

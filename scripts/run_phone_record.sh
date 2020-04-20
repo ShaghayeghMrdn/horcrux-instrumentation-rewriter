@@ -14,11 +14,14 @@ phone_record_file='phone_record_mahimahi.sh'
 script_inside_mahimahi='run_inside_mahimahi.sh'
 phone_replay_bin='/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-http1-proxyreplay'
 phone_record_bin='/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-phone-webrecord-using-vpn'
+mmdelay=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-delay
 
-ipfilePrefix=/home/goelayu/research/WebPeformance/output/unmodified/mobile/record/trace_5_15_rt/
+ipfilePrefix=/home/goelayu/research/WebPeformance/output/unmodified/mobile/record/alexa_1000/
 ipfileDst=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/delay_ip_mapping.txt
 
 adb_prefix="adb </dev/null"
+
+echo "received arguments: " $@
 
 waitForNode(){
     count=0
@@ -55,20 +58,46 @@ iptableSetup(){
     setForwardingRules $addr
 }
 
+enableSUAccess() {
+    eval $adb_prefix shell "am start -a android.intent.action.VIEW -n jackpal.androidterm/.Term"
+    sleep 2
+    eval $adb_prefix shell input text su
+    eval $adb_prefix shell input keyevent 66
+}
+
+disableCPU(){
+    eval $adb_prefix shell "am start -a android.intent.action.VIEW -n jackpal.androidterm/.Term"
+    sleep 2
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 1\ \>\ /sys/devices/system/cpu/cpu0/online")"
+    eval $adb_prefix shell input keyevent 66
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 1\ \>\ /sys/devices/system/cpu/cpu1/online")"
+    eval $adb_prefix shell input keyevent 66
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 1\ \>\ /sys/devices/system/cpu/cpu2/online")"
+    eval $adb_prefix shell input keyevent 66
+    eval "$(adb </dev/null -s FA79E1A03237 shell input text  "echo\ 1\ \>\ /sys/devices/system/cpu/cpu3/online")"
+    eval $adb_prefix shell input keyevent 66
+}
+
 cleanUp(){
     echo "cleaning up.."
     # sudo pkill mm-phone-webrecord-using-vpn
-    eval $adb_prefix shell pm clear com.android.chrome
+    # eval $adb_prefix shell pm clear com.android.chrome
     # eval $adb_prefix shell pm clear org.chromium.chrome
     # eval $adb_prefix shell pm clear jackpal.androidterm
 
     # sudo iptables -t nat -F
     killProcess openvpn
+    sleep 1
+    # killProcess replayshell
     # sanity check killing
     # ideally all replay shell instances should be destroyed by killing openvpn itself
     # killProcess replayshell
     # killProcess /usr/sbin/apache2
     # ifconfig | grep veth* | awk '{print $1}' | cut -d: -f1  | xargs -I{} sudo ifconfig {} down
+}
+
+cleanChrome(){
+    eval $adb_prefix shell pm clear org.chromium.chrome
 }
 
 #Arguments: 
@@ -89,33 +118,48 @@ ctrl_c(){
 
 rm fetchErrors
 rm loadErrors
+cleanChrome
 # cleanUp
 
-for iter in $(seq 1 3); do 
+# enableSUAccess
+# disableCPU
+
+for iter in $(seq 0 0); do 
     echo "current iteration is " $iter 
-    while IFS='' read -r line || [[ -n "$line" ]]; do
+    # while IFS='' read -r line || [[ -n "$line" ]]; do
+    while read line; do
         echo "Iteration" $iter "replaying url: " $line 
-        url=`echo $line | cut -d'/' -f 3`
+        url=`echo $line | cut -d'/' -f 3- | sed 's/\//_/g'`
         echo $url
-        mkdir -p "$4"/${iter}/record/
-        mkdir -p "$4"/${iter}/replay/
+        # mkdir -p "$4"/${iter}/record/
+        # mkdir -p "$4"/${iter}/replay/
         # for config in $(seq 1 4); do
-        for config in {3..3}; do
-            # mm-webrecord $3/${iter}/"$url"/ ./$script_inside_mahimahi &
-             # cpdelayFile $url
-             $phone_replay_bin $3/$url 1194 regular_replay none &
-             # $phone_record_bin $3/$url none none & 
-             sleep 3
+        for mode in record replay; do
+             mahimahi_dir=$3/$mode/$url
+             # if [[ $mode == "replay" ]]; then
+             #    mahimahi_dir=$3/$mode/skip/$url
+             #    # mahimahi_dir=../traces/mobile/alexa_1000/$url/
+             #    # mahimahi_dir=../modified/mobile/sig/alexa_1000/0/replay/skip/$url
+             # fi
+             echo "Running in mode",$mode," in directory ", $mahimahi_dir
+             $phone_replay_bin $mahimahi_dir 1194 regular_replay none &> /dev/null & 
+             # $phone_replay_bin $3/$url 1194 regular_replay none &
+             # $phone_record_bin $3//$url none none & 
+             sleep 2
             # iptableSetup
-             ./$phone_record_file $config $2 $line ${4}/$iter/record/"$url"/ record "$$"
-             ./$phone_record_file $config $2 $line ${4}/$iter/replay/"$url"/ replay "$$"
+             ./$phone_record_file 3 $2 $line ${4}/$iter/$mode/"$url"/ $mode "$$"
+             # ./$phone_record_file 3 $2 $line ${4}/$mode/"$url"/ std "$$"
              echo "Returned from phone_record_file, since parent wasn't killed"
             # ./$phone_record_file $config $2 $line ${4}/$iter/replay/"$url"/ replay
              # adb </dev/null shell am force-stop com.android.chrome
             # ./$phone_record_file $config $2 $line ${4}/replay/"$url"/ replay
             # killProcess replayshell
             cleanUp
+            sleep 2
         done
+        cleanChrome
         sleep 1
-    done <"$1"
+    done<"$1"
 done
+
+cleanChrome

@@ -242,7 +242,7 @@ var traceFilter = function (content, options) {
 
         ASTNodes.forEach((node)=>{
             if (node.type === "Program") { 
-                total += node.source().length;
+                // total += node.source().length;
                 /*
                 Some JS files don't have access to the global execution context and they have a dynamically generated
                 html file, therefore create dummy tracer functions, just to avoid runtime errors. 
@@ -261,6 +261,7 @@ var traceFilter = function (content, options) {
                 else 
                     update(node, options.prefix,sourceNodes(node))
             } else if (node.type == "CallExpression" || node.type == "NewExpression") {
+                return;
                 var _functionId = util.getFunctionIdentifier(node);
                 if (_functionId) {
                     // var finalCallee = util.getFinalObjectFromCallee(node.callee);
@@ -286,8 +287,8 @@ var traceFilter = function (content, options) {
 
             else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
 
-                if (!insideFunction(node))
-                    totalInJs += node.source().length;
+                // if (!insideFunction(node))
+                //     totalInJs += node.source().length;
 
                 var containsReturn = false;
                 var index = makeId('function', options.path, node);
@@ -333,7 +334,7 @@ var traceFilter = function (content, options) {
             }*/
         });
         processed = m;
-        console.log("[STATIC] " , total, totalInJs )
+        // console.log("[STATIC] " , total, totalInJs )
         return processed
     } catch (e) {
         return processed;

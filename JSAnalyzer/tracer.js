@@ -107,16 +107,22 @@ function __declTracerObject__(window) {
     var keysToStdKeys = {};
     var cacheableSignature = {};
     var pageLoaded = {pageLoaded};
+    var oldPageLoaded = [];
     var INVOCATION_LIMIT = {invocation_limit};
     var domCounter =0;
     var invocationToWrites = {};
-    var omniStringifier = new Omni();
+    var omniStringifier = Omni ? new Omni() : "";
     var parse = omniStringifier.parse;
-    var sigSizeLimit = 50;
+    var sigSizeLimit = 500; // Number of reads and writes allowed per invocations
+    var OMNI_SIZE_LIMIT=10000; //Length of string allowed to be read or written
     var instrumentationPattern = {instrumentationPattern};
     var invocationList = [];
     var timingInfo = {};
-    var PMD = {}
+    var sigSizes = {};
+    var PMD = {};
+    var runtimeInfo = {runtimeInfo};
+    var runTimePurged = 0;
+    var writeStateProcessed = new Map();
 
     /*
     For efficient recording, constraint the size of certain objects
@@ -199,7 +205,11 @@ function __declTracerObject__(window) {
             // delete window.performance.getEntriesByType
         } else {
             console.log("Page successfully replayed");
-        }
+        }  
+        // if (window.top == window)
+        //     debugger;
+        // if (instrumentationPattern == "replay")
+        //     debugger;
 
     })
 
@@ -264,14 +274,59 @@ function __declTracerObject__(window) {
 
         // constructCacheReadKey();
 
-        console.log("Done processing final signature")
+        console.log("Done processing final signature\nStarting propagation...\n")
 
         //garbage cleaning
-        delete invocationToArgProxy;
-        delete globalProxyHandler;
+        // delete invocationToArgProxy;
+        // delete globalProxyHandler;
         delete customLocalStorage;
-        delete invocationToClosureProxy;
+        // delete invocationToClosureProxy;
 
+        // sigProcessor.setPropagationData(PMD, {i2a:invocationToArgProxy, i2c:invocationToClosureProxy
+        //     ,i2t: invocationToThisProxy, gph:globalProxyHandler}, processedSignature, nonCacheableNodes);
+        // sigProcessor.signaturePropagate()
+
+        console.log("Done propagating signatures..\nPurging expensive signatures");
+        // purgeExpensiveSignatures();
+
+    }
+
+
+    var purgeExpensiveSignatures = function(){
+        var topNodeInfo = runtimeInfo.filter(e=>e[2]>=0);
+        var topNodes = topNodeInfo.map(e=>e[0]);
+        var PERBYTEOVERHEAD = 1; //microsecond
+        var node2invocations = {}, perInvocationTime = {};
+        Object.keys(processedSignature).forEach((invoc)=>{
+            var [n,count] = invoc.split("_count");
+            if ( !(n in node2invocations) )
+                node2invocations[n] = [];
+            node2invocations[n].push(invoc);
+        })
+
+        topNodes.forEach((tN,ind)=>{
+            var invocs = node2invocations[tN];
+            if (!invocs){
+                //the function never got instrumented for some reason
+                return;
+            }
+            perInvocationTime[tN] = topNodeInfo[ind][2]*1000/invocs.length; //convert to microseconds
+            invocs.forEach((i)=>{
+                var sig = processedSignature[i];
+                var sigSize = sig.reduce((acc, cur)=>{
+                        var len =0; 
+                        if (typeof cur[1] == "string")
+                            len += cur[1].length
+                        if (cur[2] && typeof cur[2] == "string")
+                            len += cur[2].length;
+                        return len + acc},0);
+                var predictedTime = PERBYTEOVERHEAD*sigSize;
+                if (predictedTime > perInvocationTime[tN]){
+                    runTimePurged += perInvocationTime[tN];
+                    delete processedSignature[i];
+                }
+            })
+        })
     }
 
     var _constructCacheReadKey = function(signature){
@@ -398,6 +453,7 @@ function __declTracerObject__(window) {
     }
 
     var storeSignature = function(){
+        var strSignature = {};
         Object.keys(processedSignature).forEach((invocId)=>{
             if (invocId in nonCacheableNodes) return;
             processedSignature[invocId].IBF && (processedSignature[invocId].push(["IBF"].concat(processedSignature[invocId].IBF)) );
@@ -410,11 +466,11 @@ function __declTracerObject__(window) {
             else if (processedSignature[invocId] == "NonLeafNode") return;
 
             //convert the original signature in the string format, to do a memory comparison
-            processedSignature[invocId] = strSig;
+            strSignature[invocId] = strSig;
             
         })
 
-        createSigProcWorker(processedSignature);
+        createSigProcWorker(strSignature);
 
         // console.log(Object.keys(processedSignature).length + " coalesced into " + Object.keys(cacheableSignature).length);
     }
@@ -423,12 +479,18 @@ function __declTracerObject__(window) {
 
     this.processFinalSignature = processFinalSignature;
 
+    this.omni = omniStringifier;
+
     this.getKeysToStdKeys = function(){
         return keysToStdKeys;
     }
 
     this.getPMD = function(){
         return PMD;
+    }
+
+    this.getRuntimePurged = function(){
+        return runTimePurged;
     }
 
     this.getStoredSignature = function(){
@@ -547,11 +609,27 @@ function __declTracerObject__(window) {
             self.Object.defineProperty = function(){
                 for (var i=0;i<arguments.length;i++){
                     var arg = arguments[i];
+                    if (arg && arg.value && arg.value.__isProxy)
+                        arg.value = arg.value.__target;
                     if (arg && arg.__isProxy)
                         arguments[i] = arg.__target;
                 }
                 return _defineProperty.apply(this, arguments);
             }
+
+            // var _toString = Object.prototype.toString;
+            // self.Object.prototype.toString = function(){
+            //     var thisObj = this;
+            //     for (var i=0;i<arguments.length;i++){
+            //         var arg = arguments[i];
+            //         if (arg && arg.__isProxy)
+            //             arguments[i] = arg.__target;
+            //     }
+            //     if (thisObj && thisObj.__isProxy)
+            //         thisObj = thisObj.__target;
+            //     return _toString.apply(thisObj,arguments);
+            // }
+
 
             window.___ranCUSTOMSHIMS___ = true;
         };
@@ -574,7 +652,7 @@ function __declTracerObject__(window) {
                 "HTMLStyleElement", "HTMLTableRowElement", "HTMLTableSectionElement", "PerformanceObserver",
                 "HTMLBRElement","Node","EventTarget","HTMLCollection","MutationObserver","Document",
                 "HTMLCanvasElement", "CanvasRenderingContext2D","CanvasGradient","CanvasPattern",
-                "ImageBitMap","ImageData","TextMetrics","Path2D","CSSCounterStyleRule","Element","RegExp"
+                "ImageBitMap","ImageData","TextMetrics","Path2D","CSSCounterStyleRule","Element","RegExp","Crypto","Object","Map"
             ];
 
             HTMLNames.forEach((_class)=>{
@@ -582,6 +660,7 @@ function __declTracerObject__(window) {
                     try {    
                          if (typeof self[_class].prototype[classKey] == "function") {
                             var origMethod = self[_class].prototype[classKey];
+                            if (classKey == "constructor") return;
                             if (origMethod.name == "appendChild" || origMethod.name == "append" || origMethod.name == "createElement"){
                                self[_class].prototype[classKey] = function(){
                                     var thisObj = this;
@@ -606,7 +685,9 @@ function __declTracerObject__(window) {
                                     // }
                                     return ret;
                                 }; 
-                            } else 
+                                self[_class].prototype[classKey].__isShimmed__ = true
+                                self[_class].prototype[classKey].__orig__ = origMethod;
+                            } else {
                                 self[_class].prototype[classKey] = function(){
                                     var thisObj = this;
                                     for (var i=0;i<arguments.length;i++){
@@ -620,8 +701,14 @@ function __declTracerObject__(window) {
                                         // if (arguments[0].async == 1)
                                         //     arguments[0].async = 0;
                                     }
+                                    /*If regex testing, return the original method*/
+                                    if ( (origMethod.name == "test" || origMethod.name =="exec") && arguments[0] && arguments[0].__isShimmed__)
+                                        arguments[0] = arguments[0].__orig__;
                                     return origMethod.apply(thisObj,arguments);
                                 };
+                                self[_class].prototype[classKey].__isShimmed__ = true
+                                self[_class].prototype[classKey].__orig__ = origMethod;
+                            }
                          }
                     } catch (e){};
                 });
@@ -660,15 +747,19 @@ function __declTracerObject__(window) {
         }
 
         var origSetTimeout = window.setTimeout;
-        window.setTimeout = function(){
-            if (arguments.length > 1 && !isNaN(Number.parseFloat(arguments[1]))){
-                if (arguments[1] === 0){
-                    arguments[1] = 500;
-                }
-                arguments[1] = arguments[1]*4;
-            }
-            return origSetTimeout.apply(this, arguments);
-        }
+        // window.setTimeout = function(){
+        //     if (arguments.length > 1 && !isNaN(Number.parseFloat(arguments[1]))){
+        //         if (arguments[1] === 0){
+        //             arguments[1] = 500;
+        //         }
+        //         arguments[1] = arguments[1]*4;
+        //     }
+        //     var thisArg = this;
+        //     if (this && this.__isProxy){
+        //         thisArg = this.__target;
+        //     }
+        //     return origSetTimeout.apply(thisArg, arguments);
+        // }
 
 
         /*
@@ -677,12 +768,13 @@ function __declTracerObject__(window) {
         for example: Object.prototype.toString.call(o);
         here if o is wrapped in proxy, it will always return object type 
         */
-        var callExceptions = ["hasOwnProperty","toString","toLocaleString","isPrototypeOf"];
+
+        /*Not sure why we need these call exceptions*/
+        var callExceptions = [/*"hasOwnProperty","toString","toLocaleString","isPrototypeOf"*/];
         var origCall = Function.prototype.call;
         Function.prototype.call = function() {
             var _t,n = this.__isProxy ? this.__target.name : this.name;
-            if (this && callExceptions.indexOf(n)<0 && 
-                arguments[0] && (_t = arguments[0].__isProxy))
+            if (arguments[0] && arguments[0].__isProxy)
                 arguments[0] = arguments[0].__target;
             return origCall.apply(this, arguments);
         }
@@ -737,9 +829,10 @@ function __declTracerObject__(window) {
             || method.click || method.appendData) &&  !(method instanceof HTMLDocument) /*&& (method && method.self != method)*/
     }
 
-    var handlePropagatedProxy = function(proxyObj,argInd, transferState){
-        var state = proxyObj.__isProxy;
-        var parentNodeId = proxyObj.__debug;
+    /*Proxyobj is either a proxy object, or the window object when the this refers to window*/
+    var handlePropagatedProxy = function(proxyObj,argInd, transferState, stackHead){
+        var state = proxyObj.__isProxy || "global";
+        var parentNodeId = proxyObj.__debug, proxyMap;
         switch (state) {
             case "argument" : 
                 proxyMap = invocationToArgProxy; break;
@@ -751,11 +844,17 @@ function __declTracerObject__(window) {
                 proxyMap = invocationToClosureProxy; break;
         }
         var proxyPrivates = state == "global" ? globalProxyHandler : proxyMap[parentNodeId];
-        var objId = proxyPrivates.accessToPrivates().getObjectId(proxyObj.__target)
-        if (objId == null){
-            console.error("Error while trying to propagate object from " + _shadowStackHead + " to " + parentNodeId);
+        if (!proxyPrivates) {
+            /*Maybe the parent exists in different iframe*/
+            nonCacheableNodes[parentNodeId] = "propagation error | can't store metadata"
+            return;
         }
-        PMD[_shadowStackHead][transferState] = [argInd,objId[0],state] // transferState(arguments or this) -> [objId of parent Object, argInd in case the object was passed as a specific index, state (which parent state it belonged to)]
+        var objId = proxyObj.__target != null ? proxyPrivates.accessToPrivates().getObjectId(proxyObj.__target) : [0]
+        if (objId == null){
+            console.error("Error while trying to propagate object from " + stackHead + " to " + parentNodeId);
+            nonCacheableNodes[parentNodeId] = "propagation error | can't store metadata"
+        }
+        PMD[stackHead][transferState].push([argInd,objId[0],state]) // transferState(arguments or this) -> [objId of parent Object, argInd in case the object was passed as a specific index, state (which parent state it belonged to)]
     }
 
     var proxyEncapsulation =  function(rootObject, type) {
@@ -859,34 +958,34 @@ function __declTracerObject__(window) {
             // therefore, add the log in both function signatures
             var currentObjectTree = null;
             var remoteLogType = "";
-            if (_shadowStackHead != nodeId) {
-                // console.error("shadow stack head doesn't point to proxy creating head");
-                //Check how in the current function, it is being accessed: as closure,argument, or this
-                if ( invocationToArgProxy[_shadowStackHead] ){
-                    var remotePrivates = invocationToArgProxy[_shadowStackHead].accessToPrivates();
-                    if (remotePrivates.hasObjectId(target)) {
-                        currentObjectTree = remotePrivates.getObjectId;
-                        var remoteRootId = currentObjectTree(target);
-                        remoteLogType += "argument_" + logType.split('_')[1];
-                    }
-                } 
-                if (!currentObjectTree && invocationToClosureProxy[_shadowStackHead]) {
-                    var remotePrivates = invocationToClosureProxy[_shadowStackHead].accessToPrivates();
-                    if (remotePrivates.hasObjectId(target)) {
-                        currentObjectTree = remotePrivates.getObjectId;
-                        var remoteRootId = currentObjectTree(target);
-                        remoteLogType += "closure_" + logType.split('_')[1];
-                    }
-                }
-                if (!currentObjectTree && invocationToThisProxy[_shadowStackHead]){
-                    var remotePrivates = invocationToThisProxy[_shadowStackHead].accessToPrivates();
-                    if (remotePrivates.hasObjectId(target)) {
-                        currentObjectTree = remotePrivates.getObjectId;
-                        var remoteRootId = currentObjectTree(target);
-                        remoteLogType += "this_" + logType.split('_')[1];
-                    }
-                }
-            }
+            // if (_shadowStackHead != nodeId) {
+            //     // console.error("shadow stack head doesn't point to proxy creating head");
+            //     //Check how in the current function, it is being accessed: as closure,argument, or this
+            //     if ( invocationToArgProxy[_shadowStackHead] ){
+            //         var remotePrivates = invocationToArgProxy[_shadowStackHead].accessToPrivates();
+            //         if (remotePrivates.hasObjectId(target)) {
+            //             currentObjectTree = remotePrivates.getObjectId;
+            //             var remoteRootId = currentObjectTree(target);
+            //             remoteLogType += "argument_" + logType.split('_')[1];
+            //         }
+            //     } 
+            //     if (!currentObjectTree && invocationToClosureProxy[_shadowStackHead]) {
+            //         var remotePrivates = invocationToClosureProxy[_shadowStackHead].accessToPrivates();
+            //         if (remotePrivates.hasObjectId(target)) {
+            //             currentObjectTree = remotePrivates.getObjectId;
+            //             var remoteRootId = currentObjectTree(target);
+            //             remoteLogType += "closure_" + logType.split('_')[1];
+            //         }
+            //     }
+            //     if (!currentObjectTree && invocationToThisProxy[_shadowStackHead]){
+            //         var remotePrivates = invocationToThisProxy[_shadowStackHead].accessToPrivates();
+            //         if (remotePrivates.hasObjectId(target)) {
+            //             currentObjectTree = remotePrivates.getObjectId;
+            //             var remoteRootId = currentObjectTree(target);
+            //             remoteLogType += "this_" + logType.split('_')[1];
+            //         }
+            //     }
+            // }
             
             var childId, childLogStr;
             if ((value instanceof Object) || (typeof value == "object" && value != null) || typeof value == "function") {
@@ -917,7 +1016,7 @@ function __declTracerObject__(window) {
                 return 0;
 
             //HACK
-            if (state == "write" && logType.indexOf("argument")>=0 && rootId == 0 
+            if (state == "write" && logType.indexOf("argument")>=0 && rootId === 0 
                 && value === null)
                 return;
 
@@ -943,7 +1042,7 @@ function __declTracerObject__(window) {
                 childLogStr = stringifier.stringify(value,state,1);
                 if (childLogStr && childLogStr instanceof Error){
                     nonCacheableNodes[nodeId] = childLogStr.message;
-                    _shadowStackHead = null;
+                    // _shadowStackHead = null;
                     return 1;
             
                  } //else if (!childLogStr && logType.indexOf("reads")>=0 && childLogStr != "")
@@ -952,11 +1051,18 @@ function __declTracerObject__(window) {
 
 
             // Doesn't make sense to log function reads, as I currently don't have a correct way of stringifying them
+            if (!customLocalStorage[nodeId][logType])
+                customLocalStorage[nodeId][logType]=[];
             if (logType.indexOf("reads")>=0) {
-                // if (typeof value != "function")
-                    customLocalStorage[nodeId].push([logType, rootId, key, childLogStr,childId ]);
+                var log = [logType, rootId, key, childLogStr,childId ];
+                customLocalStorage[nodeId].readKeys.add(logType);
+                customLocalStorage[nodeId].push(log);
+                customLocalStorage[nodeId][logType].push(log);
             } else { 
-                customLocalStorage[nodeId].push([logType, rootId, key, childLogStr ]);
+                customLocalStorage[nodeId].writeKeys.add(logType);
+                var log = [logType, rootId, key, childLogStr ];
+                customLocalStorage[nodeId].push(log);
+                customLocalStorage[nodeId][logType].push(log);
                 if (customLocalStorage[nodeId].filter(e=>e[0].indexOf("reads")>=0 && e[3] === rootId).length)
                     freezeReadState(nodeId);
             }
@@ -976,8 +1082,10 @@ function __declTracerObject__(window) {
 
         var handleNonConfigurableProperty = function(target, key){
             var method = Reflect.get(target,key);
-            if (_shadowStackHead)
-                nonCacheableNodes[_shadowStackHead] = "non-configurable";
+            // if (typeof method == "function")
+            //     method = method.bind
+            // if (_shadowStackHead)
+            //     nonCacheableNodes[_shadowStackHead] = "non-configurable;" + key;
              return method;
         } 
 
@@ -1021,15 +1129,35 @@ function __declTracerObject__(window) {
             }
         }
 
+        // function isArguments( item ) {
+        //     if (item && item.__isProxy)
+        //         item = item.__target;
+        //     return Object.prototype.toString.call( item ) === '[object Arguments]';
+        // }
+
+        function isArguments(thisArg, target){
+            if (thisArg && thisArg.__target)
+                thisArg = thisArg.__target;
+
+            if (!thisArg.length) return false;
+
+
+            return Array.from(thisArg).indexOf(target)>=0;
+        }
+
         var handler = {
           get(target, key, receiver) {
 
             if (key == "__isProxy") return rootType;
             if (key == "__target") return target;
             if (key == "__debug") return parentFunctionId;
+            if (key == "__isClosureObj") return target[key];
+
             var method = Reflect.get(target,key);
 
-            if (key == "toJSON") return function(){return target};
+            /*Overwrites the custom toJson implementation, which might be doing something else
+            instead of simply returning the original object*/
+            if (key == "toJSON") return method;
 
             if (outOfScopeProperties.includes(key)) return method;
             var desc = customMethods.getOwnPropertyDescriptor(target, key);
@@ -1045,13 +1173,13 @@ function __declTracerObject__(window) {
             _ret = loggerFunction(target, key, method, rootType + "_reads");
 
             if (method && method.__isProxy) {
-                if (rootType == "global" || method.__isProxy == "global") 
-                    return method;
+                // if (rootType == "global" || method.__isProxy == "global") 
+                //     return method;
 
                 // method = method.__target;
                 // Sometimes the toString method doesn't exist on certain objects
-                if (Object.prototype.toString.call(target).indexOf("Arguments")>=0)
-                    handlePropagatedProxy(method,key, "argument")
+                if (Object.prototype.toString.call(target).indexOf("Arguments")>=0 && _shadowStackHead)
+                    handlePropagatedProxy(method,key, "argument",_shadowStackHead)
                 method = method.__target
                 //     return method;
                 //     var actualMethod = method.__target;
@@ -1072,7 +1200,7 @@ function __declTracerObject__(window) {
                 // return method;
               }
               var desc = customMethods.getOwnPropertyDescriptor(target, key);
-              // if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
+              if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
               window.proxyReadCount++;
               // if (window.proxyReadCount % 1000000 == 0)
               //   alert("window.Proxyreadcount is " + window.proxyReadCount);
@@ -1102,12 +1230,20 @@ function __declTracerObject__(window) {
           },
           set (target, key, value, receiver) {
             var cors={}, method;
-            if (!isWindow(value,cors))
-                loggerFunction(target, key, value,rootType + "_writes");
+            // if (!isWindow(value,cors))
+            //     loggerFunction(target, key, value,rootType + "_writes");
             window.proxyWriteCount++;
             if (specialSetKets.indexOf(key)>=0 && value && value.__isProxy){
                 value = value.__target;
                 return Reflect.set(target, key, value);
+            }
+            /*The final value set should always be the actual value*/
+            if (value && value.__isProxy)
+                value = value.__target;
+            /*if rewriting closure object, rewrite the underlying object as well*/
+            if (target.__isClosureObj){
+                var setter = "set"+key;
+                target[setter](value);
             }
             return Reflect.set(target, key, value);
           },
@@ -1116,6 +1252,10 @@ function __declTracerObject__(window) {
           Let p be a proxy object. The following event handler will be called :
            - if p if a function itself, p(arg) : target -> p, thisArg -> window, args = args
            - if you do p.call or p.apply, first you go inside the get handler, read the value, and then go inside the apply handler
+
+           We need function calls to be wrapped in proxy so that the thisArg can be properly handled. 
+           if target.name exists, then simply call the target using thisArg[target](...args) // Doesn't work because target.name might not a property of thisArg, 
+           otherwise follow the already implemented routine
           */
 
           apply (target, thisArg, args) {
@@ -1125,15 +1265,30 @@ function __declTracerObject__(window) {
                     If the thisArg is not a proxy object, call the method on the thisArg itself. 
                 */
 
-                if (thisArg && thisArg.__proto__ && ((thisArg.__proto__.constructor && 
-                    applyTargetSpcl.indexOf(thisArg.__proto__.constructor.name)>=0) ||
-                     thisArg.__target && thisArg.self == thisArg.__target) ){
-                    if (args.length){
+                // if (thisArg && (thisArg.__isClosureObj || isArguments(thisArg) ))
+                //     thisArg = window
+                // TODO
+                // only remove proxies if the target is an inbuilt function
+                // cause otherwise the propagation metadata would be incorrect
+                if (args.length){
                         args.forEach((arg,_i)=>{
                             if (arg && arg.__isProxy)
                                 args[_i] = arg.__target;
                         })
-                    }
+                }
+
+                // if (target && target.name && thisArg[target.name])
+                //     return thisArg[target.name](...args);
+
+                if (thisArg && thisArg.__proto__ && ((thisArg.__proto__.constructor && 
+                    applyTargetSpcl.indexOf(thisArg.__proto__.constructor.name)>=0) ||
+                     thisArg.__target && thisArg.self == thisArg.__target) ){
+                    // if (args.length){
+                    //     args.forEach((arg,_i)=>{
+                    //         if (arg && arg.__isProxy)
+                    //             args[_i] = arg.__target;
+                    //     })
+                    // }
                     if (thisArg && thisArg.__target)
                         thisArg = thisArg.__target;
                 }
@@ -1141,13 +1296,27 @@ function __declTracerObject__(window) {
                 if (Reflect.apply.__isProxy)
                     Reflect.apply = Reflect.apply.__target;
 
-                // if (thisArg && thisArg.__target)
-                //     thisArg = thisArg.__target;
-                // if ( ! Array.isArray(thisArg) ){
-                //     if (thisArg && thisArg.__target)
-                //         return Reflect.apply(target, thisArg.__target, args);
-                //     else return Reflect.apply(target, thisArg, args);
-                // }
+                /*If target is indexed inside arguments, that means arguments was set as the 
+                thisObj due to instrumentation*/
+                if (thisArg && (thisArg.__isClosureObj || isArguments(thisArg, target) ))
+                    thisArg = window
+
+                /*Try catch can't catch certain errors, handle separately
+                - thisArg of type permissions*/
+                /*Permissions object*/
+                if (thisArg && thisArg.__isProxy && thisArg.query)
+                    thisArg = thisArg.__target;
+                if (thisArg && thisArg.__isProxy && thisArg.getRegistration)
+                    thisArg = thisArg.__target;
+                if (thisArg && thisArg.__isProxy && thisArg.getBattery)
+                    thisArg = thisArg.__target;
+                if (thisArg && thisArg.__isProxy && thisArg.digest)
+                    thisArg = thisArg.__target;
+
+                if ( (target.name == "valueOf"  || target.name == "toString"  || 
+                    target == Function.prototype.toString) && thisArg && thisArg.__target)
+                    thisArg = thisArg.__target;
+
                 try {
                     return Reflect.apply(target, thisArg, args);
                 } catch (e){
@@ -1169,10 +1338,11 @@ function __declTracerObject__(window) {
           getPrototypeOf (target) {
             return Reflect.getPrototypeOf(target);
           },
-          getOwnPropertyDescriptor (target, propertyKey) {
-            loggerFunction(target, propertyKey, target[propertyKey], rootType + "_reads");
-            return Reflect.getOwnPropertyDescriptor(target, propertyKey);
-          },
+          // getOwnPropertyDescriptor (target, propertyKey) {
+          //   var r =  Reflect.getOwnPropertyDescriptor(target, propertyKey);
+          //   loggerFunction(target, propertyKey, r, rootType + "_reads");
+          //   return r;
+          // },
           ownKeys (target) {
             return Reflect.ownKeys(target)
           },
@@ -1261,6 +1431,10 @@ function __declTracerObject__(window) {
     this.getTimingInfo = function(){
         return timingInfo;
     }
+
+    this.getSigSizes = function(){
+        return sigSizes;
+    }
     
     this.setMutationContext = function(command, nodeId) {
         currentMutationContext = nodeId;
@@ -1332,7 +1506,7 @@ function __declTracerObject__(window) {
     }
 
     this.handleTypeOf = function(obj){
-        if (pageLoaded) return obj;
+        if (pageLoaded || _shadowStackHead in nonCacheableNodes)  return obj;
         var state,proxyMap,readInd, type;
         // return type;
         if (!pageLoaded && _shadowStackHead && obj && (state = obj.__isProxy)){
@@ -1347,6 +1521,7 @@ function __declTracerObject__(window) {
                     proxyMap = invocationToClosureProxy; break;
             };
             var proxyPrivates = state == "global" ? globalProxyHandler : proxyMap[_shadowStackHead];
+            if (!proxyPrivates) return obj;
             var objId = proxyPrivates.accessToPrivates().getObjectId(obj.__target);
             // if (objId[1]) throw new Error("typeof argument has no object id");
             if (objId[1]) return obj;
@@ -1361,7 +1536,7 @@ function __declTracerObject__(window) {
     }
 
     this.handleComparison = function(obj, operator, value){
-        if (pageLoaded) return obj;
+        if (pageLoaded || _shadowStackHead in nonCacheableNodes) return obj;
         var state, proxymap, type, readInd,cmpDelim = ";&;";
         if (_shadowStackHead && obj && (state = obj.__isProxy)){
             switch (state) {
@@ -1375,6 +1550,7 @@ function __declTracerObject__(window) {
                     proxyMap = invocationToClosureProxy; break;
             };
             var proxyPrivates = state == "global" ? globalProxyHandler : proxyMap[_shadowStackHead];
+            if (!proxyPrivates) return obj;
             var objId = proxyPrivates.accessToPrivates().getObjectId(obj.__target);
             if (objId[1]) return obj;
 
@@ -1413,7 +1589,7 @@ function __declTracerObject__(window) {
                     param = params[1];break;
             }
         path.split(pathDelim).forEach((prop, ind)=>{
-            if (ind == 0) return;
+            if (ind === 0) return;
             var len = path.split(pathDelim).length;
             if (param)
                 param = param[prop];
@@ -1436,6 +1612,7 @@ function __declTracerObject__(window) {
                     proxyMap = invocationToClosureProxy; break;
             };
             var proxyPrivates = state == "global" ? globalProxyHandler : proxyMap[_shadowStackHead];
+            if (!proxyPrivates) return;
             var objId = proxyPrivates.accessToPrivates().getObjectId(obj.__target);
             if (objId[1]) return null;
 
@@ -1536,6 +1713,51 @@ function __declTracerObject__(window) {
         return throwArg;
     }
 
+    var cleanUpReturnValue = function(ret,ind, seenObjs){
+        try {
+            switch (typeof ret) {
+                case "object" :
+                    if (!ret || seenObjs.indexOf(ret)>=0)
+                        return;
+                    /*check for window object*/
+                    if (ret && ret.self == ret)
+                        return;
+                    if (ind === -1) {
+                        seenObjs.push(ret);
+                    } else {
+                        if (!ret[ind] || ret[ind].self == ret[ind]){
+                            return;
+                        }
+                        else if (ret[ind].__isProxy)
+                            ret[ind] = ret[ind].__target;
+                        seenObjs.push(ret[ind]);
+                        ret = ret[ind];
+                    }
+                        if (Array.isArray(ret)){
+                        for (var _i = 0, _len = ret.length; _i < _len; _i++) {
+                            cleanUpReturnValue(ret,_i, seenObjs);
+                        }
+                    } else {
+                        /*o.keys returns enumerable properties only
+                        not sure if we need to rewrite non enumerable properties as well*/
+                        var propNames = Object.keys(ret);
+                        for (var k of propNames ){
+                            cleanUpReturnValue(ret,k, seenObjs);
+                        }
+                    }
+                    break;
+                case "function":
+                    if (ind === -1) {
+                    } else if (ret[ind] && ret[ind].__isProxy)
+                        ret[ind] = ret[ind].__target;
+                default: break;
+            }
+            return;
+        } catch (e){
+            return;
+        }
+    }
+
     this.logReturnValue = function(functionIdentifier, returnValue, params) {
         var cacheIndex = functionIdentifier + "_count" + invocationsIndName[functionIdentifier];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
@@ -1553,14 +1775,13 @@ function __declTracerObject__(window) {
         if (_retString && _retString instanceof Error) {
                 nonCacheableNodes[cacheIndex] = _retString.message;
         }
+        /*If the return value couldn't be stringified, doesn't matter. The function is marked as uncacheable anyway*/
         if (customLocalStorage[cacheIndex]) customLocalStorage[cacheIndex]["returnValue"] = _retString;
-        if (returnValue && returnValue.__debug && returnValue.__debug != "global"){
-            // this.exitFunction(functionIdentifier, params);
-            return returnValue.__target;
-        } else {
-            // this.exitFunction(functionIdentifier, params);
-            return returnValue;
-        }
+
+        var seenObjs = [];
+        if (returnValue && returnValue.__isProxy)
+            returnValue = returnValue.__target;
+        return cleanUpReturnValue(returnValue, -1,seenObjs), returnValue;
     }
 
     var logNonProxyParams = function(nodeId,params){
@@ -1582,14 +1803,59 @@ function __declTracerObject__(window) {
     var replay_arg = (log, arg,cmp,params) => {
         var result = true;
         var prop = log[1], value = log[2];
-        if (!cmp){
-            if (typeof value == "object")
-                value = value[0];
-            else value = omniStringifier.parse(value,params);
-        }
+        // if (!cmp){
+        //     if (typeof value == "object")
+        //         value = value[0];
+        //     else value = omniStringifier.parse(value,params);
+        // }
         result = result && traverseToTarget(arg, prop, value,cmp);
         return result;
     };
+
+    var getChildAccessor = function(log, params, path2function){
+        var fnRoot;
+        var fnScope = path2function.split(';;;;')[0],fnKey = path2function.split(';;;;').slice(1,);
+        switch (fnScope){
+            case "global": fnRoot = window; break;
+            case "argument":fnRoot = params[0];break;
+            case "closure":fnRoot = params[1];break;
+            case "this": fnRoot = params[2];break;
+        }
+        var fnkeyLen = fnKey.length;
+        fnKey.forEach((key)=>{
+            fnRoot = fnRoot[key];
+        })
+        return fnRoot;
+    }
+
+    var replay_childClosure = function(log,arg,cmp,params){
+        var tokens = log[1].split(";&;")
+        var [path2function,prop] = [tokens.slice(0,tokens.length-1),tokens[tokens.length-1]],
+            value = log[2], fnRoot;
+        // if (!cmp) {
+        //     if (typeof value != "object")
+        //         throw new Error("Can't replay child closure where value is a reference");
+        //     value = value[0]
+        // }
+        var newParams = [...params];
+        var fnRoot;
+        path2function.forEach((path)=>{
+            fnRoot = getChildAccessor(log, newParams, path);
+            var scopeObj = fnRoot.__getScope__();
+            //update the closure scope 
+            //if path2function has more than 2 entries, then the second one
+            // has to be a closure, so update the closure params 
+            newParams[1] = scopeObj
+        })
+        var accessor = cmp ? "__get__" : "__set__";
+        return fnRoot[accessor](prop,value)
+    }  
+
+    var replay_childIBF = function(log, params){
+        var fnRoot = getChildAccessor(log, params);
+        fnRoot["__replayIBF__"](log[2]);
+    }
+
     var replay_closure = (write_array, closure,cmp) => {
         var result = true;
         write_array.forEach((write_log)=>{
@@ -1625,7 +1891,11 @@ function __declTracerObject__(window) {
         eval(IBFs);
     }
 
+    this.replay_IBF = replay_IBF;
+
     var comparisonOperators = ["==","!=","===","!==","instanceof","in"]
+
+    var specialMatchingPaths = ["localStorage","cookie"]
 
     var traverseToTarget  = function(root, path,value,cmp){
         var target = root,
@@ -1636,7 +1906,9 @@ function __declTracerObject__(window) {
             var len = path.split(pathDelim).length;
             if ( target && (ind == len-1 || prop == "typeof")) {
                 if (cmp){
-                    if (prop == "typeof")
+                    if (specialMatchingPaths.indexOf(prop)>=0) 
+                        result = true;
+                    else if (prop == "typeof")
                         result = typeof target == value;
                     else if (prop == "self")
                         result = target[prop] == target;
@@ -1654,13 +1926,49 @@ function __declTracerObject__(window) {
                         }
                     }
                     else { 
-                        if (typeof value == "string")
-                            result = omniStringifier.stringify(target[prop],"read") == value;
-                        else result = target[prop] == value[0];
+                        if (typeof value == "string"){
+                            var [Ovalue, Otype, Olen] = value.split(';;&;;');
+                            if (Otype){
+                                Olen = Number.parseInt(Olen);
+                                if (Otype == "array" ) {
+                                    if (!Array.isArray(target[prop]))
+                                        result = false;
+                                    else if (Olen != target[prop].length)
+                                        result = false;
+                                    else {
+                                        var [tval,_,__] = omniStringifier.stringify(target[prop],"read").split(';;&;;');
+                                        result = tval == Ovalue;
+                                    }
+                                } else if (Otype == "object"){
+                                    if (typeof target[prop] != "object")
+                                        result = false;
+                                    else if (target[prop] && Object.keys(target[prop]).length != Olen)
+                                        result = false;
+                                    else {
+                                        var [tval,_,__] = omniStringifier.stringify(target[prop],"read").split(';;&;;');
+                                        result = tval == Ovalue;
+                                    }
+                                }
+                            }
+                            else {
+                                var tval = omniStringifier.stringify(target[prop],"read")
+                                if (typeof tval == "string")
+                                    result = tval.split(';;&;;')[0] == Ovalue;
+                                else result = target[prop] == Ovalue;
+                            }
+                        }
+                        else {
+                            result = target[prop] == value[0];
+                        }
                     }
                 }
                 else {
-                    target[prop] = (value);
+                    if (target.__isClosureObj){
+                        target["set"+prop](value)
+
+                    } else {
+                        target[prop] = (value);
+                    }
                     result = true;
                 }
             } else if (target)
@@ -1668,6 +1976,8 @@ function __declTracerObject__(window) {
         })
         return result;
     }
+
+    this.traverseToTarget = traverseToTarget;
 
     var verifyAndReplayCache = function(cacheIndex,writeObj) {
         //Replay all the non global writes speculatively
@@ -1690,30 +2000,36 @@ function __declTracerObject__(window) {
         return nodeId.split("_count")[1] > INVOCATION_LIMIT;
     }
 
-    this.cacheInit = function(nodeId, params, isNew){
+    this.cacheInit = function(nodeId, params, isNew, enableRecord){
+        if (enableRecord){
+            oldPageLoaded.push(pageLoaded);
+            pageLoaded = false;
+        }
         if (invocationsIndName[nodeId] != null)
             invocationsIndName[nodeId]++;
         else invocationsIndName[nodeId] = 0;
 
         var cacheIndex = nodeId + "_count" + invocationsIndName[nodeId];
+        invocationList.push(cacheIndex);
+        if (instrumentationPattern == "replay")
+            return;
         // _shadowStackHead = cacheIndex;
         // shadowStack.push(cacheIndex);
 
-        timingInfo[cacheIndex] = [];
+        // timingInfo[cacheIndex] = [];
+        // timingInfo[cacheIndex].push(window.performance.now());
+        if (instrumentationPattern == "record" || instrumentationPattern == "replay") {
 
-        invocationList.push(cacheIndex);
-        if (instrumentationPattern == "signature") {
-
-            if (!(cacheIndex in callGraph))
-                callGraph[cacheIndex] = [];
-
-            
-            let key = nodeId;
-            const delim = ';;';
+            callGraph[cacheIndex] = [];
+            customLocalStorage[cacheIndex] = []
 
             if (_shadowStackHead) {
                 callGraph[_shadowStackHead].push(cacheIndex)
-                // window.performance.clearMarks(_shadowStackHead);
+                // insert placeholder for children signature
+                // if (customLocalStorage[_shadowStackHead])
+                customLocalStorage[_shadowStackHead].push(cacheIndex)
+                // Before entering child function, freeze the state of the parent function
+                freezeReadState(_shadowStackHead);
             } else {
                 parentNodes.push(cacheIndex);
             }
@@ -1721,30 +2037,30 @@ function __declTracerObject__(window) {
             shadowStack.push(cacheIndex);
             _shadowStackHead = cacheIndex;
 
-            PMD[cacheIndex] = {argument:[],this:[]}
+            PMD[cacheIndex] = {argument:[],this:[],closure:[]}
 
             if (invocationsIndName[nodeId] > INVOCATION_LIMIT ){
                 nonCacheableNodes[cacheIndex] = "INVOCLIMIT";
-                _shadowStackHead = null;
+                // _shadowStackHead = null;
                 // window.performance.mark(cacheIndex);
-                timingInfo[cacheIndex].push(window.performance.now());
+                // timingInfo[cacheIndex].push(window.performance.now());
                 return;
-            } else if (isNew){
-                nonCacheableNodes[cacheIndex] = "new-call";
-                _shadowStackHead = null;
-                // window.performance.mark(cacheIndex);
-                timingInfo[cacheIndex].push(window.performance.now());
-                return;
-            }
+            } 
+            customLocalStorage[cacheIndex]["IBF"] = "";
+            customLocalStorage[cacheIndex].readKeys = new Set();
+            customLocalStorage[cacheIndex].writeKeys = new Set();
 
             // if (customLocalStorage[cacheIndex])
             //     console.error("Same function with same invocation id", cacheIndex);
-
-            customLocalStorage[cacheIndex] = []
-            customLocalStorage[cacheIndex]["IBF"] = "";
-            timingInfo[cacheIndex].push(window.performance.now());
+            // timingInfo[cacheIndex].push(window.performance.now());
         } else {
-            timingInfo[cacheIndex].push(window.performance.now());
+            // if (!(cacheIndex in callGraph))
+            callGraph[cacheIndex] = [];
+            if (_shadowStackHead) {
+                callGraph[_shadowStackHead].push(cacheIndex)
+            }
+
+            // timingInfo[cacheIndex].push(window.performance.now());
             shadowStack.push(cacheIndex);
             _shadowStackHead = cacheIndex;
         }
@@ -1773,11 +2089,14 @@ function __declTracerObject__(window) {
         var fn = replay_arg, param = null
             result = true;
         var delim = cmp ? "_reads" : "_writes";
-        var sig = sig.filter(e=>e[0].indexOf(delim)>=0);
+        // var sig = sig.filter(e=>e[0].indexOf(delim)>=0);
         var keys = [...new Set(sig.map(e=>e[0]))];
-        sig.forEach((entry,ind)=>{
+        var scInd = 0, ind=0; //short-circuit index;
+        for (entry of sig){
+        // sig.forEach((entry,ind)=>{
             var type = entry[0];
             var state = entry[0].split(delim)[0],proxyMap;
+            fn = replay_arg;
             switch (state) {
                 case "argument" : 
                     param = params[0];break;
@@ -1787,12 +2106,31 @@ function __declTracerObject__(window) {
                      param = params[2]; break;
                 case "closure":
                     param = params[1];break;
+                case "childClosure":
+                    fn = replay_childClosure;break
             }
-            result = result && fn(sig[ind],param, cmp,params);
+            result = result && fn(entry,param, cmp,params);
+            ind++;
+            scInd = ind;
+            if (cmp && !result)
+                return [result,scInd];
+        }
+
+        return [result,scInd];
+    }
+
+    var preProcessWrites = function(writeSig, returnValue, params){
+        writeSig.forEach((entry)=>{
+            if (typeof entry[2] == "object")
+                entry[2] = entry[2][0];
+            else entry[2] = omniStringifier.parse(entry[2],params);
         })
 
-        return result;
+        if (returnValue && returnValue.length != 3){
+            returnValue[1] =  omniStringifier.parse(returnValue[1],params);
+        }
     }
+
     /*
     Returns an array 
     [cacheHit, return value]
@@ -1800,62 +2138,133 @@ function __declTracerObject__(window) {
     */
 
     this.cacheAndReplay = function(nodeId, ...params){
-        // var cacheIndex = nodeId + "_count" + invocationsIndName[nodeId];
-        var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
+        // return [false,null];
+        // var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
+        var cacheIndex = nodeId + "_count" + invocationsIndName[nodeId];
+        // if (skipReplay){
+        //     cacheStats.misses.empty.push(cacheIndex);
+        //     return [false, null]
+        // }
         if (invocationsIndName[nodeId] > INVOCATION_LIMIT){
             cacheStats.misses.empty.push(cacheIndex);
             return [false,null];
         }
         var sig, returnValue = [];
         // return [false,null];
+        // timingInfo[cacheIndex]=[];
+        // timingInfo[cacheIndex].push(window.performance.now());
         if (sig = processedSignature[keysToStdKeys[cacheIndex]]) {
-            if (!sig.length)
+            // return []
+            if (!sig.length){
+                cacheStats.misses.empty.push(cacheIndex);
+                // timingInfo[cacheIndex].push(window.performance.now());
                 return [false, null];
-            var emptyWrite = true;
+            }
             try {
-                if (compareOrExecuteState(sig,true,...params)) {
-                 // if (checkForCacheHit(sig,...params)) {
-                    compareOrExecuteState(sig,false,...params)
-                    var _r, _i;
-                    _i = sig.filter(e=>e[0] == "IBF");
-                    if (_i.length){
-                        // return [false, null];
-                        replay_IBF(_i[0][1],...params);
+                /*Iterate sig once and seperate different parts*/
+                var ibf, childIBF, _ret, readSig=[], writeSig=[],ret;
+                for (_e of sig){
+                    if (_e[0].indexOf("_reads")>=0)
+                        readSig.push(_e);
+                    else if (_e[0].indexOf("_writes")>=0)
+                        writeSig.push(_e);
+                    else if (_e[0] == "IBF")
+                        ibf = _e;
+                    else if (_e[0]== "childIBF")
+                        childIBF = _e;
+                    else if (_e[0] == "returnValue")
+                        _ret = _e;
+                }
+                var readStateMatch = compareOrExecuteState(readSig,true,...params);
+                if (readStateMatch[0]) {
+                    // cacheStats.hits.push(cacheIndex);
+                    // timingInfo[cacheIndex].push(window.performance.now());
+                    var _wP = writeStateProcessed.get(sig); 
+                    if (_wP === undefined){
+                        try {
+                            preProcessWrites(writeSig, _ret, params);
+                        } catch (e){
+                            writeStateProcessed.set(sig, false);
+                            throw e;
+                        }
+                    } else if (_wP === false){
+                        cacheStats.misses.mismatch.push(cacheIndex);
+                        return [false, null];
                     }
+                    writeStateProcessed.set(sig, true);
+                    compareOrExecuteState(writeSig,false,...params)
+                    // _i = sig.filter(e=>e[0] == "IBF");
+                    if (ibf){
+                        // return [false, null];
+                        replay_IBF(ibf[1],...params);
+                    }
+                    // _i = sig.filter(e=>e[0] == "childIBF")
+                    if (childIBF)
+                        replay_childIBF(childIBF[1],params)
                     // compareOrExecuteState(sig,false,...params)
-                    var _ret = sig.filter(e=>e[0] == "returnValue"),ret;
-                    if (_ret.length){
-                        if (_ret[0].length == 3)
-                            ret = _ret[0][1];
-                        else ret = omniStringifier.parse(_ret[0][1],params);
+                    // var _ret = sig.filter(e=>e[0] == "returnValue"),ret;
+                    if (_ret){
+                        // if (_ret.length == 3)
+                        ret = _ret[1];
+                        // else ret = omniStringifier.parse(_ret[1],params);
                     }
                     cacheStats.hits.push(cacheIndex);
+                    // timingInfo[cacheIndex].push(window.performance.now());
+                    // sigSizes[cacheIndex]=sig.reduce((acc, cur)=>{
+                    //     var len =0; 
+                    //     if (typeof cur[1] == "string")
+                    //         len += cur[1].length
+                    //     if (cur[2] && typeof cur[2] == "string")
+                    //         len += cur[2].length;
+                    //     return len + acc},0);
                     return [true,ret];
                 } else {
                     cacheStats.misses.mismatch.push(cacheIndex);
+                    // timingInfo[cacheIndex].push(window.performance.now());
+                    // var _ind = readStateMatch[1];
+                    // sigSizes[cacheIndex]=sig.slice(0,_ind).reduce((acc, cur)=>{
+                    //     var len =0; 
+                    //     if (typeof cur[1] == "string")
+                    //         len += cur[1].length
+                    //     if (cur[2] && typeof cur[2] == "string")
+                    //         len += cur[2].length;
+                    //     return len + acc},0);
                     return [false, null];
                 }
             } catch (e) {
-                if (_i && _i.length && _i[0][1].indexOf("throw ")>=0){
+                if (ibf && ibf.length && ibf[0][1].indexOf("throw ")>=0){
                     cacheStats.hits.push(cacheIndex);
+                    // timingInfo[cacheIndex].push(window.performance.now());
+                    // sigSizes[cacheIndex]=sig.reduce((acc, cur)=>{
+                    //     var len =0; 
+                    //     if (typeof cur[1] == "string")
+                    //         len += cur[1].length
+                    //     if (cur[2] && typeof cur[2] == "string")
+                    //         len += cur[2].length;
+                    //     return len + acc},0);
                     throw e;
                 }
                 cacheStats.misses.error.push([cacheIndex,e.message]);
                 
                 // if (e.message && e.message.indexOf("OMNI")<0) throw e;
-                cacheStats.hits.pop();
+                // cacheStats.hits.pop();
+                // timingInfo[cacheIndex].push(window.performance.now());
                 return [false,null];
             }
         }
         cacheStats.misses.empty.push(cacheIndex);
+        // timingInfo[cacheIndex].push(window.performance.now());
         return [false,null];
     }
 
     var getRootIds = function(readArr){
         var ids = [];
+        /*If the 4th index is string, it means the read has been processed already 
+        however if the logType is write, then add it regardless*/
         readArr.forEach((read)=>{
-            if ((typeof read[3] != "string" || 
-                read[3].indexOf("__func__source")<0))
+            if (typeof read[3] != "string" || 
+                read[3].indexOf("__func__source")>=0 || 
+                read[0].indexOf("_write")>=0)
                 ids.push(read[1]);
         })
         // return [...new Set(ids)];
@@ -1877,14 +2286,24 @@ function __declTracerObject__(window) {
         return true;
     }
 
+    var uniqueSignature = function(sig){
+        var strSig = sig.map(e=>JSON.stringify(e));
+        var uS = new Set(strSig);
+        var uniqueArr = [...uS].map(e=>JSON.parse(e));
+        return uniqueArr;
+    }
+
     var freezeReadState = function(nodeId){
+        if (nodeId in nonCacheableNodes) return;
         var signature = customLocalStorage[nodeId];
         if (signature == null) return;
         if (signature.length > sigSizeLimit) {
             nonCacheableNodes[nodeId]="signature size exceeded capacity";
             return;
         }
-        var readKeys = [...new Set(signature.filter(e=>e[0].indexOf("reads")>0).map(e=>e[0]))];
+        // signature = uniqueSignature(signature);
+        // var readKeys = [...new Set(signature.filter(e=>e[0].indexOf("reads")>0).map(e=>e[0]))];
+        var readKeys = signature.readKeys;
         readKeys.forEach((key)=>{
             var state = key.split("_reads")[0],proxyMap;
             var currStateWrites = invocationToWrites[nodeId] ? invocationToWrites[nodeId].filter(e=>e[0]==state).map(e=>e[1]) : [];
@@ -1904,6 +2323,8 @@ function __declTracerObject__(window) {
             customLocalStorage[nodeId] = signature.filter((e)=>{return filterSignature(e, rootObjects, currStateWrites, key)});
             (signature.returnValue != null) && (customLocalStorage[nodeId].returnValue = signature.returnValue)
             signature.IBF && (customLocalStorage[nodeId].IBF = signature.IBF)
+            customLocalStorage[nodeId].readKeys = signature.readKeys;
+            customLocalStorage[nodeId].writeKeys = signature.writeKeys;
             signature = customLocalStorage[nodeId];
             signature.forEach((readArr,ind)=>{
                 if (typeof readArr[3] == "number" && readArr[0] == key){
@@ -1911,9 +2332,15 @@ function __declTracerObject__(window) {
                     var obj = proxyPrivates.accessToPrivates().idToObject[readArr[3]];
                     if (!obj) console.error("Object not found during freezing read state");
                     var str = omniStringifier.stringify(obj,"read",1);
-                    if (str && str instanceof Error){
-                        nonCacheableNodes[nodeId] = str.message;
-                        return 1;
+                    if (str){
+                        if (str instanceof Error){
+                            nonCacheableNodes[nodeId] = str.message;
+                            return 1;
+                        }
+                        if (str.length > OMNI_SIZE_LIMIT){
+                            nonCacheableNodes[nodeId] = "Value exceeded OMNI_SIZE_LIMIT";
+                            return 1;
+                        }
                     }
                     signature[ind] = [readArr[0], readArr[1], readArr[2], str, null];
                 }
@@ -1921,18 +2348,21 @@ function __declTracerObject__(window) {
         })
     }
 
-    this.exitFunction = function(nodeId, empty){
+    this.exitFunction = function(nodeId, enableRecord){
         // var cacheIndexExp = nodeId + "_count" + invocationsIndName[nodeId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
         if (!cacheIndex) return;
-        // window.performance.mark(cacheIndex + "_end");
-        timingInfo[cacheIndex].push(window.performance.now());
-        !pageLoaded && !empty && freezeReadState(cacheIndex);
+        if (instrumentationPattern == "replay")
+            return;
+        !pageLoaded && freezeReadState(cacheIndex);
         // if (window.performance.getEntriesByName(cacheIndex).length)
         shadowStack.pop();
         if (shadowStack.length) 
             _shadowStackHead = shadowStack[shadowStack.length - 1];
         else _shadowStackHead = null;
+        if (enableRecord) {
+            pageLoaded = oldPageLoaded.pop();
+        }
         
     }
 
@@ -1969,7 +2399,25 @@ function __declTracerObject__(window) {
         return calleeRes;
     }
 
-    this.logIBF = function(functionId, IBF, IBFStrDecl, IBFStrCall, argStrs, argVals){
+    this.logIBF = function(functionId, IBF, callee, IBFStrDecl, IBFStrCall, argStrs, argVals){
+        if (callee && callee.toString){
+            var actualCallee = callee;
+            if (callee.__isProxy) actualCallee = callee.__target;
+            var _isNative = isNative(Object.prototype.toString.call(actualCallee));
+            if (!_isNative && !actualCallee.__isShimmed__) {
+                if (callee.__isProxy){
+                    var childLen = callGraph[_shadowStackHead].length;
+                    if (childLen) {
+                        var stackHead = callGraph[_shadowStackHead][childLen-1]
+                        handlePropagatedProxy(callee, null, "closure",stackHead)
+                    }
+                }
+                return IBF;
+            }
+        } else {
+            // TODO callee has no string method, can't store metedata information
+            // console.error("Callee has no toString method")
+        }
         var ibfStr = IBFStrDecl, argsConverted = [],val;
         // var cacheIndex = functionId + "_count" + invocationsIndName[functionId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
@@ -1998,19 +2446,21 @@ function __declTracerObject__(window) {
 
             if (typeof arg == "string" && (arg.indexOf("arg[")>=0 || arg.indexOf("closure.")>=0))
                 ibfStr += argStrs[i] + " = " + arg + ";\n"
-            else ibfStr +=  argStrs[i]+ ' = ' + val;
+            else ibfStr +=  argStrs[i]+ ' = ' + val + ";\n";
         })
         if (stringificationErr)
             return IBF;
 
         ibfStr += IBFStrCall;
+        if (customLocalStorage[cacheIndex]["IBF"] == null)
+            customLocalStorage[cacheIndex]["IBF"] = ""
         customLocalStorage[cacheIndex]["IBF"] += "\n" + ibfStr + "\n";
 
         return IBF;
     }
 
     this.createArgumentProxy = function(argObj){
-        if (pageLoaded) return argObj;
+        if (pageLoaded || _shadowStackHead in nonCacheableNodes) return argObj;
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
         if (!nodeId) return argObj;
         if (!argObj.length) return argObj;
@@ -2024,7 +2474,7 @@ function __declTracerObject__(window) {
     }
 
     this.createClosureProxy = function(closureObj){
-        if (pageLoaded) return closureObj;
+        if (pageLoaded || _shadowStackHead in nonCacheableNodes) return closureObj;
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
         if (!nodeId ) return closureObj;
         if (!Object.keys(closureObj).length) return closureObj;
@@ -2043,12 +2493,17 @@ function __declTracerObject__(window) {
     it up in a proxy. 
     */
     this.createThisProxy = function(thisObj){
-        if (pageLoaded || !thisObj || (typeof thisObj != "function" && typeof thisObj != "object")) return thisObj;
+        if (pageLoaded || !thisObj || (typeof thisObj != "function" && typeof thisObj != "object")
+         || _shadowStackHead in nonCacheableNodes ) return thisObj;
+        if (thisObj.withCredentials != null) {
+            nonCacheableNodes[_shadowStackHead] = "This: XMLHttpRequest"
+            return thisObj;
+        }
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
         if (!nodeId) return thisObj;
-        if (thisObj.__isProxy) {
-            handlePropagatedProxy(thisObj, null, "this")
-            thisObj = thisObj.__target;
+        if (thisObj.__isProxy || thisObj == window) {
+            handlePropagatedProxy(thisObj, null, "this",_shadowStackHead)
+            thisObj = thisObj.__target != null ? thisObj.__target : window
         }
         var proxyHandler = proxyEncapsulation(thisObj,"this");
         var thisProxy = new Proxy(thisObj, proxyHandler);
@@ -2289,7 +2744,8 @@ function __declTracerObject__(window) {
 
                     var children = objectTreeNode['e_' + key];
                     // FIX 
-                    // return children || [];
+                    /*all future reads from this object should be removed*/
+                    return children || [];
                     return [];
                 }
 
@@ -2298,6 +2754,8 @@ function __declTracerObject__(window) {
                     var writeObjs = {}, prunedInds = [], readsSeen = [],
                         writeObjsCh = [], readObjs = {};
                     arr.forEach(function(entry,ind){
+                        //skip child placeholders
+                        if (typeof entry == "string") return;
                         var type = entry[0];
                         if (type.indexOf(logType)<0) return;
                         var isWrite = type.indexOf("_reads")<0
@@ -2333,7 +2791,7 @@ function __declTracerObject__(window) {
                             sig[2] = val;
 
                             //Special case while reading window
-                            if (entry[4] == 0 && !isWrite) {
+                            if (entry[4] === 0 && !isWrite) {
                                 sig[1] += pathDelim + "self";
                                 sig[2] = path;
                             }
@@ -2488,57 +2946,279 @@ function __declTracerObject__(window) {
                 });
             }
 
-            signaturePropogate() {
-                var callGraph = this.callGraph;
+            setPropagationData(pmd, proxyData, processedSig, nonCacheableNodes){
+                this.PMD = pmd;
+                this.proxyData = proxyData;
+                this.processedSig = processedSig
+                this.nonCacheableNodes = nonCacheableNodes;
+            }
+            /*
+            Pseudo code
+            - Traverse bottom up, for 
+            */
+            signaturePropagate() {
+                //Copy the call graph since we will be mutating it
+                var callGraph = Object.assign({},this.callGraph);
                 var processedSig = this.processedSig;
                 var logType = this.logType;
-                var mergeArray = function(dstSig, srcSig) {
-                    srcSig.forEach((sig) => {
-                        if (dstSig.indexOf(sig) < 0)
-                            dstSig.push(sig);
-                    });
-                }
+                var pmd = this.PMD;
+                var proxyData = this.proxyData;
+                var nonCacheableNodes = this.nonCacheableNodes;
 
-                var mergeInto = function(dstNode, srcNode) {
-                    if (processedSig[srcNode] && processedSig[srcNode].isFunction)
-                        processedSig[dstNode].isFunction = true;
-                    if (processedSig[srcNode] && processedSig[srcNode][logType+"_reads"]) {
-                        if (processedSig[dstNode] && !processedSig[dstNode][logType+"_reads"]) 
-                            processedSig[dstNode][logType+"_reads"] = [];
-                        mergeArray(processedSig[dstNode][logType+"_reads"], processedSig[srcNode][logType+"_reads"]);
-                    }
-
-                    if (processedSig[srcNode] && processedSig[srcNode][logType+"_writes"]) {
-                        if (processedSig[dstNode] && !processedSig[dstNode][logType+"_writes"] ) 
-                            processedSig[dstNode][logType+"_writes"] = [];
-                        mergeArray(processedSig[dstNode][logType+"_writes"], processedSig[srcNode][logType+"_writes"]);
+                var object2pathmem;
+                var _getPathFromId = function(objectId, objectTree){
+                    if (object2pathmem[objectId] != null) return object2pathmem[objectId];
+                    for (var nodeId in objectTree){
+                        for (var edge in objectTree[nodeId]) {
+                            var _id = objectTree[nodeId][edge].indexOf(parseInt(objectId));
+                            if (_id>=0) {
+                                var parentPath = _getPathFromId(nodeId, objectTree);
+                                // path = parentPath + "['" + edge.substr(2) + "']";
+                                var path = parentPath + ";;;;" + edge.substr(2);
+                                object2pathmem[objectId] = path;
+                                return path;
+                            }
+                        }
                     }
                 }
 
-                var traverseGraph = function() {
-                    Object.keys(callGraph).forEach((nodeId) => {
-                        var children = callGraph[nodeId];
-                        children.forEach((child) => {
-                            if (processedSig[nodeId])
-                                mergeInto(nodeId, child);
-                        });
-                    });
+                var getPathFromId = function(objectId, functionId, stateType){
+                    var proxyMap, newPath;
+                    switch (stateType) {
+                        case "argument" : 
+                            proxyMap = proxyData.i2a; break;
+                        case "global" :
+                            proxyMap = proxyData.gph; break;
+                        case "this" :
+                            proxyMap = proxyData.i2t; break;
+                        case "closure":
+                            proxyMap = proxyData.i2c; break;
+                    }
+                    var _proxyPrivates = (stateType == "global" ? globalProxyHandler : proxyMap[functionId])
+                    if (!_proxyPrivates)
+                        return new Error("Path not found while translating signature")
+                    var proxyPrivates = _proxyPrivates.accessToPrivates();
+                    object2pathmem = {0:""};
+                    newPath = _getPathFromId(objectId, proxyPrivates.ObjectTree);
+                    if (newPath == null){
+                        return new Error("Path not found while translating signature")
+                    }
+                    return newPath
                 }
 
-                /*
-                Need to propagate the signature twice, due to the order of invocation
-                eg: callgraph -> function0 : function 1
-                                 function1 : function2
-                                 if 1 is propagated to 0 before 2 is propagated to 1, then 0 won't 
-                                 contain 2'signature.
-                */
-                traverseGraph();
-                traverseGraph();
+
+                var translateSigInParentScope = function(parentNode, childNode, sigEntry, sigType){
+                    var metadata = pmd[childNode];
+                    var sigCat = sigEntry[0].split("_")[1];
+                    if (sigType == "global" || sigType == "IBF") return Object.assign([],sigEntry);
+                    if (!metadata[sigType] || !metadata[sigType].length)
+                        return null;
+                    var translatedEntry = [];
+                    if (sigType == "argument") {
+                        var mainArg = sigEntry[1].split(';;;;')[1];
+                        var _matchMD = metadata[sigType].find(e=>e[0]==mainArg)
+                        if (!_matchMD) return null;
+                    } else 
+                        var _matchMD = metadata[sigType][0]
+                    var newPath = getPathFromId(_matchMD[1],parentNode, _matchMD[2])
+                    if (newPath && newPath.stack)
+                        return newPath;
+                    var newArg = _matchMD[2] + "_" + sigCat,
+                        newKey = sigType == "argument" ? [newPath].concat(sigEntry[1].split(';;;;').slice(2,)).join(";;;;") : 
+                            newPath + sigEntry[1] 
+                    return [newArg, newKey, sigEntry[2]];
+                }
+
+                var rewriteKey = function(translatedSig, origSig, alreadyChildClosure){
+                    var newKey = translatedSig[1].replace(origSig[1],"");
+                    if (!alreadyChildClosure)
+                        newKey = translatedSig[0].split("_")[0]  +  newKey   + ";&;" + origSig[1];
+                    else newKey = translatedSig[0].split("_")[0]  +  newKey 
+                    return newKey;
+                }
+
+                //sigType = read or write
+                var insertClosureSig = function(parentSig, insertInd, translatedSig, sigType, origSig, alreadyChildClosure){
+                    var newSigType = sigType == "reads" ? "childClosure_reads" : 
+                        sigType == "IBF" ? "childIBF" : "childClosure_writes";
+                    var newKey = rewriteKey(translatedSig, origSig,alreadyChildClosure);
+                    var finalSig = [newSigType,newKey,translatedSig[2]];
+                    parentSig.splice(insertInd,0,finalSig);
+                }
+
+
+                var _propagateHelper = function(sigEntry, parentNode, insertInd, childNode){
+                    var sigType = sigEntry[0].split("_")[0],
+                        parentSig = processedSig[parentNode];
+                    switch(sigType){
+                        case "global": parentSig.splice(insertInd, 0, sigEntry); break;
+                        case "argument":
+                        case "this": 
+                        case "closure":
+                        case "IBF":
+                            /*Handling IBF propagation similar to closure propagation*/
+                            if (sigType == "IBF") 
+                                var translatedSig = translateSigInParentScope(parentNode, childNode, sigEntry, "closure")
+                            else var translatedSig = translateSigInParentScope(parentNode, childNode, sigEntry, sigType)
+                            if (translatedSig && !translatedSig.stack){
+                                if (sigType == "closure"){
+                                    insertClosureSig(parentSig, insertInd, translatedSig, sigEntry[0].split("_")[1], sigEntry)
+                                    break;
+                                } else if (sigType == "IBF"){
+                                    insertClosureSig(parentSig, insertInd, translatedSig, "IBF", sigEntry)
+                                    break;
+                                }
+                                parentSig.splice(insertInd, 0, translatedSig); 
+                            } else if (translatedSig && translatedSig.stack)
+                                nonCacheableNodes[parentNode] = "translatedSig.message"
+                            break;
+                        case "childClosure":
+                        case "childIBF":
+                            var [childRef, actualKey] = sigEntry[1].split(';&;');
+                            var dummySigType = childRef.split(';;;;')[0]+"_"+sigEntry[0].split("_")[1];
+                            /*
+                            if child accessed it through closure, simply append the key 
+                            however if the child accessed it through arguments or global, translate it accordingly
+                            */
+                            var childAccessor = "closure"; 
+                            if (dummySigType.indexOf("argument")>=0 || dummySigType.indexOf("global")>=0){
+                                childAccessor = "argument";
+                                var dummySigEntry = [dummySigType, childRef.replace(childRef.split(';;;;')[0],""), sigEntry[2]];
+                            }
+                            else 
+                                var dummySigEntry = [dummySigType, "", sigEntry[2]];
+                            var translatedSig = translateSigInParentScope(parentNode, childNode, dummySigEntry, childRef.split(';;;;')[0])
+                            if (translatedSig && !translatedSig.stack){
+                                    //fix the original reference part and the key part
+                                    // translatedSig[1] = rewriteKey(translatedSig, dummySigEntry);
+                                    //mimic the closure category, modify the key to include actualKey, without the state part
+                                    if (childAccessor == "closure")
+                                        translatedSig[1] += ';&;' + sigEntry[1];
+                                    else dummySigEntry[1] = actualKey;
+                                    //tweak the originalSig to simply reuse the insertClosureSig function
+                                    // dummySigEntry[1]= actua.lKey
+                                    var rwType = sigEntry[0].split("_")[1];
+                                    if (sigType == "childIBF")
+                                        rwType = "IBF"
+
+                                    if (childAccessor == "closure")
+                                        insertClosureSig(parentSig, insertInd, translatedSig, rwType, dummySigEntry, true)
+                                    else 
+                                        insertClosureSig(parentSig, insertInd, translatedSig, rwType, dummySigEntry)
+                            }   
+
+                    }
+                }
+
+                var propagateSig = function(parentNode, childNode){
+                    var parentSig = processedSig[parentNode],
+                        childSig = processedSig[childNode];
+                    if (!parentSig || !childSig) return;
+                    var phInd = parentSig.findIndex(e=>e==childNode),
+                        cpPhInd = phInd;
+
+                    if (phInd<0){
+                        console.error("Parent node: " + parentNode + " has no placeholder for " + childNode );
+                        return;
+                    } 
+                    //Make space to insert childsig into parent sig
+                    parentSig.splice(phInd,1)
+                    childSig.forEach((sigEntry)=>{
+                        var inserted = _propagateHelper(sigEntry,parentNode, phInd, childNode);
+                        if (inserted)
+                            phInd++
+                    })
+                    if (childSig.IBF){
+                        var sigEntry = ["IBF", "", childSig.IBF]
+                        var inserted = _propagateHelper(sigEntry,parentNode, phInd, childNode);
+                        if (inserted)
+                            phInd++
+                    }
+                    //Run optimizer after updating parent sig
+                    // RWOpt(parentSig, cpPhInd);
+                }
+
+                var RWOpt = function(parentSig){
+                    var cat2w = {}, //category to write
+                        prunedInds = [],
+                        readsSeen = {};
+                    parentSig.forEach((entry,indx)=>{
+                        var state = entry[0].split("_")[0];
+                        if (!readsSeen[state])
+                            readsSeen[state] = []
+                        if (entry[0].indexOf("writes")>=0 ){
+                            readsSeen[state].push(entry[1])
+                            if (!cat2w[state])
+                                cat2w[state] = [];
+                            cat2w[state].push([entry[1],indx]) // state -> [key written to, index of the signature]
+                        } else {
+                            if (readsSeen[state].indexOf(entry[1])>=0 && prunedInds.indexOf(indx)<0)
+                                prunedInds.push(indx)
+                            else readsSeen[state].push(entry[1]);
+                        }
+                    })
+
+                    parentSig.forEach((entry, indx)=>{
+                            if (entry[0].indexOf("reads")>=0) {
+                                var state = entry[0].split("_")[0];
+                                if (!(state in cat2w)) return;
+                                for (var write of cat2w[state]) {
+                                    if (write[1] < indx && write[0].indexOf(entry[1])>=0 && prunedInds.indexOf(indx) < 0) {
+                                        prunedInds.push(indx)
+                                        break
+                                    }
+                                }
+                            }
+                    })
+                    // Removing all the reads after writes
+                    prunedInds = prunedInds.sort((b,a)=>{return b-a})
+                    for (var i=prunedInds.length - 1;i>=0;i--)
+                        parentSig.splice(prunedInds[i],1);
+
+                }
+
+                var updatedNodes = [];
+                var visitChildren = function(parentNode){
+                    if (updatedNodes.indexOf(parentNode)>=0) return;
+                    var children = callGraph[parentNode];
+
+                    for (var child of children){
+                        visitChildren(child);
+                        // console.log("Propagating " + child + " signature to " + parentNode)
+                        if (child in nonCacheableNodes){
+                            var childReason = nonCacheableNodes[child],
+                                parentReason = "";
+                            if (childReason.indexOf(";;")>=0){
+                                parentReason = childReason;
+                            } else {
+                                parentReason += childReason + ";;parent-of-nc";
+                            }
+                            nonCacheableNodes[parentNode]=parentReason;
+                            delete processedSig[parentNode]
+                            updatedNodes.push(parentNode)
+                            return;
+                        }
+                        propagateSig(parentNode,child);
+                    }
+                    updatedNodes.push(parentNode)
+                }
+
+                Object.keys(processedSig).forEach((parentNode)=>{
+                    visitChildren(parentNode);
+                })
+                Object.keys(processedSig).forEach((parentNode)=>{
+                    RWOpt(processedSig[parentNode]);
+                })
+
 
             }
     }
     var setupStateEndTime = performance.now();
     window.top.setupStateTime[window.top.setupStateCounter++] = setupStateEndTime - setupStateStartTime;
+
+    /*Set page loaded to true, since the initialization has happened
+    and we need to turn off tracking for unnecessary functions*/
+    // pageLoaded = false;
 };
 
 } /*else {

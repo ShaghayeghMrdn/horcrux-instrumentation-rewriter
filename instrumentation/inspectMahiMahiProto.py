@@ -60,11 +60,12 @@ def main(args):
     mahimahiUrls = []
     rtiUrls = {}
     # extract js Urls
-    http_response = http_record_pb2.RequestResponse()
+    http_response_orig = http_record_pb2.RequestResponse()
+    http_response_mod = http_record_pb2.RequestResponse()
 
     memoize_solutions = ["underscore","memoizee","iMemoized","lodash","fast-memoize"]
 
-    for root, folder, files in os.walk(args.mahimahi):
+    for root, folder, files in os.walk(args.original):
         scriptsToInstrument = [];
         url = root.split('/')[-2]
         urls = []
@@ -73,41 +74,62 @@ def main(args):
                 isJs = False
                 gzip = False
                 gzipType = 0
-                f = open(os.path.join(root,file), "rb")
-                # print file
-                http_response.ParseFromString(f.read())
-                f.close()
+                f_orig = open(os.path.join(root,file), "rb")
+                f_mod = open(os.path.join(args.modified, file))
+                http_response_orig.ParseFromString(f_orig.read())
+                http_response_mod.ParseFromString(f_mod.read())
+                # f.close()
+                valueChanged = False
+                unFoundHeader = False
+                for header in http_response_orig.response.header:
+                    header_found = False
+                    for header_mod in http_response_mod.response.header:
+                        if header.key == header_mod.key:
+                            header_found = True
+                        if header.key == header_mod.key and header.value != header_mod.value and header.key.lower() != "set-cookie":
+                            print header,header_mod
+                            valueChanged = True
 
-                for header in http_response.response.header:
-                    if header.key.lower() == "content-type":
-                        if "javascript" in header.value.lower() or "html" in header.value.lower():
-                            isJs = True
-                    if header.key.lower() == "content-encoding":
-                        # print "GZIIPED FILE is " , file
-                        gzip = True
-                        gzipType = header.value
-                        # markedToBeDeleted.append(header.key)
+                    if not header_found:
+                        print "Not found ", header 
+                        valueChanged = True
+                
+                if valueChanged:
+                    print http_response_orig.request.first_line
+                # if http_response_orig.response.body != http_response_mod.response.body:
+                #     print http_response_orig.response.body,http_response_mod.response.body
 
-                    if header.key.lower() == "transfer-encoding" and header.value == "chunked":
-                        http_response.response.body = unchunk(http_response.response.body)
+                print "XXXXXXXXXXXXXXXXXXXX"
 
-                if isJs:
-                    if gzip:
-                        try:
-                            # print "Decompressing {} ...with type {}".format(file, gzipType)
-                            if gzipType.lower() != "br":
-                                body = zlib.decompress(bytes(bytearray(http_response.response.body)), zlib.MAX_WBITS|32)
-                            else:
-                                body = brotli.decompress(http_response.response.body)
-                        except zlib.error as e:
-                            error=1
-                            # print "Corrupted decoding: " + file + str(e)
-                            # os._exit(0)
-                    else:
-                        body = http_response.response.body
-                    g = open(os.path.join(args.output,file),"w")
-                    g.write(body)
-                    g.close()
+                    # if header.key.lower() == "content-type":
+                    #     if "javascript" in header.value.lower() or "html" in header.value.lower():
+                    #         isJs = True
+                    # if header.key.lower() == "content-encoding":
+                    #     # print "GZIIPED FILE is " , file
+                    #     gzip = True
+                    #     gzipType = header.value
+                    #     # markedToBeDeleted.append(header.key)
+
+                #     if header.key.lower() == "transfer-encoding" and header.value == "chunked":
+                #         http_response.response.body = unchunk(http_response.response.body)
+
+                # if isJs:
+                #     if gzip:
+                #         try:
+                #             # print "Decompressing {} ...with type {}".format(file, gzipType)
+                #             if gzipType.lower() != "br":
+                #                 body = zlib.decompress(bytes(bytearray(http_response.response.body)), zlib.MAX_WBITS|32)
+                #             else:
+                #                 body = brotli.decompress(http_response.response.body)
+                #         except zlib.error as e:
+                #             error=1
+                #             # print "Corrupted decoding: " + file + str(e)
+                #             # os._exit(0)
+                #     else:
+                #         body = http_response.response.body
+                #     g = open(os.path.join(args.output,file),"w")
+                #     g.write(body)
+                #     g.close()
 
           
 
@@ -119,7 +141,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('mahimahi', help='path to input directory')
-    parser.add_argument('output',help='path to output directory')
+    parser.add_argument('original', help='path to input directory')
+    parser.add_argument('modified', help='path to input directory')
+    # parser.add_argument('url',help='path to output directory')
     args = parser.parse_args()
     main(args)

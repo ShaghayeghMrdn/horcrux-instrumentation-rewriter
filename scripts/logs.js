@@ -1,12 +1,23 @@
 var fs = require('fs')
-var util = require('util')
+var util = require('util'),
+	strSim=require('string-similarity'),
+	program = require('commander');
 
-var flag = process.argv[2];
+
+program
+    .option("-m, --modified [modified]", "path to the modified log file")
+    .option("-o, --original [original]", "path to the original log file")
+    .option("-t, --type [type]","type of analysis to run")
+    .option("-v, --verbose", "verbose logs")
+    .parse(process.argv);
+
+
+var flag = program.type
 var verbose = false;
 var log1, log2;
 try {
-	log1 = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
-	log2 = JSON.parse(fs.readFileSync(process.argv[4],"utf-8"))
+	log1 = JSON.parse(fs.readFileSync(program.modified, "utf-8"))
+	log2 = JSON.parse(fs.readFileSync(program.original,"utf-8"))
 
 	// if (!log1.length)
 	// 	process.stderr.write(util.format("Empty logs: log1" + process.argv[3] + "\n"));
@@ -72,13 +83,15 @@ function matchingExceptions(log1, log2){
     log1.forEach((l) => {
         if (l.exceptionDetails){
             //Either there is an exceptions object or the description is contained inside the text object
-            if (l.exceptionDetails.exception) {
-                var exception = l.exceptionDetails.exception.description || "";
+            if (l.exceptionDetails.exception && l.exceptionDetails.exception.description) {
+                var exception = l.exceptionDetails.text.length > l.exceptionDetails.exception.description.length ? 
+	                	l.exceptionDetails.text : l.exceptionDetails.exception.description || "";
                 if (exception.indexOf("at")>=0)
                 	exceptions1.push(exception.substr(0, exception.indexOf("at")));
                 else exceptions1.push(exception);
             } else {
-                exceptions1.push(l.exceptionDetails.text);
+                exceptions1.push(l.exceptionDetails.text ? l.exceptionDetails.text 
+                	: l.exceptionDetails.value );
             }
         }
     });
@@ -86,7 +99,8 @@ function matchingExceptions(log1, log2){
 	log2.forEach((l) => {
 	    if (l.exceptionDetails){
 	            if (l.exceptionDetails.exception) {
-	                var exception = l.exceptionDetails.exception.description || "";
+	                var exception = l.exceptionDetails.text.length > l.exceptionDetails.exception.description.length ? 
+	                	l.exceptionDetails.text : l.exceptionDetails.exception.description || "";
 	                if (exception.indexOf("at")>=0)
 	                	exceptions2.push(exception.substr(0, exception.indexOf("at")));
 	                else exceptions2.push(exception);
@@ -102,7 +116,8 @@ function matchingExceptions(log1, log2){
 		// console.log("exception1" + exceptions1[ex1]);
 		for (var ex2 in exceptions2){
 			// console.log("exceptions2" + exceptions2[ex2]);
-			if ( (exceptions1[ex1] == exceptions2[ex2]) || exceptions1[ex1].indexOf("DOMException")>=0 ) {
+			if ( (exceptions1[ex1] == exceptions2[ex2]) || exceptions1[ex1].indexOf("DOMException")>=0
+			|| exceptions1[ex1].indexOf("tracerPROXY")>=0 ) {
 				exceptionCount++;
 				foundMatch = true;
 				break;
@@ -111,13 +126,24 @@ function matchingExceptions(log1, log2){
 		/*if logs2 is empty*/
 		if (exceptions1[ex1].indexOf("DOMException")>=0 ) {
 			exceptionCount++;
-			foundMatch=true;
+			foundMatch=true;  
 		}
-		if (!foundMatch)
+		if (!foundMatch){
+			/*Didn't find exact match, let's get ss mettric*/
+			for (var ex2 in exceptions2){
+				// console.log("exceptions2" + exceptions2[ex2]);
+				var ss = strSim.compareTwoStrings(exceptions1[ex1], exceptions2[ex2]);
+				if (ss > 0.9){
+					
+				}
+			}
 			unmatches.push(exceptions1[ex1]);
+		}
 	}
-	console.error(exceptions1);
-	console.error(exceptions2);
+	if (program.verbose) {
+		console.error(exceptions1);
+		console.error(exceptions2);
+	}
 	console.error(unmatches);
 	return exceptionCount;
 
@@ -133,7 +159,7 @@ function calculateErrors(log){
 	return count;
 }
 		
-if (flag != "-l" && flag !== "-e" && flag != "-simple") { console.error("No flag provided: \nUsage: node logs.js <firstLog> <secondLog> <flag>"); process.exit(); }
-if (flag == "-e") getExceptionsDiff();
-else if (flag == "-l") {getConsoleLogs(log1);}
-else if (flag == "-simple") simpleErrorMatch(log1, log2);
+if (flag != "l" && flag !== "e" && flag != "simple") { console.error("No flag provided: \nUsage: node logs.js <firstLog> <secondLog> <flag>"); process.exit(); }
+if (flag == "e") getExceptionsDiff();
+else if (flag == "l") {getConsoleLogs(log1);}
+else if (flag == "simple") simpleErrorMatch(log1, log2);

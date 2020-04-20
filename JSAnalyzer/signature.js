@@ -128,9 +128,10 @@ var extractAllIdentifiers = function(node, isAA){
             node.params.forEach(function(arg){
                 readRecursively(arg);
             })
-            node.body.body.forEach(function(arg){
-                readRecursively(arg);
-            });
+            /*Don't need to extract anything from inside the function body*/
+            // node.body.body.forEach(function(arg){
+            //     readRecursively(arg);
+            // });
         }  else if (node.type == "AssignmentExpression" || node.type == "BinaryExpression" || node.type == "LogicalExpression"){
             readRecursively(node.left);
             readRecursively(node.right);
@@ -189,9 +190,10 @@ var handleReads = function(node, haveIds, all, isAA) {
         var _isLocal = scope.IsLocalVariable(read)
         if (_isLocal == -3  )
             globalReads.push(read);
-        else if (_isLocal >= 0 && !isParamOfFunction(read))
-            argReads.push({ind:_isLocal,val:read});
-        else if (_isLocal == -2)
+        else if (_isLocal >= 0) {
+            if (!isParamOfFunction(read))
+                argReads.push({ind:_isLocal,val:read});
+        } else if (_isLocal == -2)
             localReads.push(read);
         else
             antiLocal.push(read);

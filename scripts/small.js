@@ -129,30 +129,46 @@ if (flag == "-simple") {
     }
 } else if (flag == "-net"){
     var net  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
-    // var net = netRaw.split('\n');
-    // if (!net || !net.length) return;
-    // net.pop();// remove the last entry since it is an empty line
-    // net = net.map(e=>JSON.parse(e));
-    // reqSent = (net.filter(e=>e['Network.requestWillBeSent']).map(e=>e['Network.requestWillBeSent'].request.url));
-    reqRecv = (net.filter(e=>e['Network.responseReceived'] /*&& e['Network.responseReceived'].response.mimeType.indexOf("xhr")>=0*/).map(e=>e['Network.responseReceived'].response.url));
-    process.stdout.write(util.format(net.length));
-    // fs.writeFileSync("urls", JSON.stringify(reqSent))
-    // reqRecv.forEach((k)=>{
-    //     console.log(k);
-    // })
-    // ar = [...reqSent]
-    // ar.forEach((k)=>{''
-    //     console.log(k.split('/').slice(2).join("/"));
-    //     // console.log(k);
-    // });
-} else if( flag == "-net2") {
-    var net  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
-    reqSent = (net.filter(e=>e['Network.requestWillBeSent']).map(e=>e['Network.requestWillBeSent'].request.url));
-    process.stdout.write(util.format(reqSent.length));
-} else if (flag == "-net3"){
-    var net  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
-    process.stdout.write(util.format(net.length));
-}
+    var total = 0, reused =0;
+    net.forEach((data)=>{
+        total++;
+        if (data.response.connectionReused)
+            reused++
+        // if (data.)
+        if (data.response.timing) 
+            console.log(  data.response.timing.connectEnd -data.response.timing.connectStart)
+    })
+    // console.log(reused, total, reused/total);
+} else if( flag == "-inter") {
+    var ar1  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
+    var ar2  = JSON.parse(fs.readFileSync(process.argv[4], "utf-8"));
+    var ar3  = JSON.parse(fs.readFileSync(process.argv[5], "utf-8"));
+
+    //filter child nodes
+    ar1 = ar1.filter(e=>e[2]!= -1)
+    ar2 = ar2.filter(e=>e[2]!= -1)
+    ar3 = ar3.filter(e=>e[2]!= -1)
+
+    var inter12 = [];
+    ar1.forEach((a1)=>{
+        ar2.forEach((a2)=>{
+            if (a1[0] == a2[0])
+                inter12.push([a1[0],a1[1],a2[1]])
+        })
+    })
+    console.log(inter12);
+    var inter123 = [];
+    //intersection of inter12 with ar3
+    ar3.forEach((a3)=>{
+        inter12.forEach((i)=>{
+            if (i[0] == a3[0])
+                inter123.push([...i,a3[1]])
+        })
+    })
+    console.log("Max nodes: ", Math.max(ar1.length, ar2.length, ar3.length), " with intersection ", inter123.length);
+    console.log(inter123);
+
+} 
 else if (flag == "-cg") {
     cg = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
     var processLeafNodes = function(cg){
@@ -173,17 +189,77 @@ else if (flag == "-cg") {
 
 } else if (flag == "-cache"){
     cs = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
-    if (cs.value){
-        process.stdout.write(util.format(cs.value.hits.length, cs.value.misses.empty.length))
-    }
+    cs.forEach((node)=>{
+        if (node[1].Rtime > node[1].Otime)
+            console.log(node);
+    })
 } else if (flag == "-reduce") {
-    var leafNodes  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
-    var total = leafNodes.reduce((acc, cur)=>{return acc + cur[1]},0);
+    var setup  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
+    var total = Object.values(setup).reduce((acc, cur)=>{return acc + cur},0);
     process.stdout.write(util.format(total + " "));
-} else if (flag == "-reducec") {
-    var leafNodes  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
-    var total = leafNodes.reduce((acc, cur)=>{return acc + cur.self},0);
-    process.stdout.write(util.format(total + " "));
+} else if (flag == "-hit"){
+    var stats  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
+    var replayT  = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+    var hits  = JSON.parse(fs.readFileSync(process.argv[5], "utf-8")).value.hits;
+    var perInvocTime = {};
+    stats.forEach((s)=>{
+        perInvocTime[s[0]] = s[1].Otime/s[1].sum;
+    })
+
+    var orig = read = write = 0; 
+    hits.forEach((invoc)=>{
+        var fn = invoc.split("_count")[0];
+
+        var t = perInvocTime[fn];
+        orig += t;
+        read += replayT[invoc][1] - replayT[invoc][0];
+        write += replayT[invoc][2] - replayT[invoc][1];
+    })
+    console.log(orig, read, write);
+
+
+}  else if (flag == "-miss") {
+    var stats  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
+    var replayT  = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+    var cs  = JSON.parse(fs.readFileSync(process.argv[5], "utf-8")).value.misses;
+    var perInvocTime = {};
+    stats.forEach((s)=>{
+        perInvocTime[s[0]] = s[1].Otime/s[1].sum;
+    })
+
+    var orig = read = write = 0; 
+    ["mismatch", "error","empty"].forEach((cat)=>{
+        cs[cat].forEach((invoc)=>{
+
+            if (cat == "error") invoc = invoc[0];
+            var fn = invoc.split("_count")[0];
+
+            var t = perInvocTime[fn];
+            orig += t;
+            var len = replayT[invoc].length -1;
+            read += replayT[invoc][len] - replayT[invoc][0];
+        })
+    })
+    console.log(orig, read);
+}  else if (flag == "-sig") {
+    var timing  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
+    var sigSizes  = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+    var hits = JSON.parse(fs.readFileSync(process.argv[5], "utf-8")).value.hits;
+    var proc = {};
+    hits.forEach((invoc)=>{
+        var [n,count] = invoc.split("_count")
+        if ( !(n in proc) ){
+            proc[n] = {};
+            proc[n].time = 0;
+            proc[n].len = 0;
+        }
+        proc[n].time += timing[invoc][1] - timing[invoc][0];
+        proc[n].len += sigSizes[invoc] ? sigSizes[invoc] :0 ; 
+    })
+    Object.keys(proc).forEach((n)=>{
+        console.log(proc[n].time, proc[n].len)
+    })
+    // process.stdout.write(util.format(total + " "));
 } 
 else if (flag == "-map") {
     var leafNodes =  JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
@@ -267,33 +343,33 @@ else if (flag == "-map") {
     fs.writeFileSync(process.argv[5], JSON.stringify(expensiveNodes));
 
 } else if (flag == "-invoc"){
-    var leafNodes = JSON.parse(fs.readFileSync(process.argv[4], "utf-8"));
-    var callGraph = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
-    var totalInvocs = 0;
-    var processInvocations = function(cg){
-        var leafGraph = [], nonLeafGraph = [], node2invocations = {},tinvocs = 0;
-        if (!cg) return [];
-        (cg).forEach((nodeId)=>{
-            var fnName = nodeId.split("_count")[0];
-            // if (leafGraph.indexOf(fnName) >=0 || nonLeafGraph.indexOf(fnName)>=0) return;
-            // var _isLeaf = Object.entries(cg).filter(e=>e[0].indexOf(fnName)>=0).filter(e=>e[1]>0).length;
-            // if (_isLeaf) leafGraph.push(fnName)
-            // else nonLeafGraph.push(fnName);
+    var recordInvocs = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
+    var replayInvocs = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+    var timing = JSON.parse(fs.readFileSync(process.argv[5], "utf-8"));
 
-            if (!node2invocations[fnName])
-                node2invocations[fnName] = 0
-            node2invocations[fnName]++;
-        })
-        return node2invocations;
-    }
-    node2invocations =  processInvocations(callGraph);
-    leafNodes.forEach((lg)=>{
-        if (node2invocations[lg[0]]) {
-            // console.log(lg[0], node2invocations[lg[0]].length);
-            totalInvocs += node2invocations[lg[0]];
-        }
+    var rNode2invocs = {}, node2invocs = {record:{}, replay:{}};
+    var relevantNodes = timing.filter(e=>e[2]>0).map(e=>e[0])
+    recordInvocs.forEach((i)=>{
+        var [n,count] = i.split("_count");
+        if (count == 0)
+            node2invocs.record[n]=[]
+        node2invocs.record[n].push(i);
     })
-    process.stdout.write(util.format(totalInvocs + " "));
+    replayInvocs.forEach((i)=>{
+        var [n,count] = i.split("_count");
+        if (count == 0)
+            node2invocs.replay[n]=[]
+        node2invocs.replay[n].push(i);
+    })
+    // console.log(relevantNodes)
+    relevantNodes.forEach((rN)=>{
+        rNode2invocs[rN] = [node2invocs.record[rN] ? node2invocs.record[rN].length : 0,
+             node2invocs.replay[rN]? node2invocs.replay[rN].length:0];
+    });
+    // console.log(rNode2invocs);
+    console.log(Object.values(rNode2invocs).map(e=>e[0]).reduce((acc,cur)=>{return acc+cur},0),
+        Object.values(rNode2invocs).map(e=>e[1]).reduce((acc,cur)=>{return acc+cur},0));
+
 
 } else if (flag == "-bc") {
     var lnOrig = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
@@ -328,11 +404,9 @@ else if (flag == "-map") {
     // console.log(Math.max(...sizes))    
     process.stdout.write(Math.max(...sizes) + " ");
 } else if (flag == "-sum"){
-    var data = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
-    if (data.value){
-        var sum = Object.values(data.value).reduce((acc, cur)=>{return acc+Number.parseInt(cur)},0);
-        console.log(sum);
-    }
+    var data = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
+    var sum = Object.values(data).reduce((acc, cur)=>{if (cur.length == 2) return acc+cur[1]-cur[0]; else return acc},0);
+    console.log(sum);
 
  } else if (flag == "-dictComp") {
     var dict1 = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
@@ -388,6 +462,43 @@ else if (flag == "-map") {
 
 
 
+ } else if (flag == "-nc"){
+    var aggrReasonTime = {},
+        rCount = {}
+    var files = fs.readdirSync(process.argv[3]),
+        nFiles = files.length;
+    files.forEach((f)=>{
+        var filename = process.argv[3]+f;
+        var ncStats = JSON.parse(fs.readFileSync(filename, "utf-8"));
+        Object.keys(ncStats).forEach((r)=>{
+            if (!(r in aggrReasonTime)){
+                rCount[r] = 0
+                aggrReasonTime[r] = 0;
+            }
+            rCount[r]++;
+            aggrReasonTime[r] += ncStats[r];
+            // aggrReasons[r].push(ncStats[r]);
+        });
+
+        /*pretty print*/
+
+    })
+
+    Object.keys(aggrReasonTime).forEach((r)=>{
+        aggrReasonTime[r] = aggrReasonTime[r]/(rCount[r]); 
+        console.log(aggrReasonTime[r] + "," + r)
+    })
+ } else if (flag == "-replayOverhead") {
+    var timeInfo = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
+    var sigSizes = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+
+    var proc = {};
+    Object.keys(timeInfo).forEach((invoc)=>{
+        proc[invoc] = {}
+        proc[invoc].time = timeInfo[invoc][1] - timeInfo[invoc][0]
+        proc[invoc].sig = sigSizes[invoc];
+    })
+    fs.writeFileSync(process.argv[5], JSON.stringify(proc));
  }
 
 function genLibToKeys(sig){

@@ -105,6 +105,16 @@ var getFunctionStats = async function(Runtime, outDir) {
 
 }
 
+var getDOM = async function(Runtime, outFile){
+    var script = fs.readFileSync("serializeWithStyles.js","utf-8");
+    await Runtime.evaluate({ expression: script });
+    let html = await Runtime.evaluate({
+        expression: 'document.documentElement.serializeWithStyles();'
+    });
+    // console.log(html)
+    fs.writeFileSync(outFile,html.result.value);
+}
+
 var getInvocationProperties = async function(Runtime, outFile, fetchCommand, preProcess){
     if (preProcess)
         await runCodeOnClient(Runtime);
@@ -293,5 +303,6 @@ module.exports = {
     getInvocationProperties: getInvocationProperties,
     getProcessedSignature : getProcessedSignature,
     runPostLoadScripts: runPostLoadScripts,
-    getStorageOverhead:getStorageOverhead 
+    getStorageOverhead:getStorageOverhead,
+    getDOM: getDOM
 }

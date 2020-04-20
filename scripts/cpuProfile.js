@@ -13,12 +13,22 @@ var {cpuProfileParser} = require("../devtool-cpu-model/analyze_cpu_profile.js");
 program
     .version("0.1.0")
     .option("-i, --input [input]","path to the input raw js Profile")
+    .option("-p, --plt [plt]","page load time to cutoff profiler time")
     .option('-o, --output [output]', 'path to the output file')
+    .option('-s, --specific [specific]', "name of the function whose time needs to be inquired")
+    .option('-t, --type [type]')
     .parse(process.argv)
 
 
 var cpuRawInput = JSON.parse(fs.readFileSync(program.input, "utf-8"));
-var cpu = cpuProfileParser(cpuRawInput);
+var plt; 
+if (program.plt){
+    var _plt = JSON.parse(fs.readFileSync(program.plt,"utf-8"));
+    plt=_plt.end - _plt.startTime;
+}
+var cpu = cpuProfileParser(cpuRawInput,plt);
+if (program.plt)
+    fs.writeFileSync(program.input+".trim", JSON.stringify(cpuRawInput));
 var cpuTimeWoProgram = cpu.raw.total - (cpu.raw.idleNode.self + cpu.raw.programNode.self);
 var cpuTime = cpu.raw.total - cpu.raw.idleNode.self;
 
@@ -323,7 +333,7 @@ var getLeafNodesUsingTime = function(){
     var totalNodes = cpu.parsed.children;
     var ibf = ["(program)","(idle)","(garbage collector)"]
     totalNodes.forEach((node)=>{
-        if ( (node.self >= node.total) && ibf.indexOf(node.functionName)<0 && 
+        if ( (node.self) && ibf.indexOf(node.functionName)<0 && 
                 // && node.children.length == 0 && 
                 node.profileNode.callFrame.url.startsWith("http")){
             /*Candidate for potential leaf node*/
@@ -350,6 +360,20 @@ var instrumentationOverhead = function(){
         }
     })
     return instNodes;
+}
+
+var getUserDefinedTime = function(cpu){
+    var time = 0;
+    var topUDFns = []
+    cpu.parsed.children.sort((a,b)=>{return b.self - a.self}).forEach((child)=>{
+        if (child.profileNode.url.startsWith("http")){
+            // console.log(child.profileNode.callFrame, child.self);
+            time += child.self
+        } else {
+            // console.log(child.profileNode.callFrame)
+        }
+    })
+    return time;
 }
 
 function main(){
@@ -405,21 +429,45 @@ function main(){
     process.stdout.write(util.format(cpuTime + " " + cpuTimeWoProgram));
 }
 
-var leafNodes = getLeafNodesUsingTime();
-// var topExpensiveNodes = topKRtiSimple(cpu.parsed, 80)
-// console.log(topExpensiveNodes.length, cpu.parsed.children.length)
-var leafTime = 0;
-var leafNodesUser = leafNodes.map((child)=>{
-        if (child.url.startsWith("http")) {
-            leafTime += child.self;
-            return {self:child.self, total: child.total, callUID: child.callUID, functionName: child.functionName,
-                url: child.url, raw: child.profileNode.callFrame};
+var specificFnTime = function(fnName){
+    var time = 0, declTime = 0;
+    for (child of cpu.parsed.children){
+        if (child.profileNode.callFrame.functionName.toLowerCase().indexOf(fnName)>=0){
+        declTime =  child.total;
+            break;
         }
-    }).filter(node => node);
+        // if (child.profileNode.url.indexOf("goelayu")>=0){
+        //     time += child.profileNode.total;
+            // console.log(child.profileNode.callFrame, child.profileNode.total);
+        // }
+    }
+    return declTime;
+
+}
+// var leafNodes = getLeafNodesUsingTime();
+// // var topExpensiveNodes = topKRtiSimple(cpu.parsed, 80)
+// // console.log(topExpensiveNodes.length, cpu.parsed.children.length)
+// var leafTime = 0;
+// var leafNodesUser = leafNodes.map((child)=>{
+//         if (child.url.startsWith("http")) {
+//             leafTime += child.self;
+//             return {self:child.self, total: child.total, callUID: child.callUID, functionName: child.functionName,
+//                 url: child.url, raw: child.profileNode.callFrame};
+//         }
+//     }).filter(node => node);
 
 // var instNodes = instrumentationOverhead();
 // console.log(leafTime);
 program.output && fs.writeFileSync(program.output, JSON.stringify(leafNodesUser))
-process.stdout.write(util.format(cpuTimeWoProgram+ " "));
+// if (program.type == "u") process.stdout.write(util.format(getUserDefinedTime(cpu) + " "));
+if (program.type == "u") process.stdout.write(util.format(cpuTimeWoProgram + " "));
+if (program.type == "p") process.stdout.write(util.format(cpu.raw.programNode.self));
+if (program.type == "i") process.stdout.write(util.format(cpu.raw.idleNode.self));
+
+var ret;
+// console.log(cpu.raw.total, cpu.parsed.children.reduce((acc, cur)=>{return acc + cur.self},0))
+program.specific && (ret = specificFnTime(program.specific));
+program.specific && process.stdout.write(util.format(" " + ret));
+
 
 

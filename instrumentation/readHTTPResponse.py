@@ -10,6 +10,7 @@ import sys
 from copy import deepcopy
 from Naked.toolshed.shell import execute_js
 import json
+import time
 import unicodedata
 
 deflate_compress = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS)
@@ -21,6 +22,8 @@ instrumentation_plugins = {
     "replay" : "replay.js",
     "ND" : "ND.js"
 }
+
+timeFile = "timeInfo"
 
 def extractUrlFromString(url):
     regex = '(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
@@ -152,7 +155,7 @@ def instrument(file,root, childPids, fileType, output_directory,args):
     gzipType = ""
     TEMP_FILE = "tmp"
     iframe_script_path = "iframeJs2/"
-    log_directory = "instOutput"
+    log_directory = args.logDir
 
     if len(filename) > 50:
         filename = filename[-50:]
@@ -161,10 +164,13 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         filename = url+filename
 
     global node_debugging_port
+    global static_analysis_overhead
+    static_analysis_overhead += 3
 
     node_debugging_port+=1
     pid = os.fork()
     childPids.append(pid)
+
     if pid == 0:
         TEMP_FILE = str(os.getpid())
         TEMP_FILE_zip = TEMP_FILE + ".gz"
@@ -206,7 +212,7 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         else:
             command = " {} -i {} -n '{}' -t {} -p {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType, args.instOutput)
 
-        if (args.debug) and fileType == "html":
+        if (args.debug) and fileType == "js":
             command = "node --inspect-brk={}".format(node_debugging_port) + command
         else:
             command = "node " + command
@@ -217,8 +223,11 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         error_file=open(_log_path+"errors","w")
         # if (args.instOutput != "ND" or fileType == "html"):
         print "Executing ", command
+        _sa_begin_time = time.time()
         cmd = subprocess.call(command, stdout=log_file, stderr =error_file, shell=True)
-
+        _sa_end_time = time.time()
+        static_analysis_overhead = _sa_end_time - _sa_begin_time
+        print "overhead: ", static_analysis_overhead
         # read the information returned from the script if inst type was recording
         # if args.instOutput == "caching":
         try:
@@ -226,6 +235,7 @@ def instrument(file,root, childPids, fileType, output_directory,args):
             returnInfo = open(returnInfoFile,'r').readline();
 
             open(_log_path + "info","w").write(returnInfo)
+            open (TEMP_FILE + ".time","w").write(str(static_analysis_overhead))
         except IOError as e:
             print "Error while reading info file" + str(e)
 
@@ -296,12 +306,13 @@ def instrument(file,root, childPids, fileType, output_directory,args):
 node_debugging_port=9229
 http_response = http_record_pb2.RequestResponse()
 
+static_analysis_overhead = 0
+
 def main(args):
     file_counter = 0
     third_party_libraries = ["Bootstrap.js","show_ads_impl.js", "osd.js"]
     TEMP_FILE = "tmp"
     iframe_script_path = "iframeJs2/"
-    log_directory = "instOutput"
     output_directory = args.input.split('/')[-2]
     print output_directory
     childPids = []
@@ -361,6 +372,7 @@ def main(args):
         print "waiting on pid", pid
         os.waitpid(pid,0)
     print "All the HTML child processes died..\n Main thread terminating"
+    print "Static analysis time:", static_analysis_overhead
 
     subprocess.Popen("rm staticDump*",stderr=open("/dev/null","r"), shell=True)
     
@@ -370,7 +382,8 @@ if __name__ == "__main__":
     parser.add_argument('input', help='path to input directory')
     parser.add_argument('output', help='path to output directory')
     parser.add_argument('instOutput', help='type of instrumentation to perform',
-     default="signature", choices=["cg","signature"])
+     default="record", choices=["cg","record", "replay"])
+    parser.add_argument('logDir', help='path to log output directory')
     parser.add_argument('--jsProfile', help='path to the js profile')
     parser.add_argument('--cgInfo',help="path to the cg info")
     parser.add_argument('--debug',help="enable node debugging using -inspect flag", 

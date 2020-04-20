@@ -8,6 +8,7 @@
 
 mmwebreplay=/home/goelayu/research/hotOS/origMahimahi/mahimahi/buildDir/bin/mm-webreplay
 mmwebreplay=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-webreplay
+mmwebrecord=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-webrecord
 mmdelay=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-delay
 
 # ipfilePrefix=/home/goelayu/research/WebPeformance/output/unmodified/trace_5_15_record_v76_ssl1.0_c69/
@@ -37,7 +38,8 @@ replay(){
 	echo "Launching chrome"
 	sleep 3
     # $mmwebreplay $1 $mmdelay 3 node inspectChrome.js -u $2 -l -n --log -o $3 -p $4 --mode $5
-    $mmwebreplay $1 node inspectChrome.js -u $2 -o $3 -p $4 $DATAFLAGS
+    $mmwebrecord $1 node inspectChrome.js -u $2 -o $3 -p $4 --mode $5 $DATAFLAGS
+    # node inspectChrome.js -u $2 -o $3 -p $4 $DATAFLAGS
 	replay_pid=$!
 	#waitForNode
 	waitForNode $4
@@ -70,7 +72,7 @@ waitForNode(){
 
 waitForChrome(){
 	count=0
-	echo "waiting"
+	echo "waiting["
 	curr_time=`date +'%s'`
 	while [[  $count != 3 ]]; do
 		count=`ps aux | grep chromium-browser | wc | awk '{print $1}'`
@@ -89,14 +91,29 @@ waitForChrome(){
 help
 clean
 
-while IFS='' read -r line || [[ -n "$line" ]]; do
-	echo "replaying url: " $line
-	url=`echo $line | cut -d'/' -f 3`
-	path="$2"/"$url"
-	for iter in $(seq 1 $5); do 
-		replay $path $line ${3}//"$url"/ $4 record $url
-		# replay $path $line ${3}/replay/"$url"/ $4 replay;
-		# replay $path $line ${3}2/"$url" $4;
-		sleep 2
-	done
-done < "$1"
+for ti in b2b hour; do
+	# while IFS='' read -r line || [[ -n "$line" ]]; do
+	while read line; do
+		echo "replaying url: " $line
+		url=`echo $line | cut -d'/' -f 3`
+			echo "mode is " $mode
+			if [[ $run == "original" ]]; then
+				path="$2"//"$url"
+			fi
+			if [[ $mode == "original" ]]; then 
+				path=../traces/mobile/alexa_1000/"$url"
+				# path=$2///"$url"
+			fi
+			#for cgtime mode is in not in the path
+			# path="$2"/"$url"
+			for iter in $(seq $5 $(($5+1))); do 
+				mkdir -p $2/$ti/$iter/
+				path="$2"/$ti/$iter/"$url"
+				mkdir -p ${3}/$ti/$iter/
+				replay $path $line ${3}/$ti/$iter/"$url"/ $4 $mode $url
+				# replay $path $line ${3}/replay/"$url"/ $4 replay;
+				# replay $path $line ${3}2/"$url" $4;
+				sleep 2
+			done
+	done<"$1"
+done

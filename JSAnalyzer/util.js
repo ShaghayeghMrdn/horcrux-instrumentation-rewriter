@@ -360,13 +360,58 @@ var isClosureFunction = function(node){
     return false;
 }
 
+// var LHSContainsCall = function(node){
+//     if (node.type == "MemberExpression" && node.object.type 
+//         == "CallExpression") return true;
+
+//     if (node.type == "MemberExpression" && 
+//         node.object.type == "SequenceExpression" ){
+//         for (var n of node.object.expressions){
+//             if (n.type == "CallExpression")
+//                 return true;
+//         }
+//     }
+// }
+
+var LHSContainsCall = function(node){
+    if (!node || !node.children) return;
+    var result = false;
+    for (var c of node.children){
+        result = result || LHSContainsCall(c);
+        if (result) return result;
+        if (c.type == "CallExpression"){
+            result = true;
+            return result;
+        }
+    }
+    return result;
+}
+
+var nodeContainsCall = LHSContainsCall;
+
 var getNameFromFunction = function(node){
-    if (node.id)
+    if (node.type == "FunctionDeclaration" && node.id)
         return node.id.source();
+    if (node.parent.type == "AssignmentExpression"){
+        /*if lhs contains a function call, doing it again will 
+        either alter the cfg, or result in an incorrect lhs
+        eg: (b,a()).i = function(){} -> might result in b.i to be set as the function
+        However if you rewrite it to (b,a()).i.__getScope__ =  something. then the second invocation of 
+        a() might return true, and you would have a().i.__getScope__, when a().i doesn't exist
+        => Error*/
+        if (LHSContainsCall(node.parent.left))
+            return null;
+        return node.parent.left.source();
+    }
     if (node.parent.id)
         return node.parent.id.source()
-    if (node.parent.type == "AssignmentExpression")
-        return node.parent.left.source();
+    // if (node.id){
+    //     if (node.type == "FunctionExpression"){
+    //         Func exp node.id isn't declared in the scope
+    //         example: a = function b(){}; here b is not a valid declaration, only a is
+    //     }
+    //     return node.id.source();
+    // }
     return null;
 
 }
@@ -468,5 +513,6 @@ module.exports = {
     isArgOfFunction:isArgOfFunction,
     isChildOfX: isChildOfX,
     isArgOfCE:isArgOfCE,
-    isChildOfNode: isChildOfNode
+    isChildOfNode: isChildOfNode,
+    nodeContainsCall: nodeContainsCall
 }

@@ -16,20 +16,19 @@ program
 try {
     var leafInvocations = [];
 
-    if (program.callGraph) {
-        var callGraph =  JSON.parse(fs.readFileSync(program.callGraph, "utf-8")).value;
-        var invocations = callGraph
-        var nonLeafNodes = JSON.parse(fs.readFileSync(program.nonLeaf, "utf-8")).value;
+    program.callGraph && (callGraph =  JSON.parse(fs.readFileSync(program.callGraph, "utf-8")).value);
+    var invocations = callGraph
+    program.nonLeaf && (nonLeafNodes = JSON.parse(fs.readFileSync(program.nonLeaf, "utf-8")).value);
         // var childrenInvocs =getParentNodes();
         // process.exit();
-    }
+
     if (program.rti) invocation2time = JSON.parse(fs.readFileSync(program.rti, "utf-8")).value;
 } catch (e){
     throw e;
     return;
 }
 
-var node2time = {};
+var node2time = {}, combinedCg = {};
 
 function getParentNodes(){
     console.log("processing parent nodes");
@@ -91,51 +90,6 @@ var processLeafNodes = function(){
 
     return leafNodes;
 }
-
-// var processLeafNodes = function(cg){
-//     var leafGraph = [];
-//     var nonLeafs = [];
-//     if (!cg) return leafGraph;
-//     Object.keys(cg).forEach((nodeId)=>{
-//         var node = cg[nodeId];
-//         var fnName = nodeId.split("_count")[0];
-//         if (nonLeafs.indexOf(fnName)>=0) return;
-//         if (!node.length){
-//             if (leafGraph.indexOf(fnName)<0)
-//                 leafGraph.push(fnName);
-//         }
-//         else nonLeafs.push(fnName);
-//     })
-
-//     return leafGraph;
-// }
-
-// var processLeafNodes = function(cg){
-//     var leafGraph = [], nonLeafGraph = [], node2invocations = {},tinvocs = 0;
-//     if (!cg) return [];
-//     Object.keys(cg).forEach((nodeId)=>{
-//         var fnName = nodeId.split("_count")[0];
-//         // if (leafGraph.indexOf(fnName) >=0 || nonLeafGraph.indexOf(fnName)>=0) return;
-//         // var _isLeaf = Object.entries(cg).filter(e=>e[0].indexOf(fnName)>=0).filter(e=>e[1]>0).length;
-//         // if (_isLeaf) leafGraph.push(fnName)
-//         // else nonLeafGraph.push(fnName);
-
-//         if (!node2invocations[fnName])
-//             node2invocations[fnName] = [];
-//         node2invocations[fnName].push(cg[nodeId].length);
-//         if (cg[nodeId].length == 0)
-//             leafInvocations.push(nodeId);
-//     })
-
-//     Object.keys(node2invocations).forEach((nodeId)=>{
-//         if (!node2invocations[nodeId].filter(e=>e>0).length){
-//             leafGraph.push(nodeId);
-//             tinvocs += node2invocations[nodeId].length;
-//         }
-//     })
-//     // process.stdout.write(util.format(tinvocs + " "));
-//     return leafGraph;
-// }
 
 function getSumOfNodes(nodes, isPruned, isInvoc){
     if (Object.prototype.toString.call(nodes).indexOf("Object")>=0)
@@ -211,23 +165,6 @@ function pruneNodes(nodes, minTotalT, minInvocT){
 }
 
 function processTimingEntries(){
-    // timingInfo.forEach((TI)=>{
-    //     var name = TI.n;
-    //     if (name.indexOf("_end")<0){
-    //         //entry Time of a function
-    //         invocation2time[name] = [TI.t];
-    //         if (name.indexOf("_count0")>=0)
-    //             invocation2time[name].firstInvoc = true;
-    //     } else {
-    //         var startName = name.split("_end")[0];
-    //         var timeArr = invocation2time[startName];
-    //         if (!timeArr){
-    //             console.error("found exit time without entry time for " + name);
-    //             return;
-    //         }
-    //         timeArr.push(TI.t);
-    //     }
-    // })
 
     Object.keys(invocation2time).forEach((invoc)=>{
         var node = invoc.split("_count")[0];
@@ -249,6 +186,25 @@ function processTimingEntries(){
 
 }
 
+var coalesceCg = function(cg){
+    Object.keys(cg).forEach((invoc)=>{
+        var node = invoc.split("_count")[0];
+        if (!(node in combinedCg))
+            combinedCg[node] = [];
+
+        combinedCg[node] = combinedCg[node].concat(cg[invoc]);
+    })
+}
+
+var getAvgNodeTime = function(combinedCg, node2time){
+    var avgSubtreeTime = {};
+    Object.keys(combinedCg).forEach((node)=>{
+        if (node2time[node])
+            avgSubtreeTime[node] = node2time[node][0]/(node2time[node][2].length+combinedCg[node].length);
+    })
+    return avgSubtreeTime;
+}
+
 function processTimeFile() {
     
     processTimingEntries();
@@ -266,9 +222,18 @@ function processPattern(){
 if (program.rti)
     processTimeFile();
 
-if (program.callGraph) var leafNodes = processLeafNodes();
-if (program.pattern)
-    processPattern();
+if (program.callGraph)
+    coalesceCg(callGraph);
+
+var avgSubtreeTime = getAvgNodeTime(combinedCg, node2time);
+
+console.log(Object.entries(avgSubtreeTime).sort((b,a)=>{return a[1]-b[1]}).slice(0,10))
+
+// if (program.callGraph) var leafNodes = processLeafNodes();
+// if (program.pattern)
+    // processPattern();
+
+
 
 
 

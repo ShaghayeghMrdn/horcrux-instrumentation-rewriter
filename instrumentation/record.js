@@ -194,15 +194,15 @@ function instrumentHTML(src, fondueOptions) {
     if (!hostCounter){
         hostCounter++;
         var deterministicCode = '\n' + deterministic.header + '\n';
-        fs.writeFileSync(hostDir+"/deterministic.js", deterministicCode);
-        fs.writeFileSync(hostDir+"/tracer.js", fondue.instrumentationPrefix(options));
-        fs.writeFileSync(hostDir+"/omni.min.js", omniStringify);
-        fs.writeFileSync(hostDir+"/domJson.js", domJson);
-        fs.writeFileSync(hostDir+"/signatureWorker.js",worker);
-        ret = spawnSync("python ../instrumentation/genInstrumentationFiles.py tracer.js omni.min.js deterministic.js domJson.js signatureWorker.js", {shell:true});
-        console.error(ret.stdout.toString());
-        console.error(ret.stderr.toString());
-        console.log("updated instrumentation files");
+        // fs.writeFileSync(hostDir+"/deterministic.js", deterministicCode);
+        // fs.writeFileSync(hostDir+"/tracer.js", fondue.instrumentationPrefix(options));
+        // fs.writeFileSync(hostDir+"/omni.min.js", omniStringify);
+        // fs.writeFileSync(hostDir+"/domJson.js", domJson);
+        // fs.writeFileSync(hostDir+"/signatureWorker.js",worker);
+        // ret = spawnSync("python ../instrumentation/genInstrumentationFiles.py tracer.js omni.min.js deterministic.js domJson.js signatureWorker.js", {shell:true});
+        // console.error(ret.stdout.toString());
+        // console.error(ret.stderr.toString());
+        // console.log("updated instrumentation files");
     }
     // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
     // src = doctype + src;
@@ -276,6 +276,7 @@ function computeRTITimeMatched(){
     fs.writeFileSync(returnInfoFile, /*time.totalNodes + " " + time.matchedNodes + " " + */ staticInfo.rtiDebugInfo.ALL + " "+
         // + JSON.stringify(staticInfo.rtiDebugInfo.ALLUrls) + " " + JSON.stringify(staticInfo.rtiDebugInfo.matchedUrls));
         staticInfo.rtiDebugInfo.totalNodes.length + " " + staticInfo.rtiDebugInfo.matchedNodes.length
+        + " " + (staticInfo.rtiDebugInfo.totalNodes.time || 0)
         + " " + staticInfo.rtiDebugInfo.matchedNodes.reduce((acc,cur)=>{return cur[1] + acc},0));
 }
 
@@ -347,7 +348,7 @@ var main = function(){
             // cg = unique(cg);
             var cgTime = _cg.map(e=>e[2]);
             // console.log(cg);
-            fondueOptions = mergeInto(fondueOptions, {cg: cg, cgTime:cgTime});
+            fondueOptions = mergeInto(fondueOptions, {cg: cg, cgTime:cgTime, rawCg: _cg});
             staticInfo.rtiDebugInfo.ALL = cg.length;
             // console.log("cg nodes:" + cg);
         } catch (err){

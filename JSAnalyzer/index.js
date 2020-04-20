@@ -105,7 +105,8 @@ function instrumentationPrefix(options) {
 		proxyName: options.proxyName,
 		pageLoaded: options.pageLoaded,
 		invocation_limit:options.invocation_limit,
-		instrumentationPattern:JSON.stringify(options.pattern) 
+		instrumentationPattern:JSON.stringify(options.pattern),
+		runtimeInfo:JSON.stringify(options.rawCg)
 	});
 
 	// Object.keys(uncacheableFunctions).forEach((reason)=>{
@@ -257,6 +258,18 @@ var traceFilter = function (content, options) {
 	try {
 		var fala, update, sourceNodes, functionNameToLocation = {}; // Dictionary: key is function name, value is an array containing all the locations it was defined. 
 		var inBuiltOverrides = ["tostring", "tojson", "toprimitive","typeof"];
+		var isInBuiltFunction = function(fn){
+			if (!fn)
+				return false;
+			try {
+				var _e = eval(fn);
+				if (typeof _e == "function")
+					return true;
+				return false;
+			} catch (e){
+				return false;
+			}
+		}
 		var ASTNodes = []; // List of all the nodes in the abstract syntax tree
 		var ASTSourceMap = new Map();
 		var functionToCallees = {};
@@ -464,14 +477,17 @@ var traceFilter = function (content, options) {
 		Arguments: <AST node, string>
 		returns <AST node> 
 		*/
-		var getOriginalFromAlias = function(alias, functionId){
-			if (!functionAliasMap[functionId]) return alias;
-			var original = functionAliasMap[functionId][alias.source()];
-			if (!original) return alias;
-			if (original.source() != alias.source() && original.source() in functionAliasMap[functionId])
-				return getOriginalFromAlias(original, functionId);
-			return original;
-		}
+		var origSeenBefore = [];
+        var getOriginalFromAlias = function(alias, functionId){
+            if (!functionAliasMap[functionId]) return alias;
+            var original = functionAliasMap[functionId][alias.source()];
+            if (!original) return alias;
+            origSeenBefore.push(alias.source());
+            if (original.source() != alias.source() && original.source() in functionAliasMap[functionId]
+                && origSeenBefore.indexOf(original.source())<0)
+                return getOriginalFromAlias(original, functionId);
+            return original;
+        }
 
 		var ASTFromString = function(str){
 			var astArr = [];
@@ -525,7 +541,7 @@ var traceFilter = function (content, options) {
 				// 		local = local.concat(modifyNode(callee, read,"thisObj"));
 				// })
 				local.forEach((l)=>{
-					var _l = getOriginalFromAlias(l, functionId);
+					var _l = getOriginalFromAlias(l, functionId);origSeenBefore=[];
 						if (l.source() != _l.source() && localDeclHolder.indexOf(l.source() + " = ")<0) {
 							functionsVarDecl[functionId].push(ASTSourceMap.get(l));
 							localDeclHolder += l.source() + " = ; "
@@ -555,7 +571,7 @@ var traceFilter = function (content, options) {
 						var {readArray, local,argReads, antiLocal} = signature.handleReads(argument, false, 1,isAA);
 						// local = local.concat(argReads.map(e=>e.val));
 						local.forEach((l)=>{
-							var _l = getOriginalFromAlias(l, functionId);
+							var _l = getOriginalFromAlias(l, functionId);origSeenBefore=[];
 							if (l.source() != _l.source() && localDeclHolder.indexOf(l.source() + " = ")<0 && (_l.source().indexOf("create")>=0) ) {
 								functionsVarDecl[functionId].push(ASTSourceMap.get(l));
 								localDeclHolder += l.source() + " = ; "
@@ -622,7 +638,14 @@ var traceFilter = function (content, options) {
 				return result;
 			} \n`
 			var startComma = "", endComma = "";
+			var groupStart = "", groupEnd = "";
 			if (node.type == "FunctionExpression") {
+				var p;
+				if (p = util.isChildOfX(node, "LogicalExpression")) {
+					/*If immediate parent is logical expression*/
+					if (p == node.parent)
+						groupStart="(", groupEnd=")";
+				}
 
 				/*If nodeName has assignment operator, then bail out
 				eg: (r={}).a = function(){}, now you can't simply write to (r={}).on.__get__ = {}, because, you end up redefining r*/
@@ -688,14 +711,14 @@ var traceFilter = function (content, options) {
 			if (startComma == "," && endComma == "")
 				preserveCommaReturn = "," + nodeName
 			if (onlyGetScope){
-				update(node, node.source(), '\n',startComma,getScope,endComma,preserveCommaReturn);
+				update(node, groupStart, node.source(), '\n',startComma,getScope,endComma,preserveCommaReturn, groupEnd);
 				if (forcedBS){
 					// update(forcedBS, "{", forcedBS.source(), "}");
 					nodeFutureModified = forcedBS;
 				}
 				return;
 			}
-			update(node, node.source(), '\n',startComma,getter, setter, replayIBF,endComma,preserveCommaReturn);
+			update(node, groupStart,node.source(), '\n',startComma,getter, setter, replayIBF,endComma,preserveCommaReturn, groupEnd);
 			if (node.type == "FunctionExpression" && startComma == ""){
 				console.log(ASTSourceMap.get(node.parent.parent) + " got rewritten to " + node.source() );
 			}
@@ -945,8 +968,10 @@ var traceFilter = function (content, options) {
 				if (isNonDeterminist(node.source()) && uncacheableFunctions["ND"].indexOf(node) < 0)
 					markFunctionUnCacheable(node, "ND");
 
-				if ( (options.rti || options.cg) && (instrumentedNodes.indexOf(node)>=0 && (node.id && inBuiltOverrides.indexOf(node.id.name.toLowerCase())>=0)) ) {
-					console.log("[Static Analyzer] Unhandled: in built overrides in source code");
+				var fnName = util.getNameFromFunction(node)
+				if  ((options.rti || options.cg) && instrumentedNodes.indexOf(node)>=0 && ((fnName && inBuiltOverrides.filter(e=>fnName.toLowerCase().indexOf(e)>=0).length)
+					|| isInBuiltFunction(fnName)) ) {
+					console.log("[Static Analyzer] Unhandled: in built overrides in source code," + fnName);
 					markFunctionUnCacheable(node,"RTI");
 				}
 
@@ -1116,11 +1141,21 @@ var traceFilter = function (content, options) {
 					/*
 					Don't rewrite arguments if the argument gets rewritten, because then the reference is broken. 
 					Can;t really do this, because the subsequent uses have been modified, and therefore will result in error
+					The real reason this would fail is if the argument is not passed during invocation, then subsequent 
+					changes won't be same as the actual variable being modified in this assignment expression
 					*/
 					// if (!(node.type == "AssignmentExpression" && node.left.type == "Identifier")) {
 					// 	argReads.length && rewriteArguments(argReads);
 					// }
-					argReads.length && rewriteArguments(argReads);
+					// 
+					var argReWritten = false
+					argReads.forEach((arg)=>{
+						if (arg.val == node.left){
+							scope.addLocalVariable(node.left);
+							argReWritten = true;
+						}
+					})
+					!argReWritten && argReads.length && rewriteArguments(argReads);
 					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
 					antiLocal.forEach(function(read){
 						/*FIX
@@ -1169,6 +1204,7 @@ var traceFilter = function (content, options) {
 							var lit = ident == node.left ? node.right.value : node.left.value;
 							if (typeof lit == "string" || lit == null)
 								lit = JSON.stringify(lit);
+							var _functionId = util.getFunctionIdentifier(node);
 							if (_functionId)
 								update(ident, options.tracer_name,'.handleComparison(',ident.source(),',',JSON.stringify(node.operator), ',',lit,')');
 							else 
@@ -1442,7 +1478,11 @@ var traceFilter = function (content, options) {
 					argReads.length && node.callee.type != "FunctionExpression" && rewriteArguments(argReads);
 					readArray.forEach(function(read){
 						if (options.useProxy){
-							if (util.checkIfReservedWord(read) || read.source() == "this") return;
+							if (util.checkIfReservedWord(read)) return;
+							if (read.source() == "this") {
+								update(read, "thisProxy");
+								return
+							}
 							if (read.source() == "window") {
 								update(read, options.proxyName)
 							}
@@ -1488,7 +1528,11 @@ var traceFilter = function (content, options) {
 						if (options.caching)
 							update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '],[', util.getAllIdentifiersFromMemberExpression(read),'])');
 						if (options.useProxy){
-							if (util.checkIfReservedWord(read) || read.source() == "this") return;
+							if (util.checkIfReservedWord(read)) return;
+							if (read.source() == "this") {
+								update(read, "thisProxy");
+								return
+							}
 							if (read.source() == "window") {
 								// update(read, options.proxyName)
 							}
@@ -1540,10 +1584,17 @@ var traceFilter = function (content, options) {
 							sometimes node.callee.source is not a valid function, example b.parentNode.removeChild(b), now b.parentNode.removeChild doesn't exist
 							*/
 							var nodeCalleeSource = node.callee.source();
-							if (node.callee.source().indexOf("parentNode.removeChild")>=0)
-								nodeCalleeSource = "document.removeChild"
-							else if (node.callee.type == "SequenceExpression")
-								nodeCalleeSource = "(" + nodeCalleeSource + ")";
+							if (node.callee.type == "CallExpression" || util.nodeContainsCall(node.callee)){
+								/*two calls happening at the same time. Can't correctly do signature propagation meta data handling
+								send empty callee name*/
+								nodeCalleeSource = "null";
+							}
+							else {
+								if (node.callee.source().indexOf("parentNode.removeChild")>=0)
+									nodeCalleeSource = "document.removeChild"
+								else if (node.callee.type == "SequenceExpression")
+									nodeCalleeSource = "(" + nodeCalleeSource + ")";
+							}
 						// console.log("Node before IBF update", node.source());
 						update(node, options.tracer_name,".logIBF(",JSON.stringify(functionId),',', node.source(),',',nodeCalleeSource,',`',util.escapeRegExp(evalString[0]), '`,`',
 								 util.escapeRegExp(evalString[1]),'`,',ibfArgStrs, ',[', ...(ibfArgVals.map(e=>e+",")) ,'])');
@@ -1675,12 +1726,12 @@ var traceFilter = function (content, options) {
 				}
 				if ( (options.myRti || options.myCg)){
 					if (uncacheableFunctions["RTI"].indexOf(node)>=0) {
-						/*Check if inside another cacheable function or not
-						if yes, that's a closure function, need to expose scope*/
-						var parentFunction = util.getFunctionIdentifier(node.parent);
-						if (parentFunction){
-							closures[1] && (nodeName = util.getNameFromFunction(node)) && insertClosureAccessors(node, nodeName, closures[0], true)
-						}
+						/*Every closure function needs to have an exposed closure scope 
+						*/
+						// var parentFunction = util.getFunctionIdentifier(node.parent);
+						// if (parentFunction){
+						// closures[1] && (nodeName = util.getNameFromFunction(node)) && insertClosureAccessors(node, nodeName, closures[0], true)
+						// }
 						return
 					}
 				}
@@ -1712,7 +1763,7 @@ var traceFilter = function (content, options) {
 				if (closures[1]) update(node.body, closures[1], node.body.source());
 				
 
-				update(node.body, '\n', closures[0] ? closures[0] : '' ,' var __tracerRet; \n __tracerRet = ', _traceBegin, JSON.stringify(index),',',JSON.stringify(enableRecord)
+				update(node.body, '\n', closures[0] ? closures[0] : '' ,' var __tracerRet; \n __tracerRet = ', _traceBegin, JSON.stringify(index)
 					,replayObjects,') \n if (__tracerRet[0]) return __tracerRet[1]; \n',
 					 node.body.source(),' \n');
 				update(node.body, '{ \ntry {\n',options.tracer_name,'.cacheInit(', JSON.stringify(index),',arguments, new.target',',',JSON.stringify(enableRecord),');\n',
@@ -1741,17 +1792,18 @@ var traceFilter = function (content, options) {
 				})
 
 				update(node.body, node.body.source(),' \n} catch (e){ throw e} finally {',
-					closureRestoreStr ?  closureRestoreStr :null, 
-					argumentRestoreStr ? argumentRestoreStr :null,
+					// closureRestoreStr ?  closureRestoreStr :null, 
+					// argumentRestoreStr ? argumentRestoreStr :null,
 					 _traceEnd, JSON.stringify(index),',',JSON.stringify(enableRecord), ');\n }}');
 				var nodeName;
-				closures[1] && (nodeName = util.getNameFromFunction(node)) && insertClosureAccessors(node, nodeName, closures[0], false)
+				/*Closure scope needs a getter and setter only during*/
+				// closures[1] && (nodeName = util.getNameFromFunction(node)) && insertClosureAccessors(node, nodeName, closures[0], false)
 			}
 		});
 		processed = m;
 
 	} catch (e) {
-		console.error('[PARSING EXCEPTION]' + options.path + ": " + e + e.stack);
+		console.error('[PARSING EXCEPTION]' + options.path + ": " + e);
 		// mostly exception imples that it is a json file. 
 		return content;
 	}

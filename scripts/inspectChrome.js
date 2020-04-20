@@ -6,6 +6,7 @@ var mkdirp = require('mkdirp')
 var program = require('commander')
 var customCodes = require('./custom.js');
 var chromeUserDir = "CHROME_USER_DIR";
+const { PerformanceObserver, performance } = require('perf_hooks');
 //var TRACE_CATEGORIES = ["Blob","FileSystem","IndexedDB","ServiceWorker","ValueStoreFrontend::Backend","WebCore,benchmark,rail","audio","benchmark","benchmark,latencyInfo,rail","benchmark,rail","blink","blink,benchmark","blink,benchmark,rail,disabled-by-default-blink.debug.layout","blink,blink_style","blink,devtools.timeline","blink,loader","blink,loading","blink,rail","blink.animations,devtools.timeline,benchmark,rail","blink.console","blink.net","blink.user_timing","blink.user_timing,rail","blink_gc","blink_gc,devtools.timeline","browser","browser,navigation","browser,startup","cc","cc,benchmark","cc,disabled-by-default-devtools.timeline","cdp.perf","content","devtools","devtools.timeline","devtools.timeline,rail","devtools.timeline,v8","devtools.timeline.async","disabled-by-default-blink.debug","disabled-by-default-blink.debug.layout","disabled-by-default-blink.debug.layout.trees","disabled-by-default-blink.feature_usage","disabled-by-default-blink.image_decoding","disabled-by-default-blink.invalidation","disabled-by-default-blink_gc","disabled-by-default-cc.debug","disabled-by-default-cc.debug,disabled-by-default-cc.debug.quads,disabled-by-default-devtools.timeline.layers","disabled-by-default-cc.debug.cdp-perf","disabled-by-default-cc.debug.display_items","disabled-by-default-cc.debug.display_items,disabled-by-default-cc.debug.picture,disabled-by-default-devtools.timeline.picture","disabled-by-default-cc.debug.overdraw","disabled-by-default-cc.debug.quads","disabled-by-default-cc.debug.scheduler","disabled-by-default-cc.debug.scheduler.frames","disabled-by-default-cc.debug.scheduler.now","disabled-by-default-cc.debug.triangles","disabled-by-default-compositor-worker","disabled-by-default-devtools.timeline","disabled-by-default-devtools.timeline.frame","disabled-by-default-devtools.timeline.invalidationTracking","disabled-by-default-file","disabled-by-default-gpu.debug","disabled-by-default-gpu.device","disabled-by-default-gpu.service","disabled-by-default-gpu_decoder","disabled-by-default-ipc.flow","disabled-by-default-loading","disabled-by-default-memory-infra","disabled-by-default-net","disabled-by-default-network","disabled-by-default-renderer.scheduler","disabled-by-default-renderer.scheduler.debug","disabled-by-default-skia","disabled-by-default-skia.gpu","disabled-by-default-skia.gpu.cache","disabled-by-default-system_stats","disabled-by-default-toplevel.flow","disabled-by-default-v8.compile","disabled-by-default-v8.cpu_profiler","disabled-by-default-v8.cpu_profiler.hires","disabled-by-default-v8.gc","disabled-by-default-v8.gc_stats","disabled-by-default-v8.ic_stats","disabled-by-default-v8.runtime","disabled-by-default-v8.runtime_stats","disabled-by-default-v8.runtime_stats_sampling","disabled-by-default-worker.scheduler","disabled-by-default-worker.scheduler.debug","gpu","gpu,startup","identity","input","input,benchmark","input,benchmark,devtools.timeline","input,benchmark,rail","input,rail","io","ipc","ipc,toplevel","leveldb","loader","loading","loading,devtools.timeline","loading,rail,devtools.timeline","media","mojom","navigation","navigation,benchmark,rail","navigation,rail","net","netlog","omnibox","rail","renderer","renderer,benchmark,rail","renderer.scheduler","renderer_host","renderer_host,navigation","sandbox_ipc","service_manager","shutdown","skia","startup","startup,benchmark,rail","startup,rail","task_scheduler","test_gpu","test_tracing","ui","v8","v8,devtools.timeline","v8.execute","views","viz"];
 
 var TRACE_CATEGORIES = ["-*", "devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.frame", "toplevel", "blink.console", "disabled-by-default-devtools.timeline.stack", "disabled-by-default-devtools.screenshot", "disabled-by-default-v8.cpu_profile", "disabled-by-default-v8.cpu_profiler", "disabled-by-default-v8.cpu_profiler.hires"];
@@ -72,6 +73,7 @@ function navigate(launcher){
 			await Runtime.enable();
 			await Network.enable();
 			await Log.enable();
+            await Performance.enable();
             // await Debugger.enable();
             // await HeapProfiler.enable();
 
@@ -188,7 +190,7 @@ function navigate(launcher){
 
                     chrome.close();
                     fatalKill();
-                }, 50000)
+                }, 100000)
             }
 
             if (program.sim){
@@ -197,12 +199,12 @@ function navigate(launcher){
                 Network.emulateNetworkConditions(simConfig);
             }
 
-            if (!program.mobile) {
-                console.log("emulating mobile on desktop")
-                // Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36"});
-                Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.90 Mobile Safari/537.36"}); 
-                Emulation.setDeviceMetricsOverride({width:411, height: 731, mobile:true, deviceScaleFactor:0 })
-            }
+            // if (!program.mobile) {
+            //     console.log("emulating mobile on desktop")
+            //     // Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36"});
+            //     Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.90 Mobile Safari/537.36"}); 
+            //     Emulation.setDeviceMetricsOverride({width:411, height: 731, mobile:true, deviceScaleFactor:0 })
+            // }
 
 			if (program.jsProfiling) 
 				await Profiler.start()
@@ -215,12 +217,14 @@ function navigate(launcher){
 
 			if (program.network){
 				
-                Network.responseReceived(function(data){
-                    // NetworkLog.push({"Network.requestWillBeSent":data});
-                    // console.log(data.response.url);
-                    NetworkLog.push(data);
-                    // fs.appendFileSync(file, JSON.stringify({"Network.requestWillBeSent":data})+"\n");
-                });
+                // Network.responseReceived(function(data){
+                //     // NetworkLog.push({"Network.requestWillBeSent":data});
+                //     // console.log(data.response.url);
+                //     NetworkLog.push(data);
+                //     // fs.appendFileSync(file, JSON.stringify({"Network.requestWillBeSent":data})+"\n");
+                // });
+
+                await NetworkEventHandlers(Network,"");
             }
 
             if (program.coverage)
@@ -296,6 +300,9 @@ function navigate(launcher){
               // Pause the page is stop any further javascript computation
             // Runtime.evaluate({expression:"debugger;"});
             console.log("Page has been paused");
+
+            var perfData = await Performance.getMetrics();
+            fs.writeFileSync("perf", JSON.stringify(perfData));
             
             if (program.correctness){
                 var evalString = fs.readFileSync(evalStringFile,"utf-8");
@@ -311,18 +318,24 @@ function navigate(launcher){
                         fs.writeFileSync(program.output + "/logs", JSON.stringify(consoleLog));
                         console.log("Console data logged");
                     };
+                    // if (program.tracing) {
+                    //     Tracing.end();
+                    //     Tracing.tracingComplete();
+                    // }
 
                     fs.appendFileSync("./fetchErrors", '\n' + program.output + "\n");
 
                     chrome.close();
                     fatalKill();
 
-                }, 45000)
+                }, 105000)
             }
 
+            var fetchStart = performance.now();
             if (program.custom) {
                    await extractCustomInformation(Runtime, program,1);
-            }
+            } else 
+                dataReceived=true
             await extractPageLoadTime(Runtime, "plt");
 
             if (program.coverage) {
@@ -392,12 +405,14 @@ function navigate(launcher){
                 // fs.writeFileSync(program.output +"/mem", JSON.stringify(memData));
             }
             //mark all data received
-            alldataReceived = true;
+            alldataReceived = dataReceived = true;
             if (program.mode != "record" || dataReceived)
                 clearTimeout(pltTimer);
             // a=spawnSync("ps aux | grep replayshell | awk '{print $2}' | xargs kill -9",{shell:true});
             // Don't immediately kill Chrome as it takes some time for the cache to be dumped on disk
             if (!program.testing && (program.mode != "record" || dataReceived) ) {
+                console.log("Cache alert seems to be already fired");
+                console.log("Time to fetch: ", performance.now() - fetchStart);
                 collectLogs(program);
                 // if (program.mode == "record")
                 //     await customCodes.getStorageOverhead(Runtime, program.output + "/cacheSize");
@@ -406,6 +421,7 @@ function navigate(launcher){
                         chrome.close();
                         safeKill();
                     } else {
+                        console.log("closing page");
                         Page.close();
                         chrome.close();
                     }
@@ -452,23 +468,24 @@ async function NetworkEventHandlers(Network, file){
     //     // fs.appendFileSync(file, JSON.stringify({"Network.requestServedFromCache":data})+"\n");
     // });
 
-    // Network.responseReceived(function(data){
-    //     NetworkLog.push({"Network.responseReceived":data});
-    //     // fs.appendFileSync(file, JSON.stringify({"Network.responseReceived":data})+"\n");
-    // });
+    Network.responseReceived(function(data){
+        NetworkLog.push({"Network.responseReceived":data});
+        // fs.appendFileSync(file, JSON.stringify({"Network.responseReceived":data})+"\n");
+    });
 
-    // Network.dataReceived(function(data){
-    //     fs.appendFileSync(file, JSON.stringify({"Network.dataReceived":data})+"\n");
-    // });
+    Network.dataReceived(function(data){
+        NetworkLog.push({"Network.dataReceived":data});
+    });
 
-    // Network.loadingFinished(function(data){
-    //     fs.appendFileSync(file, JSON.stringify({"Network.loadingFinished":data})+"\n");
-    // });
+    Network.loadingFinished(function(data){
+        NetworkLog.push({"Network.loadingFinished":data});
+    });
 
 }
 
 async function extractCustomInformation(Runtime, program, path){
     if (program.mode == "record") {
+       await customCodes.getInvocationProperties(Runtime, program.output  + "/cacheStats", '__tracer.getCacheStats()');
        var runPostLoadScripts = await customCodes.runPostLoadScripts(Runtime);
        if (runPostLoadScripts == 0){
 
@@ -484,9 +501,12 @@ async function extractCustomInformation(Runtime, program, path){
        await customCodes.getInvocationProperties(Runtime, program.output + "/mem", 'performance.memory.usedJSHeapSize');
        // await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
        // await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
-       // await customCodes.getInvocationProperties(Runtime, program.output + "/noncacheable", '__tracer.getNonCacheableFunctions()');
+       await customCodes.getInvocationProperties(Runtime, program.output + "/noncacheable", '__tracer.getNonCacheableFunctions()');
+       // await customCodes.getDOM(Runtime, program.output +"/DOM");
        await customCodes.getInvocationProperties(Runtime, program.output + "/signature", '__tracer.getProcessedSignature()');
-       dataReceived = true
+       await customCodes.getInvocationProperties(Runtime, program.output + "/purgeTime", '__tracer.getRuntimePurged()');
+       await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
+       // dataReceived = true
        // await customCodes.getProcessedSignature(Runtime, program.output);
    } else if (program.mode == "replay"){
         // await customCodes.getInvocationProperties(Runtime, program.output  + "/invocProps", 'Object.keys(__tracer.getCustomCache())');
@@ -494,14 +514,18 @@ async function extractCustomInformation(Runtime, program, path){
         await customCodes.getInvocationProperties(Runtime, program.output  + "/cacheExists", 'localStorage.getItem("fnCacheExists")');
         await customCodes.getInvocationProperties(Runtime, program.output + "/callGraph", '__tracer.getCallGraph()');
         await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, '__tracer.getTimingInfo()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/sigSize" + path, '__tracer.getSigSizes()');
         await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
         await customCodes.getInvocationProperties(Runtime, program.output + "/setupStateTime", 'window.top.setupStateTime');
+        // await customCodes.getDOM(Runtime, program.output +"/DOM");
    } else {
-        await customCodes.getInvocationProperties(Runtime, program.output + "/leafNodes" + path, 'leafNodes',1);
-        await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo" + path, '__tracer.getTimingInfo()');
-        await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
-        await customCodes.getInvocationProperties(Runtime, program.output + "/parentNodes", '__tracer.getParentNodes()');
-        await customCodes.getInvocationProperties(Runtime, program.output + "/nonLeafNodes", '__tracer.getNonLeafNodes()');
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/leafNodes" + path, 'leafNodes',1);
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo", '__tracer.getTimingInfo()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/cg", '__tracer.getCallGraph()');
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/rc", 'window.proxyReadCount');
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/wc", 'window.proxyWriteCount');
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/parentNodes", '__tracer.getParentNodes()');
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/nonLeafNodes", '__tracer.getNonLeafNodes()');
         // await customCodes.getInvocationProperties(Runtime, program.output + "/minHeap", 'minHeap');
    }
    // await customCodes.getInvocationProperties(Runtime, program.output  + "/callgraph", 'Object.keys(__tracer.getCallGraph())');
@@ -510,6 +534,7 @@ async function extractCustomInformation(Runtime, program, path){
 
 
 async function extractPageLoadTime(Runtime, outputFile){
+    var _timing  = await Runtime.evaluate({expression: 'performance.timing',returnByValue:true})
     var _query  = await Runtime.evaluate({expression: 'performance.timing.navigationStart'})
     pageLoadTime["startTime"] = _query.result.value
     var _query  = await Runtime.evaluate({expression: 'performance.timing.loadEventEnd'})
@@ -558,9 +583,9 @@ if (program.launch) {
         // '--js-flags="--expose-gc"',
         // '--auto-open-devtools-for-tabs',
         // '--enable-devtools-experiments',
-        // '--disable-features=IsolateOrigins,site-per-process',
-        // '--disable-site-isolation-trials',
-        // '--allow-running-insecure-content',
+        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingAlways,CrossSiteDocumentBlockingIfIsolating',
+        '--disable-site-isolation-trials',
+        '--allow-running-insecure-content',
 		 // '--headless',
          // '--v8-cache-options=off',
          // '--js-flags="--compilation-cache false"',
