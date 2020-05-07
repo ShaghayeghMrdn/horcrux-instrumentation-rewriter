@@ -48,7 +48,7 @@ var getNodeLocationFromID = function(functionID){
 var origLog = console.log;
 
 console.log = function(){
-    var verboseLog = [program.inst,":",...arguments];
+    var verboseLog = [program.jsProfile,":",...arguments];
     origLog.apply(this, verboseLog);
 }
 
@@ -298,48 +298,70 @@ var getNodestoInst = function(timeCgArr, proccProf){
         }
         var _curNode = sortedTimeArray[nodeIdx],_n,
             curNode = _curNode;
-        if (curNode.ttime <= minNodeTime){
+        if (curNode.stime <= minNodeTime){
             /*Reached nodes with less than threshold time, no point of adding 
             these nodes to fill up the knapsack*/
             console.log("Couldn't fill up the desired time\n Below the threshold");
             break;
         }
-        _n = finalNodes.indexOf(curNode)
-        if (_n >= 0){
-            var node = finalNodes[_n];
-            node.child = false
-            nodeIdx++;
-            // checkIfChildAdded(curNode, finalNodes, timeCgArr);
-            currTotalTime += node.ttime;
-            continue;
-        }
+        // _n = finalNodes.indexOf(curNode)
+        // if (_n >= 0){
+        //     var node = finalNodes[_n];
+        //     node.child = false
+        //     nodeIdx++;
+        //     // checkIfChildAdded(curNode, finalNodes, timeCgArr);
+        //     currTotalTime += node.ttime;
+        //     continue;
+        // }
 
-        var _children = unique(node2children[curNode.f]),
-            children = _children.filter(e=> e && e!=curNode.f && !existsInArray(finalNodes, e))
-            .map(e=>inst2match[e] || {f:e, stime:0})
-            .map((e)=>{e.child = true; return e;})
-            .filter(e=>e);
+        // var _children = unique(node2children[curNode.f]),
+        //     children = _children.filter(e=> e && e!=curNode.f && !existsInArray(finalNodes, e))
+        //     .map(e=>inst2match[e] || {f:e, stime:0})
+        //     .map((e)=>{e.child = true; return e;})
+        //     .filter(e=>e);
 
-        if (children.length>50){
-            nodeIdx++
-            continue
-        }
-        curNode.child = false;
+        // if (children.length>50){
+        //     nodeIdx++
+        //     continue
+        // }
+        // curNode.child = false;
         // checkIfChildAdded(curNode, finalNodes, timeCgArr);
         finalNodes.push(curNode)
-        parentNodes.push(curNode);
-        finalNodes = finalNodes.concat(children);
-        var childrenTime = children.reduce((acc,cur)=>{return acc + cur.stime},0); 
+        // parentNodes.push(curNode);
+        // finalNodes = finalNodes.concat(children);
+        // var childrenTime = children.reduce((acc,cur)=>{return acc + cur.stime},0); 
         // console.log("Verify: ", curNode.stime, childrenTime, curNode.ttime);
         // console.log(curNode.stime + childrenTime, curNode.ttime);
         // console.log("Main node: " ,curNode.f, curNode.stime, curNode.ttime, " children time: " , childrenTime);
         nodeIdx++
         // var curTime = curNode[1][1];
         // currTotalTime += curNode.stime + childrenTime;
-        currTotalTime += curNode.ttime;
+        currTotalTime += curNode.stime;
     }
     console.log("Time selected " + currTotalTime);
     return finalNodes.map((e)=>{if (e.child) return [e.f,e.stime,-1]; else return [e.f,e.stime,e.ttime, e.rti.profileNode.callFrame]});
+}
+
+var getNodesWithRuntime = function(cpu){
+    var nodes = [];
+    cpu.parsed.children.forEach((child)=>{
+        if (child.profileNode.url.startsWith("http") && child.self > 0)
+            nodes.push(child);
+    })
+    return nodes.map((e)=>{return {self:e.self, total: e.total, callUID: e.callUID, functionName: e.functionName,
+                 url: e.url, raw: e.profileNode.callFrame}});
+}
+
+/*
+Simply processes the chrome cpuprofile and returns nodes
+with selfTime > 0
+*/
+function selfTimeNodes(){
+    var jsProfile = JSON.parse(fs.readFileSync(program.jsProfile, "utf-8"));
+    var proccProf = cpuProfileParser(jsProfile);
+    var selfTimeNodes = getNodesWithRuntime(proccProf);
+    console.log(`Number of cpu profile nodes: ${proccProf.parsed.children.length} Number of selfTimeNodes: ${selfTimeNodes.length}`);
+    program.output && fs.writeFileSync(program.output, JSON.stringify((selfTimeNodes) ));
 }
 
 /*Takes the callgraph and the inbuilt jsProfile and returns an array of nodes to be instrumented
@@ -361,7 +383,7 @@ function i2j(){
     // console.log(Object.entries(subTree2time).sort((b,a)=>{return a[1]-b[1]}).slice(0,10))
     var finalNodes = getNodestoInst(matched,proccProf);
     console.log("Final:" + unique2(finalNodes).length)
-    console.log("Final time: " ,finalNodes.reduce((acc, cur)=>{if (cur[2]>=0 )return acc+cur[2]; else return acc},0));
+    console.log("Final time: " ,finalNodes.reduce((acc, cur)=>{if (cur[1]>=0 )return acc+cur[1]; else return acc},0));
     program.output && fs.writeFileSync(program.output, JSON.stringify(unique2(finalNodes) ));
 }
 
@@ -390,5 +412,6 @@ function i2i() {
     program.output && fs.writeFileSync(program.output, JSON.stringify(finalNodes));
 }
 
-if (program.jsProfile) i2j();
-if (program.replay) i2i();
+if (!program.inst) selfTimeNodes();
+else if (program.jsProfile) i2j();
+else if (program.replay) i2i();

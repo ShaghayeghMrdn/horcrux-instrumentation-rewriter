@@ -38,7 +38,7 @@ replay(){
 	echo "Launching chrome"
 	sleep 3
     # $mmwebreplay $1 $mmdelay 3 node inspectChrome.js -u $2 -l -n --log -o $3 -p $4 --mode $5
-    $mmwebrecord $1 node inspectChrome.js -u $2 -o $3 -p $4 --mode $5 $DATAFLAGS
+    $mmwebreplay $1 node inspectChrome.js -u $2 -o $3 -p $4 --mode $5 $DATAFLAGS
     # node inspectChrome.js -u $2 -o $3 -p $4 $DATAFLAGS
 	replay_pid=$!
 	#waitForNode
@@ -91,29 +91,31 @@ waitForChrome(){
 help
 clean
 
-for ti in b2b hour; do
+# for ti in b2b; do
 	# while IFS='' read -r line || [[ -n "$line" ]]; do
 	while read line; do
 		echo "replaying url: " $line
-		url=`echo $line | cut -d'/' -f 3`
-			echo "mode is " $mode
-			if [[ $run == "original" ]]; then
-				path="$2"//"$url"
-			fi
-			if [[ $mode == "original" ]]; then 
-				path=../traces/mobile/alexa_1000/"$url"
-				# path=$2///"$url"
-			fi
-			#for cgtime mode is in not in the path
-			# path="$2"/"$url"
-			for iter in $(seq $5 $(($5+1))); do 
-				mkdir -p $2/$ti/$iter/
-				path="$2"/$ti/$iter/"$url"
-				mkdir -p ${3}/$ti/$iter/
-				replay $path $line ${3}/$ti/$iter/"$url"/ $4 $mode $url
-				# replay $path $line ${3}/replay/"$url"/ $4 replay;
-				# replay $path $line ${3}2/"$url" $4;
-				sleep 2
-			done
+		url=`echo $line | cut -d'/' -f3-`
+		url=`echo $url | sed 's/\//_/g' | sed 's/\&/-/g'`
+		echo "mode is " $mode
+		if [[ $run == "original" ]]; then
+			path="$2"//"$url"
+		fi
+		if [[ $mode == "original" ]]; then 
+			path=../traces/mobile/alexa_1000/"$url"
+			# path=$2///"$url"
+		fi
+		#for cgtime mode is in not in the path
+		# path="$2"/"$url"
+		for iter in $(seq $5 $5); do 
+			# mkdir -p $2/$ti/$iter/
+			path="$2"/$ti//"$url"
+			mkdir -p $2/$ti/
+			mkdir -p $3/$ti/$url
+			replay $path $line ${3}/$ti//"$url"/ $4 $mode $url
+			# replay $path $line ${3}/replay/"$url"/ $4 replay;
+			# replay $path $line ${3}2/"$url" $4;
+			sleep 2
+		done
 	done<"$1"
-done
+# done

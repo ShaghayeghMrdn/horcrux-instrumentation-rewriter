@@ -190,7 +190,7 @@ function navigate(launcher){
 
                     chrome.close();
                     fatalKill();
-                }, 100000)
+                }, 60000)
             }
 
             if (program.sim){
@@ -199,12 +199,12 @@ function navigate(launcher){
                 Network.emulateNetworkConditions(simConfig);
             }
 
-            // if (!program.mobile) {
-            //     console.log("emulating mobile on desktop")
-            //     // Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36"});
-            //     Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.90 Mobile Safari/537.36"}); 
-            //     Emulation.setDeviceMetricsOverride({width:411, height: 731, mobile:true, deviceScaleFactor:0 })
-            // }
+            if (!program.mobile) {
+                console.log("emulating mobile on desktop")
+                // Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36"});
+                Network.setUserAgentOverride({userAgent: "Mozilla/5.0 (Linux; Android 8.0.0; Pixel 2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.90 Mobile Safari/537.36"}); 
+                Emulation.setDeviceMetricsOverride({width:411, height: 731, mobile:true, deviceScaleFactor:0 })
+            }
 
 			if (program.jsProfiling) 
 				await Profiler.start()
@@ -328,7 +328,7 @@ function navigate(launcher){
                     chrome.close();
                     fatalKill();
 
-                }, 105000)
+                }, 60000)
             }
 
             var fetchStart = performance.now();

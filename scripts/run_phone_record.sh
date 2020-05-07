@@ -97,7 +97,8 @@ cleanUp(){
 }
 
 cleanChrome(){
-    eval $adb_prefix shell pm clear org.chromium.chrome
+    # eval $adb_prefix shell pm clear org.chromium.chrome
+    eval $adb_prefix shell pm clear com.android.chrome
 }
 
 #Arguments: 
@@ -134,8 +135,8 @@ for iter in $(seq 0 0); do
         # mkdir -p "$4"/${iter}/record/
         # mkdir -p "$4"/${iter}/replay/
         # for config in $(seq 1 4); do
-        for mode in record replay; do
-             mahimahi_dir=$3/$mode/$url
+        # for mode in record replay; do
+             mahimahi_dir=$3/$url
              # if [[ $mode == "replay" ]]; then
              #    mahimahi_dir=$3/$mode/skip/$url
              #    # mahimahi_dir=../traces/mobile/alexa_1000/$url/
@@ -143,11 +144,11 @@ for iter in $(seq 0 0); do
              # fi
              echo "Running in mode",$mode," in directory ", $mahimahi_dir
              $phone_replay_bin $mahimahi_dir 1194 regular_replay none &> /dev/null & 
-             # $phone_replay_bin $3/$url 1194 regular_replay none &
+             # $phone_replay_bin $mahimahi_dir 1194 regular_replay none &
              # $phone_record_bin $3//$url none none & 
              sleep 2
             # iptableSetup
-             ./$phone_record_file 3 $2 $line ${4}/$iter/$mode/"$url"/ $mode "$$"
+             ./$phone_record_file 3 $2 $line ${4}//"$url"/ $mode "$$"
              # ./$phone_record_file 3 $2 $line ${4}/$mode/"$url"/ std "$$"
              echo "Returned from phone_record_file, since parent wasn't killed"
             # ./$phone_record_file $config $2 $line ${4}/$iter/replay/"$url"/ replay
@@ -156,7 +157,7 @@ for iter in $(seq 0 0); do
             # killProcess replayshell
             cleanUp
             sleep 2
-        done
+        # done
         cleanChrome
         sleep 1
     done<"$1"

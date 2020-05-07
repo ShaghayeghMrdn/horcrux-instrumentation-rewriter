@@ -145,7 +145,7 @@ startChrome() {
     # eval $adb_prefix shell pm clear com.android.chrome
     # sleep 1
     echo "Starting Chrome on Client"
-    eval $adb_prefix shell $custom_chrome 1>/dev/null
+    eval $adb_prefix shell $stock_chrome 1>/dev/null
     sleep 1
     if [[ "$2" -eq "moto" ]]; then
         skipWelcomePage

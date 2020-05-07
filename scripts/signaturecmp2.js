@@ -7,10 +7,8 @@ const fs = require('fs'),
     {cpuProfileParser} = require("../devtool-cpu-model/analyze_cpu_profile.js");
 
 const PATH_TO_SIGNATURE="/home/goelayu/research/WebPeformance/outputm2/modified/mobile/sig/imc",
-    PATH_TO_SIGNATURE2="/home/goelayu/research/WebPeformance/outputm2/modified/mobile/sig/imc2",
     PATH_TO_PROFILE="/home/goelayu/research/WebPeformance/outputm2/orig/mobile//imc",
-    PATH_TO_ALIASURLS="/home/goelayu/research/WebPeformance/scripts/aliasURlS/",
-    PATH_TO_PAIRS_DICT="/home/goelayu/research/WebPeformance/scripts/sites/pairDict_top";
+    PATH_TO_ALIASURLS="/home/goelayu/research/WebPeformance/scripts/aliasURlS/"
 
 program
     // .option('-s, --sig [sig]', 'path to the signature file')
@@ -18,7 +16,6 @@ program
     // .option('-c, --cpu [cpu]','path to the chrome cpu profile')
     .option('-t, --type [type]','type of time interval for signature comparision')
     .option('-s, --site, [site]', 'the name of the site')
-    .option('-p, --pairs','Set to true if comparing pairs')
     // .option('-s, --sanity', 'sanity test signature')
     .parse(process.argv);
 
@@ -33,7 +30,6 @@ var getUserDefinedTime = function(cpu){
 }
 
 var parseFile = function(f){
-    // console.log(f);
     return JSON.parse(fs.readFileSync(f),"utf-8");
 }
 
@@ -162,7 +158,6 @@ var _compareSignature = function(srcSigStr, srcLen,  dstSig){
 }
 
 var getCanonicalFnName = function(srcFn, pairs){
-    return srcFn;
     var _dstFn, dstFn;
     for (var k in pairs){
         if (srcFn.indexOf(k)>=0){
@@ -178,12 +173,6 @@ var compareSignatures = function(srcSig, dstSig, fnPairs){
 
     var srcFns = [...new Set(Object.keys(srcSig).map(e=>e.split("_count")[0]))],
         dstFns = [...new Set(Object.keys(dstSig).map(e=>e.split("_count")[0]))];
-
-    // srcFns.forEach((sf)=>{
-    //     if (dstFns.indexOf(sf)<0)
-    //         console.log(sf);
-    // });
-    // process.exit();
 
     var binDstSig = binSignature(dstSig);
 
@@ -264,116 +253,30 @@ var checkData = function(s,d){
         ) return true;
 }
 
-var sanitizeUrls = function(u){
-    return u.split('://')[1].replace(/\//g,'_').replace(/\&/g,'-');
-}
-
-var _getValidSourceSig = function(subPaths,type,srcStart){
-    var ret = [], _srcSig, srcSig;
-    for (var i = srcStart; i < subPaths.length;i++){
-        var p = subPaths[i];
-        _srcSig = `${PATH_TO_SIGNATURE}/top/pairs/b2b/${sanitizeUrls(p)}/signature`;
-        try {
-            srcSig = parseFile(_srcSig).value;
-            if (srcSig && Object.keys(srcSig).length){
-                ret = [srcSig, i];
-                break;
-            }
-        } catch (e){
-            // do nothing, continue
-        }
-    };
-    return ret;
-}
-
-var compareAllTopPairs = function(subPaths, type,srcStart){
-    var getSrc = _getValidSourceSig(subPaths,type,srcStart);
-    if (!getSrc.length) return Number.MAX_SAFE_INTEGER;
-
-    var dstStart = getSrc[1], srcSig = getSrc[0],
-        _dstSig, dstSig;
-    var _prof = `${PATH_TO_PROFILE}/top/pairs/b2b/=${sanitizeUrls(subPaths[0])}/jsProfile`, //The profile used was the first url's
-        prof = cpuProfileParser(parseFile(_prof));
-
-    for (var i = dstStart+1; i<subPaths.length;i++){
-        var p = subPaths[i];
-        _dstSig = `${PATH_TO_SIGNATURE}/top/pairs/${type}/${sanitizeUrls(p)}/signature`;
-        try {
-            dstSig = parseFile(_dstSig).value;
-        } catch (e){
-            dstSig = {};
-        }
-        if (checkData(srcSig, dstSig)) continue;
-
-
-        var fasterRun = Object.keys(srcSig).length > Object.keys(dstSig).length ?
-        dstSig : srcSig;
-        var slowerRun = fasterRun == srcSig ? dstSig : srcSig;
-
-        var matchData = compareSignatures(fasterRun, slowerRun, []);
-        var time = sigMatchTime(matchData, prof);
-        console.log(`${time} ${getTimeWithSig(fasterRun,prof)}`);
-
-    }
-    return getSrc[1]+1;
-}
-
-var getTopPairPaths = function(type, subPaths){
-    var srcStart = 0;
-    while (srcStart < subPaths.length){
-        srcStart = compareAllTopPairs(subPaths,type,srcStart);
-    }
-}
-
 function main(){
     // var cpu = parseFile(program.cpu),
     //  node2time = parseFile(program.inst),
     //  signature = parseFile(program.sig).value,
     //  proccCpu = cpuProfileParser(cpu);
 
-    var srcSig, dstSig, srcProf, dstProf, canonUrls, fnPairs, urlPairDict, pair = [],
-        dstProf = srcProf = PATH_TO_PROFILE+"/pixel/b2b/0/"+program.site+'/jsProfile';
-
-    if (program.pairs){
-        urlPairDict = parseFile(PATH_TO_PAIRS_DICT);
-        pair = urlPairDict[program.site];
-    }
-
-    getTopPairPaths(program.type, pair);
-    return;
+    var srcSig, dstSig, srcProf, dstProf, canonUrls, fnPairs;
+    srcSig = PATH_TO_SIGNATURE+"/b2b/0/"+program.site+'/signature',
+        srcProf = PATH_TO_PROFILE+"/b2b/0/"+program.site+'/jsProfile';
 
     switch (program.type){
         case 'b2b': 
-            if (pair.length){
-                srcSig = PATH_TO_SIGNATURE+"/rand/pairs/b2b/"+sanitizeUrls(pair[1])+"/signature",
-                dstSig = PATH_TO_SIGNATURE+"/rand/pairs/b2b/p1/b2b/"+sanitizeUrls(pair[1])+"/signature",
-                dstProf = srcProf = PATH_TO_PROFILE + "/rand/pairs/b2b/"+sanitizeUrls(pair[1])+"/jsProfile"
-                break;
-            }
-            srcSig = PATH_TO_SIGNATURE+"/pixel/b2b/0/"+program.site+'/signature',
-            dstSig = PATH_TO_SIGNATURE+"/pixel/b2b/1/"+program.site+'/signature',
+            dstSig = PATH_TO_SIGNATURE+"/b2b/1/"+program.site+'/signature',
+            dstProf = PATH_TO_PROFILE+"/b2b/1/"+program.site+'/jsProfile';
             canonUrls = PATH_TO_ALIASURLS+"/b2b/"+ program.site;
             break;
         case 'hour':
-            if (pair.length){
-                srcSig = PATH_TO_SIGNATURE+"/rand/pairs/hour/"+sanitizeUrls(pair[1])+"/signature",
-                dstSig = PATH_TO_SIGNATURE+"/rand/pairs/b2b/p1/hour/"+sanitizeUrls(pair[1])+"/signature",
-                dstProf = srcProf = PATH_TO_PROFILE + "/rand/pairs/hour/"+sanitizeUrls(pair[1])+"/jsProfile"
-                break;
-            }
-            srcSig = PATH_TO_SIGNATURE+"/b2b/0_hour/"+program.site+'/signature',
             dstSig = PATH_TO_SIGNATURE+"/hour/0/"+program.site+'/signature',
+            dstProf = PATH_TO_PROFILE+"/hour/0/"+program.site+'/jsProfile';
             canonUrls = PATH_TO_ALIASURLS+"/hour/"+ program.site
             break;
         case 'day':
-            if (pair.length){
-                srcSig = PATH_TO_SIGNATURE+"/rand/pairs/day/"+sanitizeUrls(pair[1])+"/signature",
-                dstSig = PATH_TO_SIGNATURE+"/rand/pairs/b2b/p1/day/"+sanitizeUrls(pair[1])+"/signature",
-                dstProf = srcProf = PATH_TO_PROFILE + "/rand/pairs/day/"+sanitizeUrls(pair[1])+"/jsProfile"
-                break;
-            }
-            srcSig = PATH_TO_SIGNATURE+"/b2b/0_day/"+program.site+'/signature',
             dstSig = PATH_TO_SIGNATURE+"/day/0/"+program.site+'/signature',
+            dstProf = PATH_TO_PROFILE+"/day/0/"+program.site+'/jsProfile';
             canonUrls = PATH_TO_ALIASURLS+"/day/"+ program.site;
             break;
     }
