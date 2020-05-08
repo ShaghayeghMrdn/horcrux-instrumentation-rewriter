@@ -19,6 +19,7 @@ program
     .option('-t, --type [type]','type of time interval for signature comparision')
     .option('-s, --site, [site]', 'the name of the site')
     .option('-p, --pairs','Set to true if comparing pairs')
+    .option('-v, --verbose', 'verbose log')
     // .option('-s, --sanity', 'sanity test signature')
     .parse(process.argv);
 
@@ -229,13 +230,14 @@ var compareSignatures = function(srcSig, dstSig, fnPairs){
 }
 
 var sigMatchTime = function(matchData, cpu){
-    var time = 0;
+    var time = 0, ttotal = 0;
     Object.keys(matchData).forEach((f)=>{
         var invocs = matchData[f];
         var perc = invocs.matched.length/invocs.total.length;
         var func = {f:f}
         var t = _matchFunctionWithRTI(func, cpu) ? func.time : 0
         time += t*perc;
+        ttotal += t;
     })
     return time;
 }
@@ -332,15 +334,15 @@ function main(){
     //  proccCpu = cpuProfileParser(cpu);
 
     var srcSig, dstSig, srcProf, dstProf, canonUrls, fnPairs, urlPairDict, pair = [],
-        dstProf = srcProf = PATH_TO_PROFILE+"/pixel/b2b/0/"+program.site+'/jsProfile';
+        dstProf, srcProf;
 
     if (program.pairs){
         urlPairDict = parseFile(PATH_TO_PAIRS_DICT);
         pair = urlPairDict[program.site];
-    }
 
-    getTopPairPaths(program.type, pair);
-    return;
+        getTopPairPaths(program.type, pair);
+        return;
+    }
 
     switch (program.type){
         case 'b2b': 
@@ -350,9 +352,10 @@ function main(){
                 dstProf = srcProf = PATH_TO_PROFILE + "/rand/pairs/b2b/"+sanitizeUrls(pair[1])+"/jsProfile"
                 break;
             }
-            srcSig = PATH_TO_SIGNATURE+"/pixel/b2b/0/"+program.site+'/signature',
-            dstSig = PATH_TO_SIGNATURE+"/pixel/b2b/1/"+program.site+'/signature',
+            srcSig = PATH_TO_SIGNATURE+"/top/b2b/0_1/"+program.site+'/signature',
+            dstSig = PATH_TO_SIGNATURE+"/top/b2b/1/"+program.site+'/signature',
             canonUrls = PATH_TO_ALIASURLS+"/b2b/"+ program.site;
+            dstProf = srcProf = PATH_TO_PROFILE+"/top/b2b/1/"+program.site+'/jsProfile';
             break;
         case 'hour':
             if (pair.length){
@@ -361,9 +364,10 @@ function main(){
                 dstProf = srcProf = PATH_TO_PROFILE + "/rand/pairs/hour/"+sanitizeUrls(pair[1])+"/jsProfile"
                 break;
             }
-            srcSig = PATH_TO_SIGNATURE+"/b2b/0_hour/"+program.site+'/signature',
-            dstSig = PATH_TO_SIGNATURE+"/hour/0/"+program.site+'/signature',
+            srcSig = PATH_TO_SIGNATURE+"/top/b2b/0_hour/"+program.site+'/signature',
+            dstSig = PATH_TO_SIGNATURE+"/top/hour/0/"+program.site+'/signature',
             canonUrls = PATH_TO_ALIASURLS+"/hour/"+ program.site
+            dstProf = srcProf = PATH_TO_PROFILE+"/top/hour/0/"+program.site+'/jsProfile';
             break;
         case 'day':
             if (pair.length){
@@ -372,9 +376,10 @@ function main(){
                 dstProf = srcProf = PATH_TO_PROFILE + "/rand/pairs/day/"+sanitizeUrls(pair[1])+"/jsProfile"
                 break;
             }
-            srcSig = PATH_TO_SIGNATURE+"/b2b/0_day/"+program.site+'/signature',
-            dstSig = PATH_TO_SIGNATURE+"/day/0/"+program.site+'/signature',
+            srcSig = PATH_TO_SIGNATURE+"/top/b2b/0_day/"+program.site+'/signature',
+            dstSig = PATH_TO_SIGNATURE+"/top/day/0/"+program.site+'/signature',
             canonUrls = PATH_TO_ALIASURLS+"/day/"+ program.site;
+            dstProf = srcProf = PATH_TO_PROFILE+"/top/day/0/"+program.site+'/jsProfile';
             break;
     }
 
@@ -390,10 +395,12 @@ function main(){
 
         if (checkData(srcSig,dstSig)){
             console.log("")
+            if (program.verbose) console.log("empty data in one of the signatures");
             return;
         }
     } catch (e){
         console.log("");
+        if (program.verbose) console.log(e);
         return;
     }
 
