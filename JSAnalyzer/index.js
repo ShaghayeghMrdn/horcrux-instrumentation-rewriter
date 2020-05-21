@@ -146,7 +146,7 @@ function instrument(src, options) {
 		console.log("[instrument] Only instrumenting the following functions from the current script: " + options.origPath + " : " + JSON.stringify(_logStringRTI));
 
 		// Logging matching information
-		staticInfo.rtiDebugInfo.totalNodes = options.myRti
+		staticInfo.rtiDebugInfo.totalNodes = (options.myRti);
 		var ALLUrls = options.rti.map((el)=>{return el.url}).filter((el,ind,self)=>self.indexOf(el)==ind);
 		var matchedUrls = options.myRti.map((el)=>{return el.url}).filter((el,ind,self)=>self.indexOf(el)==ind);
 		staticInfo.rtiDebugInfo.ALLUrls = ALLUrls;
@@ -750,9 +750,16 @@ var traceFilter = function (content, options) {
 				var matchedNode = util.matchASTNodewithRTINode(rtiNode, ASTNodes, options, ASTSourceMap);
 				if (matchedNode){
 					instrumentedNodes.push(matchedNode);
-					staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
-				} else
-				remainingRTINodes.push(rtiNode);
+					// staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
+				} 
+			})
+
+			ASTNodes.forEach((node)=>{
+				if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
+					if (instrumentedNodes.indexOf(node)<0){
+						markFunctionUnCacheable(node,"RTI");
+					}
+				}
 			})
 
 			// if (remainingRTINodes.length){
@@ -1724,7 +1731,7 @@ var traceFilter = function (content, options) {
 				if (functionToNonLocals[index].length) {
 					closures = insertClosureProxy(node, index);
 				}
-				if ( (options.myRti || options.myCg)){
+				if ( (options.rti || options.myCg)){
 					if (uncacheableFunctions["RTI"].indexOf(node)>=0) {
 						/*Every closure function needs to have an exposed closure scope 
 						*/
@@ -1803,7 +1810,7 @@ var traceFilter = function (content, options) {
 		processed = m;
 
 	} catch (e) {
-		console.error('[PARSING EXCEPTION]' + options.path + ": " + e);
+		console.error('[PARSING EXCEPTION]' + options.path + ": " + e + e.stack);
 		// mostly exception imples that it is a json file. 
 		return content;
 	}

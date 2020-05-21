@@ -112,7 +112,9 @@ def main(args):
 
                 if isJS(http_response_orig.response.header):
                     u = http_response_orig.request.first_line.split()[1]
-                    listOfJS[url].append(u.split('/')[-1].split('?')[0])
+                    # listOfJS[url].append(u.split('/')[-1].split('?')[0])
+
+                    print u
             except:
                 print "error while processing file"
         # print "processed", url
@@ -121,10 +123,10 @@ def main(args):
 
     jsData = {}
     count = 0
-    print listOfJS
-    for root, folder, files in os.walk(args.original):
+    print "files from", args.modified
+    for root, folder, files in os.walk(args.modified):
         url = root.split('/')[-1]
-        otherJS = {k:listOfJS[k] for k in listOfJS if k != url}
+        # otherJS = {k:listOfJS[k] for k in listOfJS if k != url}
         jsData[url] = [0,0]
         count = count+1
         for file in files:
@@ -133,21 +135,22 @@ def main(args):
                 http_response_orig.ParseFromString(f_orig.read())
 
                 if isJS(http_response_orig.response.header):
-                    jsData[url][1] = jsData[url][1] + 1
+                    # jsData[url][1] = jsData[url][1] + 1
                     _u = http_response_orig.request.first_line.split()[1]
-                    u = _u.split('/')[-1].split('?')[0]
-                    val = []
-                    for i in otherJS.values():
-                        val.extend(i)
-                    if u in val:
-                        jsData[url][0] = jsData[url][0] + 1
+                    print _u
+                    # u = _u.split('/')[-1].split('?')[0]
+                    # val = []
+                    # for i in otherJS.values():
+                    #     val.extend(i)
+                    # if u in val:
+                    #     jsData[url][0] = jsData[url][0] + 1
             except:
                 print "error while processing file"
         # if count > 100:
         #     break
 
-        if jsData[url][1] != 0:
-            print url, jsData[url][0]/float(jsData[url][1])
+        # if jsData[url][1] != 0:
+        #     print url, jsData[url][0]/float(jsData[url][1])
                     # orig_body = getPlainText(http_response_orig)
                     # if "analytics" in http_response_orig.request.first_line.split()[1]:
                     #     print "orig,",file,http_response_orig.request.first_line.split()[1]
@@ -176,7 +179,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('original', help='path to input directory')
-    # parser.add_argument('modified', help='path to input directory')
+    parser.add_argument('modified', help='path to input directory')
     # parser.add_argument('url',help='path to output directory')
     args = parser.parse_args()
     main(args)

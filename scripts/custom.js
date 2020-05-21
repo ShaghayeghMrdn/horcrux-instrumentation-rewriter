@@ -139,13 +139,17 @@ var runPostLoadScripts = async function(Runtime){
     console.log("Running postload scripts..");
     //process final signature
     var processCommand = `
+    var accSig = {};
     for (i=0;i<window.frames.length;i++){
     win = window.frames[i];
         if (win.__tracer && win.__tracer != window.top.__tracer) {
                 win.__tracer.processFinalSignature();
+                __ = Object.assign(accSig, win.__tracer.getProcessedSignature())
                 // win.__tracer.storeSignature();
     }}
     __tracer.processFinalSignature();
+    __ = Object.assign(accSig, __tracer.getProcessedSignature())
+    accSig;
     // __tracer.storeSignature();
 
 `;
@@ -171,7 +175,7 @@ var runPostLoadScripts = async function(Runtime){
 
     console.log("successfully ran the post load scripts");
 
-    return 0;
+    return cmdOutput;
 }
 
 var getProcessedSignature = async function(Runtime, outDir){

@@ -16,6 +16,12 @@ ipfilePrefix=/home/goelayu/research/WebPeformance/traces/vaspol/record/devtools_
 ipfileDst=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/delay_ip_mapping.txt
 
 echo "DATA FLAGS: " $DATAFLAGS
+nodeTIMEOUT=100
+
+if [[ $DATAFLAGS == *"testing"* ]]; then
+    echo "Running in testing mode..."
+    nodeTIMEOUT=1100000
+fi
 
 help(){
 	echo "Note: The 3rd argument (path to the output directory) shouldn't contain a backslash at the end"
@@ -61,7 +67,7 @@ waitForNode(){
 		curr_time=`date +'%s'`
 		elapsed=`expr $curr_time - $start_time`
 		echo $elapsed
-		if [ $elapsed -gt 100 ]; then
+		if [ $elapsed -gt $nodeTIMEOUT ]; then
 			echo "TIMED OUT..."
 			ps aux | grep $1 | awk '{print $2}' | xargs kill -9
 		fi

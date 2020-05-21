@@ -175,7 +175,12 @@ var getCanonicalFnName = function(srcFn, pairs){
         srcFn;
 }
 
-var compareSignatures = function(srcSig, dstSig, fnPairs){
+var isFirstDomain = function(sig,site){
+    return !sig.length || sig[sig.length - 1][1].startsWith(`https://${site}/`) 
+        || sig[sig.length - 1][1].startsWith(`https://${site.replace('www','')}/`)
+}
+
+var compareSignatures = function(srcSig, dstSig, fnPairs, site){
 
     var srcFns = [...new Set(Object.keys(srcSig).map(e=>e.split("_count")[0]))],
         dstFns = [...new Set(Object.keys(dstSig).map(e=>e.split("_count")[0]))];
@@ -193,14 +198,22 @@ var compareSignatures = function(srcSig, dstSig, fnPairs){
 
     Object.keys(srcSig).forEach((s)=>{
         var fn = s.split("_count")[0],
-            sig = srcSig[s].filter(e=> typeof e == 'object');
+            sig = srcSig[s].filter(e=> typeof e == 'object' && e[0] != "ec");
         if (!(fn in srcFn2Invocs))
-            srcFn2Invocs[fn]={matched:[], total:[], cache:{}};
+            srcFn2Invocs[fn]={matched:[], noCand : [], total:[], 
+                context : [0,0], cache:{}, nFrames : [new Set, new Set]};
         var [sigStr, sigLen] = [sig.toString(), sig.length];
 
         if (srcFn2Invocs[fn].cache[sigStr] !== undefined){
-            if (srcFn2Invocs[fn].cache[sigStr])
+            if (srcFn2Invocs[fn].cache[sigStr]){
                 srcFn2Invocs[fn].matched.push(s);
+                if (isFirstDomain(srcFn2Invocs[fn].cache[sigStr], site)){
+                    srcFn2Invocs[fn].context[1]++
+                }
+            } else srcFn2Invocs[fn].noCand.push(s);
+            if (isFirstDomain(srcSig[s], site)){
+                    srcFn2Invocs[fn].context[0]++
+            }
             srcFn2Invocs[fn].total.push(s);
             return;
         }
@@ -215,31 +228,65 @@ var compareSignatures = function(srcSig, dstSig, fnPairs){
             candDstSig = binDstSig[aliasFn] || [];
         }
 
+        if (!candDstSig.length)
+            srcFn2Invocs[fn].noCand.push(s);
+
         for (var d of candDstSig){
             if (_compareSignature(sigStr, sigLen, d)){
                 srcFn2Invocs[fn].matched.push(s);
                 foundMatch = true;
-                srcFn2Invocs[fn].cache[sigStr] = true;
+                srcFn2Invocs[fn].cache[sigStr] = srcSig[s].length ? srcSig[s] : [];
+                if (isFirstDomain(srcSig[s], site)){
+                    srcFn2Invocs[fn].context[1]++
+                    srcSig[s].length && srcFn2Invocs[fn].nFrames[1].add(srcSig[s][srcSig[s].length-1][1])
+                }
                 break;
             }
         }
+        if (isFirstDomain(srcSig[s], site)){
+             srcFn2Invocs[fn].context[0]++;
+             srcSig[s].length && srcFn2Invocs[fn].nFrames[0].add(srcSig[s][srcSig[s].length-1][1])
+         }
         srcFn2Invocs[fn].total.push(s);
     });
 
     return srcFn2Invocs;
 }
 
-var sigMatchTime = function(matchData, cpu){
-    var time = 0, ttotal = 0;
+var sigMatchTime = function(matchData, cpu, site){
+    var tsaved = 0, noCandTime = 0, ttotal = 0,
+        tMain = 0, sMain = 0, nFrames = [new Set, new Set];
     Object.keys(matchData).forEach((f)=>{
         var invocs = matchData[f];
-        var perc = invocs.matched.length/invocs.total.length;
+        var perc = invocs.matched.length/invocs.total.length,
+            noCandPerc = invocs.noCand.length/invocs.total.length;
         var func = {f:f}
         var t = _matchFunctionWithRTI(func, cpu) ? func.time : 0
-        time += t*perc;
+        // console.log(noCandPerc);
+        noCandTime += t*noCandPerc;
+        tsaved += t*perc;
         ttotal += t;
+        tMain += (invocs.context[0]/invocs.total.length)*t
+        sMain += (invocs.context[1]/invocs.total.length)*t
+
+        nFrames[0] = new Set([...nFrames[0], ...invocs.nFrames[0]])
+        nFrames[1] = new Set([...nFrames[1], ...invocs.nFrames[1]])
+        // if (func.rti.profileNode.callFrame.url.indexOf(site)>=0){
+        //     total[0] += t;
+        //     saved[0] += t*perc;
+        // } else {
+        //     total[1] += t;
+        //     saved[1] += t*perc;
+        //     if (perc>0)
+        //         nDomains[1].add(func.rti.profileNode.callFrame.url.split('/')[2])
+        //     nDomains[0].add(func.rti.profileNode.callFrame.url.split('/')[2])
+        // }
+
+
     })
-    return time;
+    return [tsaved, noCandTime]
+    // return [ttotal, tMain, tsaved, sMain];
+    // return [nFrames.map(e=>e.size)];
 }
 
 var _urlToFnName = function(url){
@@ -352,7 +399,7 @@ function main(){
                 dstProf = srcProf = PATH_TO_PROFILE + "/rand/pairs/b2b/"+sanitizeUrls(pair[1])+"/jsProfile"
                 break;
             }
-            srcSig = PATH_TO_SIGNATURE+"/top/b2b/0_1/"+program.site+'/signature',
+            srcSig = PATH_TO_SIGNATURE+"/top/b2b/0_context/"+program.site+'/signature',
             dstSig = PATH_TO_SIGNATURE+"/top/b2b/1/"+program.site+'/signature',
             canonUrls = PATH_TO_ALIASURLS+"/b2b/"+ program.site;
             dstProf = srcProf = PATH_TO_PROFILE+"/top/b2b/1/"+program.site+'/jsProfile';
@@ -411,8 +458,8 @@ function main(){
     var slowerRun = fasterRun == srcSig ? dstSig : srcSig;
     var fasterProf = fasterRun == srcSig ? srcProf : dstProf
 
-    var matchData = compareSignatures(fasterRun, slowerRun, fnPairs);
-    var time = sigMatchTime(matchData, fasterProf);
+    var matchData = compareSignatures(fasterRun, slowerRun, fnPairs, program.site);
+    var time = sigMatchTime(matchData, fasterProf, program.site);
     console.log(`${time} ${getTimeWithSig(fasterRun,fasterProf)}`);
 }
 

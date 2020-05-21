@@ -212,7 +212,7 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         else:
             command = " {} -i {} -n '{}' -t {} -p {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType, args.instOutput)
 
-        if (args.debug) and fileType == "js":
+        if (args.debug) and fileType == "html":
             command = "node --inspect-brk={}".format(node_debugging_port) + command
         else:
             command = "node " + command
@@ -235,7 +235,7 @@ def instrument(file,root, childPids, fileType, output_directory,args):
             returnInfo = open(returnInfoFile,'r').readline();
 
             open(_log_path + "info","w").write(returnInfo)
-            open (TEMP_FILE + ".time","w").write(str(static_analysis_overhead))
+            # open (TEMP_FILE + ".time","w").write(str(static_analysis_overhead))
         except IOError as e:
             print "Error while reading info file" + str(e)
 

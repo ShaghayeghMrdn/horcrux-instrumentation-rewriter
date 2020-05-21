@@ -487,6 +487,7 @@ async function extractCustomInformation(Runtime, program, path){
     if (program.mode == "record") {
        await customCodes.getInvocationProperties(Runtime, program.output  + "/cacheStats", '__tracer.getCacheStats()');
        var runPostLoadScripts = await customCodes.runPostLoadScripts(Runtime);
+       fs.writeFileSync(program.output + "/signature",JSON.stringify(runPostLoadScripts.result));
        if (runPostLoadScripts == 0){
 
          // await customCodes.getCacheSize(Runtime, program.output);
@@ -503,7 +504,7 @@ async function extractCustomInformation(Runtime, program, path){
        // await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
        await customCodes.getInvocationProperties(Runtime, program.output + "/noncacheable", '__tracer.getNonCacheableFunctions()');
        // await customCodes.getDOM(Runtime, program.output +"/DOM");
-       await customCodes.getInvocationProperties(Runtime, program.output + "/signature", '__tracer.getProcessedSignature()');
+       // await customCodes.getInvocationProperties(Runtime, program.output + "/signature", '__tracer.getProcessedSignature()');
        await customCodes.getInvocationProperties(Runtime, program.output + "/purgeTime", '__tracer.getRuntimePurged()');
        await customCodes.getInvocationProperties(Runtime, program.output + "/invocations", '__tracer.getInvocations()');
        // dataReceived = true

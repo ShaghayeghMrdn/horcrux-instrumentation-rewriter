@@ -26,7 +26,7 @@ properties.parse(PATH_TO_PROPERTIES, {path: true, sections: true}, function(err,
 var logPrefix;
 var _oldLogger = console;
 var staticInfo = {};
-staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matchedUrls: []};
+staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matchedUrls: [], ND:[]};
 staticInfo.rtiDebugInfo.totalNodes.time = 0;
 staticInfo.uncacheableFunctions = uncacheableFunctions;
 // console.log = function(arg, filename = __filename){
@@ -379,7 +379,8 @@ var traceFilter = function (content, options) {
         }
 
         var isNonDeterminist = function(src) {
-            return ((src.indexOf("random") >= 0) || (src.indexOf("Date") >= 0));
+            return ((src.indexOf("random") >= 0) || (src.indexOf("Date") >= 0)
+                || src.indexOf("XMLHttpRequest")>=0);
         }
 
         var rewriteArguments = function(argReads){
@@ -1696,6 +1697,10 @@ var traceFilter = function (content, options) {
                 var containsReturn = false, closures = [];
                 var index = makeId('function', options.path, node);
                 if (node.containsReturn) containsReturn = true;
+
+                if (isNonDeterminist(node.source()))
+                    staticInfo.rtiDebugInfo.ND.push(index);
+
                 if (functionToNonLocals[index].length) {
                     closures = insertClosureProxy(node, index);
                 }

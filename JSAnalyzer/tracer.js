@@ -2047,6 +2047,8 @@ function __declTracerObject__(window) {
                 return;
             } 
             customLocalStorage[cacheIndex]["IBF"] = "";
+            customLocalStorage[cacheIndex]["ec"] = window && window.document ? 
+                window.document.location.href : null;
             customLocalStorage[cacheIndex].readKeys = new Set();
             customLocalStorage[cacheIndex].writeKeys = new Set();
 
@@ -2323,6 +2325,7 @@ function __declTracerObject__(window) {
             customLocalStorage[nodeId] = signature.filter((e)=>{return filterSignature(e, rootObjects, currStateWrites, key)});
             (signature.returnValue != null) && (customLocalStorage[nodeId].returnValue = signature.returnValue)
             signature.IBF && (customLocalStorage[nodeId].IBF = signature.IBF)
+            customLocalStorage[nodeId].ec = signature.ec
             customLocalStorage[nodeId].readKeys = signature.readKeys;
             customLocalStorage[nodeId].writeKeys = signature.writeKeys;
             signature = customLocalStorage[nodeId];
@@ -2883,6 +2886,9 @@ function __declTracerObject__(window) {
                         }
                         signature[nodeId] &&  signature[nodeId].IBF && processedSig[nodeId] && (
                             processedSig[nodeId].IBF = signature[nodeId].IBF)
+
+                        signature[nodeId] &&  signature[nodeId].ec && processedSig[nodeId] && (
+                            processedSig[nodeId].push(['ec', signature[nodeId].ec]));
                     }
 
                     // Object.keys(signature[nodeId]).forEach((key)=>{

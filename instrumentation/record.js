@@ -273,11 +273,13 @@ function computeRTITimeMatched(){
     //     time[type] = _tmpTime;
     // })
     //Dump this time in a file
-    fs.writeFileSync(returnInfoFile, /*time.totalNodes + " " + time.matchedNodes + " " + */ staticInfo.rtiDebugInfo.ALL + " "+
-        // + JSON.stringify(staticInfo.rtiDebugInfo.ALLUrls) + " " + JSON.stringify(staticInfo.rtiDebugInfo.matchedUrls));
-        staticInfo.rtiDebugInfo.totalNodes.length + " " + staticInfo.rtiDebugInfo.matchedNodes.length
-        + " " + (staticInfo.rtiDebugInfo.totalNodes.time || 0)
-        + " " + staticInfo.rtiDebugInfo.matchedNodes.reduce((acc,cur)=>{return cur[1] + acc},0));
+    // fs.writeFileSync(returnInfoFile, /*time.totalNodes + " " + time.matchedNodes + " " + */ staticInfo.rtiDebugInfo.ALL + " "+
+    //     // + JSON.stringify(staticInfo.rtiDebugInfo.ALLUrls) + " " + JSON.stringify(staticInfo.rtiDebugInfo.matchedUrls));
+    //     staticInfo.rtiDebugInfo.totalNodes.length + " " + staticInfo.rtiDebugInfo.matchedNodes.length
+    //     + " " + (staticInfo.rtiDebugInfo.totalNodes.time || 0)
+    //     + " " + staticInfo.rtiDebugInfo.matchedNodes.reduce((acc,cur)=>{return cur[1] + acc},0));
+    fs.writeFileSync(returnInfoFile,staticInfo.rtiDebugInfo.ALL + " " + staticInfo.rtiDebugInfo.totalNodes.length + " " + staticInfo.rtiDebugInfo.matchedNodes.length );
+    // fs.writeFileSync(returnInfoFile, JSON.stringify(staticInfo.rtiDebugInfo.ND));
 }
 
 function dumpStaticInformation_uncacheable(options){
