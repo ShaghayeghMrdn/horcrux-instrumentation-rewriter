@@ -242,24 +242,8 @@ else if (flag == "-cg") {
     })
     console.log(orig, read);
 }  else if (flag == "-sig") {
-    var timing  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
-    var sigSizes  = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
-    var hits = JSON.parse(fs.readFileSync(process.argv[5], "utf-8")).value.hits;
-    var proc = {};
-    hits.forEach((invoc)=>{
-        var [n,count] = invoc.split("_count")
-        if ( !(n in proc) ){
-            proc[n] = {};
-            proc[n].time = 0;
-            proc[n].len = 0;
-        }
-        proc[n].time += timing[invoc][1] - timing[invoc][0];
-        proc[n].len += sigSizes[invoc] ? sigSizes[invoc] :0 ; 
-    })
-    Object.keys(proc).forEach((n)=>{
-        console.log(proc[n].time, proc[n].len)
-    })
-    // process.stdout.write(util.format(total + " "));
+    var sig  = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
+    console.log(Object.keys(sig).length);
 } 
 else if (flag == "-map") {
     var leafNodes =  JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));

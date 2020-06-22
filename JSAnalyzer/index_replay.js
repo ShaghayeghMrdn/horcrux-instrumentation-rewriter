@@ -379,8 +379,11 @@ var traceFilter = function (content, options) {
         }
 
         var isNonDeterminist = function(src) {
-            return ((src.indexOf("random") >= 0) || (src.indexOf("Date") >= 0)
-                || src.indexOf("XMLHttpRequest")>=0);
+            // return src.indexOf("Math.random")>=0;
+            return (src.indexOf("Math.random") >= 0 || (src.indexOf(" Date") >= 0)
+                || src.indexOf("Object.keys")>=0
+                || src.indexOf("performance.now") >=0
+                );
         }
 
         var rewriteArguments = function(argReads){
@@ -1698,8 +1701,9 @@ var traceFilter = function (content, options) {
                 var index = makeId('function', options.path, node);
                 if (node.containsReturn) containsReturn = true;
 
-                if (isNonDeterminist(node.source()))
+                if (isNonDeterminist(node.source())){
                     staticInfo.rtiDebugInfo.ND.push(index);
+                }
 
                 if (functionToNonLocals[index].length) {
                     closures = insertClosureProxy(node, index);

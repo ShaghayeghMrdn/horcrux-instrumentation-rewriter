@@ -1771,7 +1771,7 @@ function __declTracerObject__(window) {
         //     return returnValue;
         // }
         // return returnValue;
-        var _retString = omniStringifier.stringify(returnValue,"write",1);
+        var _retString = omniStringifier.stringify(returnValue,"read",2);
         if (_retString && _retString instanceof Error) {
                 nonCacheableNodes[cacheIndex] = _retString.message;
         }
@@ -2016,7 +2016,7 @@ function __declTracerObject__(window) {
         // _shadowStackHead = cacheIndex;
         // shadowStack.push(cacheIndex);
 
-        // timingInfo[cacheIndex] = [];
+        timingInfo[cacheIndex] = [];
         // timingInfo[cacheIndex].push(window.performance.now());
         if (instrumentationPattern == "record" || instrumentationPattern == "replay") {
 
@@ -2051,10 +2051,7 @@ function __declTracerObject__(window) {
                 window.document.location.href : null;
             customLocalStorage[cacheIndex].readKeys = new Set();
             customLocalStorage[cacheIndex].writeKeys = new Set();
-
-            // if (customLocalStorage[cacheIndex])
-            //     console.error("Same function with same invocation id", cacheIndex);
-            // timingInfo[cacheIndex].push(window.performance.now());
+            // customLocalStorage[cacheIndex].startTime = window.performance.now();
         } else {
             // if (!(cacheIndex in callGraph))
             callGraph[cacheIndex] = [];
@@ -2062,7 +2059,7 @@ function __declTracerObject__(window) {
                 callGraph[_shadowStackHead].push(cacheIndex)
             }
 
-            // timingInfo[cacheIndex].push(window.performance.now());
+            timingInfo[cacheIndex].push(window.performance.now());
             shadowStack.push(cacheIndex);
             _shadowStackHead = cacheIndex;
         }
@@ -2322,7 +2319,8 @@ function __declTracerObject__(window) {
             var rootObjects = getRootIds(signature.filter(e=>e[0].split("_")[0]==state));
             // customLocalStorage[nodeId] = signature.filter((e)=> { return e[0] != key || 
             //     (rootObjects.indexOf(e[4])<0 && currStateWrites.indexOf(e[4])<0)} );
-            customLocalStorage[nodeId] = signature.filter((e)=>{return filterSignature(e, rootObjects, currStateWrites, key)});
+            //Disable filtering of signature entriesinde
+            // customLocalStorage[nodeId] = signature.filter((e)=>{return filterSignature(e, rootObjects, currStateWrites, key)});
             (signature.returnValue != null) && (customLocalStorage[nodeId].returnValue = signature.returnValue)
             signature.IBF && (customLocalStorage[nodeId].IBF = signature.IBF)
             customLocalStorage[nodeId].ec = signature.ec
@@ -2355,8 +2353,10 @@ function __declTracerObject__(window) {
         // var cacheIndexExp = nodeId + "_count" + invocationsIndName[nodeId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
         if (!cacheIndex) return;
+        timingInfo[cacheIndex].push(window.performance.now());
         if (instrumentationPattern == "replay")
             return;
+        // customLocalStorage[cacheIndex].endTime = window.performance.now();
         !pageLoaded && freezeReadState(cacheIndex);
         // if (window.performance.getEntriesByName(cacheIndex).length)
         shadowStack.pop();
@@ -2421,40 +2421,40 @@ function __declTracerObject__(window) {
             // TODO callee has no string method, can't store metedata information
             // console.error("Callee has no toString method")
         }
-        var ibfStr = IBFStrDecl, argsConverted = [],val;
+        var ibfStr = IBFStrCall, argsConverted = [],val;
         // var cacheIndex = functionId + "_count" + invocationsIndName[functionId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
         if (!cacheIndex || nonCacheableNodes[cacheIndex] || pageLoaded) 
             return IBF;
 
-        if ((IBFStrDecl != null && IBFStrDecl.indexOf("createElement")>=0 )){
-            nonCacheableNodes[cacheIndex] = "DOM element being created";
-            return IBF;
-        }
+        // if ((IBFStrDecl != null && IBFStrDecl.indexOf("createElement")>=0 )){
+        //     nonCacheableNodes[cacheIndex] = "DOM element being created";
+        //     return IBF;
+        // }
         /*
         Commented the bottom part, because all the arguments are being statically handled
         However moving forward, we need to dynamically handle these, as static analysis 
         doesn't completely create everything we need. 
         */
         var stringificationErr = false;
-        argVals.forEach((arg,i)=>{
-            var _argStr = omniStringifier.stringify(arg,"write",2);
-            if (_argStr && _argStr instanceof Error){
-                nonCacheableNodes[cacheIndex] = _argStr.message;
-                stringificationErr = true;
-            }
-            if (typeof _argStr == "object") {
-                val = _argStr[0];
-            } else val  = " omniStringifier.parse(\"" + escapeRegExp(_argStr) + "\");\n"; 
+        // argVals.forEach((arg,i)=>{
+        //     var _argStr = omniStringifier.stringify(arg,"write",2);
+        //     if (_argStr && _argStr instanceof Error){
+        //         nonCacheableNodes[cacheIndex] = _argStr.message;
+        //         stringificationErr = true;
+        //     }
+        //     if (typeof _argStr == "object") {
+        //         val = _argStr[0];
+        //     } else val  = " omniStringifier.parse(\"" + escapeRegExp(_argStr) + "\");\n"; 
 
-            if (typeof arg == "string" && (arg.indexOf("arg[")>=0 || arg.indexOf("closure.")>=0))
-                ibfStr += argStrs[i] + " = " + arg + ";\n"
-            else ibfStr +=  argStrs[i]+ ' = ' + val + ";\n";
-        })
-        if (stringificationErr)
-            return IBF;
+        //     if (typeof arg == "string" && (arg.indexOf("arg[")>=0 || arg.indexOf("closure.")>=0))
+        //         ibfStr += argStrs[i] + " = " + arg + ";\n"
+        //     else ibfStr +=  argStrs[i]+ ' = ' + val + ";\n";
+        // })
+        // if (stringificationErr)
+        //     return IBF;
 
-        ibfStr += IBFStrCall;
+        // ibfStr += IBFStrCall;
         if (customLocalStorage[cacheIndex]["IBF"] == null)
             customLocalStorage[cacheIndex]["IBF"] = ""
         customLocalStorage[cacheIndex]["IBF"] += "\n" + ibfStr + "\n";
@@ -2878,17 +2878,24 @@ function __declTracerObject__(window) {
 
                     if (logType == "global"){
                         if (signature[nodeId].returnValue !== undefined) { 
-                            var _ret = omniStringifier.stringify(signature[nodeId].returnValue,"write",2);
-                            if (!(_ret instanceof Error))
-                                processedSig[nodeId].returnValue = _ret;
+                            // var _ret = omniStringifier.stringify(signature[nodeId].returnValue,"write",2);
+                            var _ret = signature[nodeId].returnValue
+                            if (!(_ret instanceof Error)) {
+                                processedSig[nodeId].push(['returnValue',_ret]);
+                                // processedSig[nodeId].returnValue = _ret;
+                            }
                             else delete processedSig[nodeId];
 
                         }
                         signature[nodeId] &&  signature[nodeId].IBF && processedSig[nodeId] && (
-                            processedSig[nodeId].IBF = signature[nodeId].IBF)
+                            processedSig[nodeId].push(['IBF',signature[nodeId].IBF]));
 
                         signature[nodeId] &&  signature[nodeId].ec && processedSig[nodeId] && (
                             processedSig[nodeId].push(['ec', signature[nodeId].ec]));
+                        // signature[nodeId] &&  signature[nodeId].startTime && processedSig[nodeId] && (
+                        //     processedSig[nodeId].push(['startTime', signature[nodeId].startTime]));
+                        // signature[nodeId] &&  signature[nodeId].endTime && processedSig[nodeId] && (
+                        //     processedSig[nodeId].push(['endTime', signature[nodeId].endTime]));
                     }
 
                     // Object.keys(signature[nodeId]).forEach((key)=>{

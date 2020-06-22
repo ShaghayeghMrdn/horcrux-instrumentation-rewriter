@@ -282,7 +282,7 @@ function navigate(launcher){
             // });
 
             if (program.url) {
-                await Page.navigate({'url':program.url});
+                Page.navigate({'url':program.url});
                 console.log("Page navigated");
             }
             // await Debugger.setBreakpointsActive({active:true});
@@ -521,7 +521,7 @@ async function extractCustomInformation(Runtime, program, path){
         // await customCodes.getDOM(Runtime, program.output +"/DOM");
    } else {
         // await customCodes.getInvocationProperties(Runtime, program.output + "/leafNodes" + path, 'leafNodes',1);
-        // await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo", '__tracer.getTimingInfo()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo", '__tracer.getTimingInfo()');
         await customCodes.getInvocationProperties(Runtime, program.output + "/cg", '__tracer.getCallGraph()');
         // await customCodes.getInvocationProperties(Runtime, program.output + "/rc", 'window.proxyReadCount');
         // await customCodes.getInvocationProperties(Runtime, program.output + "/wc", 'window.proxyWriteCount');

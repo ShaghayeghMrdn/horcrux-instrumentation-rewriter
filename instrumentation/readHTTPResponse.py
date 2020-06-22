@@ -212,7 +212,7 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         else:
             command = " {} -i {} -n '{}' -t {} -p {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType, args.instOutput)
 
-        if (args.debug) and fileType == "html":
+        if (args.debug) and fileType == "js":
             command = "node --inspect-brk={}".format(node_debugging_port) + command
         else:
             command = "node " + command

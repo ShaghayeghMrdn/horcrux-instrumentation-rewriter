@@ -155,6 +155,18 @@ var traceFilter = function (content, options) {
         var functionsContainingThis = [];
         var functionToNonLocals = {};
         var inBuiltOverrides = ["tostring", "tojson", "toprimitive","typeof"];
+        var isInBuiltFunction = function(fn){
+            if (!fn)
+                return false;
+            try {
+                var _e = eval(fn);
+                if (typeof _e == "function")
+                    return true;
+                return false;
+            } catch (e){
+                return false;
+            }
+        }
         var fala = function () {
             var m = falafel.apply(this, arguments);
             return {
@@ -180,6 +192,7 @@ var traceFilter = function (content, options) {
             }
         }
 
+        var instrumentedNodes = [];
         m = fala({
             source: content,
             loc: true,
@@ -193,15 +206,29 @@ var traceFilter = function (content, options) {
         });
 
         if (options.rti) {
-            var instrumentedNodes = [], remainingRTINodes =[];
+            var remainingRTINodes =[];
             options.myRti.forEach((rtiNode)=>{
                 var matchedNode = util.matchASTNodewithRTINode(rtiNode, ASTNodes, options, ASTSourceMap);
                 if (matchedNode){
                     instrumentedNodes.push(matchedNode);
-                    staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
-                } else
-                remainingRTINodes.push(rtiNode);
+                    // staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
+                } 
             })
+
+            ASTNodes.forEach((node)=>{
+                if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
+                    if (instrumentedNodes.indexOf(node)<0){
+                        markFunctionUnCacheable(node,"RTI");
+                    }
+                }
+            })
+
+            // if (remainingRTINodes.length){
+            //  //Throw error since not all rti nodes found a match. 
+            //  console.error("Match not found for " + remainingRTINodes.length + " number of RTI nodes");
+            //  console.error("Quiting instrumentation");
+            //  return processed;
+            // }
         } else if (options.cg) {
             var instrumentedNodes = [], remainingRTINodes =[];
             ASTNodes.forEach((node)=>{
@@ -216,14 +243,7 @@ var traceFilter = function (content, options) {
                 }
 
             });
-        }
-
-        ASTNodes.forEach((node)=>{
-            if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression"){
-                if ( (options.rti || options.cg) && (instrumentedNodes.indexOf(node)<0 || (node.id && inBuiltOverrides.indexOf(node.id.name.toLowerCase())>=0)) )
-                    markFunctionUnCacheable(node,"RTI");
-            }
-        })
+        }  
 
 
         var interceptDecl = "___tracerINT";
@@ -287,8 +307,12 @@ var traceFilter = function (content, options) {
 
             else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
 
-                // if (!insideFunction(node))
-                //     totalInJs += node.source().length;
+                var fnName = util.getNameFromFunction(node)
+                if  ((options.rti || options.cg) && instrumentedNodes.indexOf(node)>=0 && ((fnName && inBuiltOverrides.filter(e=>fnName.toLowerCase().indexOf(e)>=0).length)
+                    || isInBuiltFunction(fnName)) ) {
+                    console.log("[Static Analyzer] Unhandled: in built overrides in source code," + fnName);
+                    markFunctionUnCacheable(node,"RTI");
+                }
 
                 var containsReturn = false;
                 var index = makeId('function', options.path, node);
@@ -296,7 +320,7 @@ var traceFilter = function (content, options) {
                     return;
                 if (node.containsReturn) containsReturn = true;
                 var nodeBody = node.body.source().substring(1, node.body.source().length-1);
-
+                staticInfo.rtiDebugInfo.matchedNodes.push([index,node.time]);
                 update(node.body, '{ \n try {',options.tracer_name,'.cacheInit(',JSON.stringify(index),',arguments);\n var ',interceptDecl,'\n;',
                     node.body.source().substring(1, node.body.source().length-1),'\n');
 

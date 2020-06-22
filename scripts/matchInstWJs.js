@@ -117,11 +117,12 @@ var getUserDefinedTime = function(cpu){
 }
 
 var matchFunctionWithRTI = function(astNodeArray, proccProf){
-    var matched = [];
+    var matched = {};
     astNodeArray.forEach((func,i)=>{
         var fStruct = {f:func}
             if (_matchFunctionWithRTI(fStruct, proccProf)) {
-                matched.push(fStruct);
+                // matched.push(fStruct);
+                matched[func]=fStruct;
                 inst2match[func]=fStruct
             }
         });
@@ -130,6 +131,27 @@ var matchFunctionWithRTI = function(astNodeArray, proccProf){
 
 var unique = function(arr){
     return [...new Set(arr.map(e=>e.split("_count")[0])) ] 
+}
+
+var patchSigWithTime = function(sig, matched, fn2invoc){
+    Object.keys(sig).forEach((invoc)=>{
+        var fn = invoc.split("_count")[0];
+        if (!matched[fn]) return;
+        var fnTime = matched[fn].stime;
+        var invocTime = fnTime/fn2invoc[fn];
+        sig[invoc].push(["time",invocTime]);
+    });
+}
+
+var getInvocations = function(cg){
+    var fn2invocs = {};
+    Object.keys(cg).forEach((invoc)=>{
+        var fn = invoc.split("_count")[0];
+        if (!(fn in fn2invocs))
+            fn2invocs[fn]=0;
+        fn2invocs[fn]++;
+    });
+    return fn2invocs;
 }
 
 var unique2 = function(arrT){
@@ -280,7 +302,7 @@ var checkIfChildAdded = function(parent, selectedNodes, cgArray){
 }
 
 var getNodestoInst = function(timeCgArr, proccProf){
-    var minNodeTime = 0;
+    var minNodeTime = 0.1;
     var userDefinedTime = getUserDefinedTime(proccProf);
     var timeCgArr_f = timeCgArr.map(e=>e.f);
     var sortedSubTreeTime = Object.entries(subTreeTime).sort((b,a)=>{return a[1][0]-b[1][0]})
@@ -352,6 +374,28 @@ var getNodesWithRuntime = function(cpu){
                  url: e.url, raw: e.profileNode.callFrame}});
 }
 
+
+var getInvocationsFor80Time = function(nodes, invocations){
+    var fn2invoc = {};
+    invocations.forEach((invoc)=>{
+        var fn = invoc.split("_count")[0];
+        if (!(fn in fn2invoc))
+            fn2invoc[fn]=0;
+        fn2invoc[fn]++;
+    });
+
+    var totalTime = nodes.map(e=>e.stime).reduce((acc,cur)=>{return acc+cur},0),
+        threshT = totalTime*.8, curTime = 0, numInvocs = 0;
+
+    var sortedNodes = nodes.sort((a,b)=>{return b.stime - a.stime}), indx = 0;
+    while (curTime < threshT){
+        curTime += sortedNodes[indx].stime;
+        numInvocs += fn2invoc[sortedNodes[indx].f];
+        indx++;
+    }
+    return numInvocs/Object.values(fn2invoc).reduce((acc,cur)=>{return acc+cur},0);
+
+}
 /*
 Simply processes the chrome cpuprofile and returns nodes
 with selfTime > 0
@@ -369,18 +413,23 @@ based on their runtime and callgraph information*/
 function i2j(){
     var cg = JSON.parse(fs.readFileSync(program.inst, "utf-8")).value;
     var jsProfile = JSON.parse(fs.readFileSync(program.jsProfile, "utf-8"));
-
+    var fn2invoc = getInvocations(cg);
     var uniqueCg = unique(Object.keys(cg));
+    // var uniqueCg = cg;
     var proccProf = cpuProfileParser(jsProfile);
     var cpuTimeWoProgram = proccProf.raw.total - (proccProf.raw.idleNode.self + proccProf.raw.programNode.self);
-    console.log("Number of inst nodes: ", uniqueCg.length, " and number of jsProfiler nodes: ", proccProf.parsed.children.length);
+    // console.log("Number of inst nodes: ", uniqueCg.length, " and number of jsProfiler nodes: ", proccProf.parsed.children.length);
 
     var matched = matchFunctionWithRTI(uniqueCg, proccProf);
+    // patchSigWithTime(cg, matched, fn2invoc);
+    // program.output && fs.writeFileSync(program.output, JSON.stringify(cg));
     console.log("Number of matched nodes: " + matched.length + " total time inside matched "  + matched.map(e=>e.stime).reduce((acc,cur)=>{return acc+cur}) 
         + " and total user defined time " + getUserDefinedTime(proccProf) + " actual scripting time " + cpuTimeWoProgram)
+    console.log(matched.map(e=>e.stime).reduce((acc,cur)=>{return acc+cur},0) , getUserDefinedTime(proccProf));
+    // console.log(getInvocationsFor80Time(matched, Object.keys(cg)))
 
     var subTree2time = getSubtreeTime(matched, cg)
-    // console.log(Object.entries(subTree2time).sort((b,a)=>{return a[1]-b[1]}).slice(0,10))
+    // // console.log(Object.entries(subTree2time).sort((b,a)=>{return a[1]-b[1]}).slice(0,10))
     var finalNodes = getNodestoInst(matched,proccProf);
     console.log("Final:" + unique2(finalNodes).length)
     console.log("Final time: " ,finalNodes.reduce((acc, cur)=>{if (cur[1]>=0 )return acc+cur[1]; else return acc},0));

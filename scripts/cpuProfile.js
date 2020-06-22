@@ -458,9 +458,11 @@ var specificFnTime = function(fnName){
 
 // var instNodes = instrumentationOverhead();
 // console.log(leafTime);
-program.output && fs.writeFileSync(program.output, JSON.stringify(leafNodesUser))
+// program.output && fs.writeFileSync(program.output, JSON.stringify(leafNodesUser))
 // if (program.type == "u") process.stdout.write(util.format(getUserDefinedTime(cpu) + " "));
-if (program.type == "u") process.stdout.write(util.format(cpuTimeWoProgram + " "));
+if (program.type == "t") {
+    process.stdout.write(util.format(cpuTime,cpu.raw.programNode.self));
+}
 if (program.type == "p") process.stdout.write(util.format(cpu.raw.programNode.self));
 if (program.type == "i") process.stdout.write(util.format(cpu.raw.idleNode.self));
 
