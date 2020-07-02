@@ -1039,7 +1039,7 @@ function __declTracerObject__(window) {
 
             if (childLogStr == null) {
 
-                childLogStr = stringifier.stringify(value,state,1);
+                // childLogStr = stringifier.stringify(value,state,1);
                 if (childLogStr && childLogStr instanceof Error){
                     nonCacheableNodes[nodeId] = childLogStr.message;
                     // _shadowStackHead = null;
@@ -1063,8 +1063,8 @@ function __declTracerObject__(window) {
                 var log = [logType, rootId, key, childLogStr ];
                 customLocalStorage[nodeId].push(log);
                 customLocalStorage[nodeId][logType].push(log);
-                if (customLocalStorage[nodeId].filter(e=>e[0].indexOf("reads")>=0 && e[3] === rootId).length)
-                    freezeReadState(nodeId);
+                // if (customLocalStorage[nodeId].filter(e=>e[0].indexOf("reads")>=0 && e[3] === rootId).length)
+                //     freezeReadState(nodeId);
             }
             return 0;
         }
@@ -1771,12 +1771,12 @@ function __declTracerObject__(window) {
         //     return returnValue;
         // }
         // return returnValue;
-        var _retString = omniStringifier.stringify(returnValue,"read",2);
-        if (_retString && _retString instanceof Error) {
-                nonCacheableNodes[cacheIndex] = _retString.message;
-        }
-        /*If the return value couldn't be stringified, doesn't matter. The function is marked as uncacheable anyway*/
-        if (customLocalStorage[cacheIndex]) customLocalStorage[cacheIndex]["returnValue"] = _retString;
+        // var _retString = omniStringifier.stringify(returnValue,"read",2);
+        // if (_retString && _retString instanceof Error) {
+        //         nonCacheableNodes[cacheIndex] = _retString.message;
+        // }
+        // /*If the return value couldn't be stringified, doesn't matter. The function is marked as uncacheable anyway*/
+        // if (customLocalStorage[cacheIndex]) customLocalStorage[cacheIndex]["returnValue"] = _retString;
 
         var seenObjs = [];
         if (returnValue && returnValue.__isProxy)
@@ -2029,7 +2029,7 @@ function __declTracerObject__(window) {
                 // if (customLocalStorage[_shadowStackHead])
                 customLocalStorage[_shadowStackHead].push(cacheIndex)
                 // Before entering child function, freeze the state of the parent function
-                freezeReadState(_shadowStackHead);
+                // freezeReadState(_shadowStackHead);
             } else {
                 parentNodes.push(cacheIndex);
             }
@@ -2047,6 +2047,7 @@ function __declTracerObject__(window) {
                 return;
             } 
             customLocalStorage[cacheIndex]["IBF"] = "";
+            customLocalStorage[cacheIndex].CFG = [];
             customLocalStorage[cacheIndex]["ec"] = window && window.document ? 
                 window.document.location.href : null;
             customLocalStorage[cacheIndex].readKeys = new Set();
@@ -2357,7 +2358,7 @@ function __declTracerObject__(window) {
         if (instrumentationPattern == "replay")
             return;
         // customLocalStorage[cacheIndex].endTime = window.performance.now();
-        !pageLoaded && freezeReadState(cacheIndex);
+        // !pageLoaded && freezeReadState(cacheIndex);
         // if (window.performance.getEntriesByName(cacheIndex).length)
         shadowStack.pop();
         if (shadowStack.length) 
@@ -2367,6 +2368,12 @@ function __declTracerObject__(window) {
             pageLoaded = oldPageLoaded.pop();
         }
         
+    }
+
+    this.logBranchTaken = function(nodeId, branchInfo){
+        var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
+        if (!cacheIndex) return;
+        customLocalStorage[cacheIndex].CFG.push(branchInfo);
     }
 
     this.updateClosureCache = function(cacheIndex, closureObj){
@@ -2788,8 +2795,8 @@ function __declTracerObject__(window) {
                             else str = entry[2] + '';
                             var path = parentPath + pathDelim + str;
                             var val = entry[3];
-                            if (state == "write")
-                                val = omniStringifier.stringify(val, state, 2);
+                            // if (state == "write")
+                            //     val = omniStringifier.stringify(val, state, 2);
                             sig[1] = path;
                             sig[2] = val;
 

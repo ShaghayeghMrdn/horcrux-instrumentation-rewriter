@@ -4,6 +4,8 @@ var javascriptReservedWords = ['__tracer','__tracerPROXY','console','amzn_aps_cs
 var uncacheableFunctions ={"RTI":[], "antiLocal":[], "DOM":[], "ND":[]};
 var options;
 
+const COND_TO_IF_FN = "__transformed_if__";
+
 var getArgs = function (node) {
     var args = [];
     if (node.params.length > 0){
@@ -150,6 +152,10 @@ var getFunctionIdentifier = function(node, notCacheable) {
     parent = node;
     while (parent != undefined){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression") {
+            if (parent.id && parent.id.name == COND_TO_IF_FN) {
+                parent = parent.parent;
+                continue;
+            }
             if (uncacheableFunctions["RTI"] && uncacheableFunctions["RTI"].indexOf(parent)>=0 && !notCacheable) return null
             else return parent;
         } else if (parent.type == "ArrowFunctionExpression")
@@ -157,6 +163,44 @@ var getFunctionIdentifier = function(node, notCacheable) {
         parent = parent.parent;
     }
     return null;
+}
+
+var rewriteLogicalExprToIf = function(leNode){
+    var andTemplate = `
+    (function __transformed_if__(){
+        var __le__ = LEFT;
+        if (__le__){
+            return RIGHT;
+        }
+        else {
+            return __le__;
+        }
+    })BIND()
+    `;
+    var orTemplate = `
+    (function __transformed_if__(){
+        var __le__ = LEFT;
+        if (!__le__){
+            return RIGHT;
+        }
+        else {
+            return __le__;
+        }
+    })BIND()
+    `;
+    var left = leNode.left.source(),
+        right = leNode.right.source(),
+        template = andTemplate;
+
+    if (leNode.operator == "||")
+        template = orTemplate;
+
+    if (leNode.source().indexOf("this")>=0)
+        template = template.replace('BIND','.bind(this)');
+    else 
+        template = template.replace('BIND','');
+
+    return template.replace('LEFT', left).replace('RIGHT', right);
 }
 
 /*Returns the final variable which is the actual
@@ -514,5 +558,6 @@ module.exports = {
     isChildOfX: isChildOfX,
     isArgOfCE:isArgOfCE,
     isChildOfNode: isChildOfNode,
-    nodeContainsCall: nodeContainsCall
+    nodeContainsCall: nodeContainsCall,
+    rewriteLogicalExprToIf: rewriteLogicalExprToIf
 }

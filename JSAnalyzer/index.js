@@ -13,6 +13,7 @@ var signature = require('./signature.js');
 var properties = require ("properties");
 var e2eTesting = false;
 var path = require('path');
+var babel = require('babel-core');
 var scriptName = path.basename(__filename);
 var functionCounter = 0;
 var minFunctionTime = 2;// Minimum function time worth replaying is 2ms -> emperically decided
@@ -20,7 +21,8 @@ var minFunctionTime = 2;// Minimum function time worth replaying is 2ms -> emper
 var simpleFunctions = {};
 var uncacheableFunctions = util.uncacheableFunctions;
 var propertyObj = {};
-const PATH_TO_PROPERTIES = __dirname + "/DOMHelper.ini";
+const PATH_TO_PROPERTIES = __dirname + "/DOMHelper.ini",
+	 COND_TO_IF_FN = "__transformed_if__";
 properties.parse(PATH_TO_PROPERTIES, {path: true, sections: true}, function(err, obj){ propertyObj = obj ;})
 
 var logPrefix;
@@ -724,6 +726,65 @@ var traceFilter = function (content, options) {
 			}
 		}
 
+		var constructCFGTag = function(node){
+			const IF="IfStatement";
+			var cfgTag = "-";
+
+			function traverseParents(parent, node){
+				if (!parent) return;
+				traverseParents(parent.parent, parent);
+				if (node == parent.consequent){
+					cfgTag+=`if-`;
+				} else if (node == parent.alternate){
+					cfgTag+='else-';
+				}
+			};
+
+			//get nesting information
+			traverseParents(node.parent, node);
+
+			return cfgTag;
+		}
+
+		var insertCFGTrackingSC = function(node, functionId, cfgTag){
+			// var bodySrc = node.map(e=>e.source()).join("");
+			update(node, options.tracer_name,'.logBranchTaken(',JSON.stringify(functionId),',',JSON.stringify(cfgTag),')\n',node.source());
+		}
+
+		var insertCFGTrackingIF = function(node, functionId,cfgTag){
+			// var cfgTag = constructCFGTag(node);
+			var cfgTagStart = `${cfgTag}-s`, cfgTagEnd = `${cfgTag}-e`;
+			if (node.type != "BlockStatement"){
+				update(node, '{',options.tracer_name,'.logBranchTaken(',JSON.stringify(functionId),',',JSON.stringify(cfgTagStart),')\n',node.source(),'\n',
+					options.tracer_name,'.logBranchTaken(',JSON.stringify(functionId),',',JSON.stringify(cfgTagEnd),')}');
+			} else {
+				var bodySrc = node.body.map(e=>e.source()).join("");
+				update(node,'{', options.tracer_name,'.logBranchTaken(',JSON.stringify(functionId),',',JSON.stringify(cfgTagStart),')\n',bodySrc, '\n',
+					options.tracer_name,'.logBranchTaken(',JSON.stringify(functionId),',',JSON.stringify(cfgTagEnd),')}');
+			}
+		}
+
+		//Rewrite conditional expressions to if statements
+		try {
+			content = fala({
+				source:content
+			}, function(node){
+				if (node.type == "ConditionalExpression" && !util.isChildOfX(node.parent, "ConditionalExpression")){
+					var ifCode = babel.transform(node.source(),
+						{plugins: ["transform-ternary-to-if-else"]});
+					if (ifCode.code[ifCode.code.length-1] == ";")
+						ifCode.code = ifCode.code.substr(0,ifCode.code.length - 1);
+					update(node, ifCode.code);
+				} else if (node.type == "LogicalExpression"){
+					var ifCode = util.rewriteLogicalExprToIf(node);
+					var origCode = node.parent.source();
+					update(node,ifCode);
+				}
+			}).toString();
+		} catch (e){
+			console.error('error while parsing');
+		}
+
 		// console.log(esprima.parse(content));
 		var instrumentedNodes = [];
 		m = fala({
@@ -787,7 +848,8 @@ var traceFilter = function (content, options) {
 						node.time = nodeTime;
 						instrumentedNodes.push(node);
 					} else {
-						markFunctionUnCacheable(node,"RTI");
+						if (!node.id || (node.id && node.id.name != COND_TO_IF_FN))
+							markFunctionUnCacheable(node,"RTI");
 					}
 				}
 
@@ -1157,7 +1219,7 @@ var traceFilter = function (content, options) {
 					// 
 					var argReWritten = false
 					argReads.forEach((arg)=>{
-						if (arg.val == node.left){
+						if (arg.val == node.left && node.type == "AssignmentExpression"){
 							scope.addLocalVariable(node.left);
 							argReWritten = true;
 						}
@@ -1416,12 +1478,11 @@ var traceFilter = function (content, options) {
 						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
 					}
 				}
-			}
-			else if (node.type == "IfStatement") {
-					var {readArray,local, argReads, antiLocal} = signature.handleReads(node.test);
+			} else if (node.type == "SwitchStatement"){
+				var {readArray,local, argReads, antiLocal} = signature.handleReads(node.discriminant);
 					var _functionId = util.getFunctionIdentifier(node);
 					if (_functionId) {
-						// 	var functionId = makeId('function', options.path, _functionId);
+						var functionId = makeId('function', options.path, _functionId);
 						// 	if (uncacheableFunctions.indexOf(functionId) >= 0) return;
 						argReads.length && rewriteArguments(argReads);
 						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
@@ -1447,6 +1508,55 @@ var traceFilter = function (content, options) {
 							}
 								
 						});
+
+						node.cases.forEach((cs)=>{
+							var _t = cs.test
+							var cfgTag = `sc-${_t ? _t.source() : ''}`;
+							//only prepend the logging statement before the very first expression
+							cs.consequent.length && insertCFGTrackingSC(cs.consequent[0], functionId, cfgTag);
+						});
+							
+					}
+			}
+			else if (node.type == "IfStatement") {
+					var {readArray,local, argReads, antiLocal} = signature.handleReads(node.test);
+					var _functionId = util.getFunctionIdentifier(node);
+					if (_functionId) {
+						var functionId = makeId('function', options.path, _functionId);
+						// 	if (uncacheableFunctions.indexOf(functionId) >= 0) return;
+						argReads.length && rewriteArguments(argReads);
+						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						antiLocal.forEach(function(read){
+							if (options.useProxy){
+									update(read, 'closureProxy.',read.source());
+							}
+						});
+						readArray.forEach(function(read){
+							var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
+							if (options.caching)
+								update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '],[', util.getAllIdentifiersFromMemberExpression(read),'])');
+							if (options.useProxy){
+								if (util.checkIfReservedWord(read)) return;
+								if (read.source() == "this") {
+									update(read, "thisProxy");
+									return
+								}
+								if (read.source() == "window")
+									update(read, options.proxyName)
+								else
+									update(read, options.proxyName, '.', read.source());
+							}
+								
+						});
+
+						if (node.consequent){
+							var cfgTag = "if";
+							insertCFGTrackingIF(node.consequent,functionId, cfgTag)
+						}
+						if (node.alternate && node.alternate.type != "IfStatement") {
+							var cfgTag = "else";
+							insertCFGTrackingIF(node.alternate,functionId, cfgTag);
+						}
 							
 					} else {
 						var _functionId = util.getFunctionIdentifier(node, true);
@@ -1603,8 +1713,8 @@ var traceFilter = function (content, options) {
 									nodeCalleeSource = "(" + nodeCalleeSource + ")";
 							}
 						// console.log("Node before IBF update", node.source());
-						update(node, options.tracer_name,".logIBF(",JSON.stringify(functionId),',', node.source(),',',nodeCalleeSource,',`',util.escapeRegExp(evalString[0]), '`,`',
-								 util.escapeRegExp(evalString[1]),'`,',ibfArgStrs, ',[', ...(ibfArgVals.map(e=>e+",")) ,'])');
+						// update(node, options.tracer_name,".logIBF(",JSON.stringify(functionId),',', node.source(),',',nodeCalleeSource,',`',util.escapeRegExp(evalString[0]), '`,`',
+						// 		 util.escapeRegExp(evalString[1]),'`,',ibfArgStrs, ',[', ...(ibfArgVals.map(e=>e+",")) ,'])');
 							functionIBFArgsCounter++;
 						}
 						// console.log("Node after IBF update", node.source());
@@ -1696,8 +1806,8 @@ var traceFilter = function (content, options) {
 						var returnValue = node.argument.expressions[node.argument.expressions.length - 1];
 						var preReturns = node.argument.expressions.slice(0,-1).map(function(e){return e.source()}).join();
 						if (options.caching || options.useProxy) {
-							update(node, 'return ',preReturns ,',', options.tracer_name, 
-							'.logReturnValue(', JSON.stringify(functionId), ',',returnValue.source() ,',arguments',');');
+							// update(node, 'return ',preReturns ,',', options.tracer_name, 
+							// '.logReturnValue(', JSON.stringify(functionId), ',',returnValue.source() ,',arguments',');');
 							// update(node,  _traceEnd, JSON.stringify(functionId),',arguments', ');\n', node.source())
 						}
 						// if (options.useProxy)
@@ -1706,8 +1816,8 @@ var traceFilter = function (content, options) {
 							// 	',',options.proxyName,'.',returnValue.source(),");");
 					} else {
 						if (options.caching || options.useProxy) {
-							update(node, "return ", options.tracer_name, '.logReturnValue(', JSON.stringify(functionId),
-							 ',', node.argument ? node.argument.source() : "null",',arguments',");");
+							// update(node, "return ", options.tracer_name, '.logReturnValue(', JSON.stringify(functionId),
+							//  ',', node.argument ? node.argument.source() : "null",',arguments',");");
 							// update(node,  _traceEnd, JSON.stringify(functionId),',arguments', ');\n', node.source());
 						}
 						// if (options.useProxy)
@@ -1732,13 +1842,8 @@ var traceFilter = function (content, options) {
 					closures = insertClosureProxy(node, index);
 				}
 				if ( (options.rti || options.myCg)){
-					if (uncacheableFunctions["RTI"].indexOf(node)>=0) {
-						/*Every closure function needs to have an exposed closure scope 
-						*/
-						// var parentFunction = util.getFunctionIdentifier(node.parent);
-						// if (parentFunction){
-						// closures[1] && (nodeName = util.getNameFromFunction(node)) && insertClosureAccessors(node, nodeName, closures[0], true)
-						// }
+					if (uncacheableFunctions["RTI"].indexOf(node)>=0 || 
+						(node.id && node.id.name == COND_TO_IF_FN)) {
 						return
 					}
 				}

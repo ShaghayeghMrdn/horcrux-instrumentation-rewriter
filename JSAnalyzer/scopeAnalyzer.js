@@ -3,7 +3,8 @@
 var util = require('./util');
 var properties = require ("properties");
 var propertyObj = {};
-const PATH_TO_PROPERTIES = __dirname + "/DOMHelper.ini";
+const PATH_TO_PROPERTIES = __dirname + "/DOMHelper.ini",
+    COND_TO_IF_FN = "__transformed_if__";
 properties.parse(PATH_TO_PROPERTIES, {path: true, sections: true}, function(err, obj){ propertyObj = obj ;})
 
 
@@ -79,7 +80,8 @@ var returnIdFromBindingPatterns = function(node){
 
 var addLocalVariable = function (node) {
     parent = node.parent;
-    while ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") && parent.parent != undefined){
+    while ( ((parent.type != "FunctionDeclaration" && parent.type != "FunctionExpression") || ( parent.id && parent.id.name == COND_TO_IF_FN) ) &&
+        parent.parent != undefined){
         parent = parent.parent;
     }
     if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
@@ -161,6 +163,10 @@ var IsLocalVariable = function (node){
     parent = identNode.parent;
     while (parent != undefined){
         if (parent.type == "FunctionDeclaration" || parent.type == "FunctionExpression"){
+            if (parent.id && parent.id.name == COND_TO_IF_FN) {
+                parent = parent.parent;
+                continue;
+            }
             foundInImmediateParent++;
             functionArguments = util.getArgs(parent);
             if (parent.localVariables == undefined) parent.localVariables = []
