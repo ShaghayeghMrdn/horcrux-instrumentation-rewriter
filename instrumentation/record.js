@@ -206,7 +206,7 @@ function instrumentHTML(src, fondueOptions) {
     }
     // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
     // src = doctype + src;
-    src = doctype + "\n<script>\n" + deterministicCode + omniStringify +  fondue.instrumentationPrefix(options) + "\n</script>\n" + src;
+    src = doctype + "\n<script>\n" +  fondue.instrumentationPrefix(options) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
@@ -292,9 +292,12 @@ function dumpStaticInformation_uncacheable(options){
 function instrumentJavaScript(src, fondueOptions, jsInHTML) {
     console.log("Instrumenting a js file")
     var fondueOptions = mergeInto({include_prefix: false}, fondueOptions);
-    // src = src.replace(/^\s+|\s+$/g, '');
-    if (IsJsonString(src))
-        return src;
+    fondueOptions.jsInHTML = jsInHTML
+    if (IsJsonString(src)){
+        if (jsInHTML)
+            return src.replace(/^\s+|\s+$/g, '');
+        else return src;
+    }
     // src = fondue_plugin.instrument(src, fondueOptions).toString();
     src = instrumentor.instrument(src, fondueOptions).toString();
     if (program.type == "js") {
@@ -303,8 +306,6 @@ function instrumentJavaScript(src, fondueOptions, jsInHTML) {
         dumpStaticInformation_uncacheable(fondueOptions);
         computeRTITimeMatched();
     }
-    // fs.writeFileSync(fondueOptions.path.replace(/\//g,'_') + "DEBUG", src);
-    src = src.replace(/^\s+|\s+$/g, '');
     return src;
 }
 

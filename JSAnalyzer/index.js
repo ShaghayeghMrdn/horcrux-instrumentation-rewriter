@@ -14,6 +14,7 @@ var properties = require ("properties");
 var e2eTesting = false;
 var path = require('path');
 var babel = require('babel-core');
+var globalWrapper = require('./global-code-wrapper.js');
 var scriptName = path.basename(__filename);
 var functionCounter = 0;
 var minFunctionTime = 2;// Minimum function time worth replaying is 2ms -> emperically decided
@@ -30,11 +31,9 @@ var _oldLogger = console;
 var staticInfo = {};
 staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matchedUrls: []};
 staticInfo.uncacheableFunctions = uncacheableFunctions;
-// console.log = function(arg, filename = __filename){
-// 	// filename = filename.split('/').pop()
-// 	// process.stdout.write("[" + filename + "]");
-// 	_oldLogger(arg);
-// }
+
+
+var IIFE_NAME="__HORCRUX__";
 
 // console.error = function(){
 // 	var args = [scriptName];
@@ -390,20 +389,14 @@ var traceFilter = function (content, options) {
 			})
 		}
 
-		var rewriteGlobals = function(readArray, functionId){
+		var rewriteGlobals = function(node, functionId){
+			var readArray = signature.handleReads(node).readArray;
 			readArray.forEach(function(read){
 				if (options.useProxy){
 					if (read.source() == "arguments"){
-						if (functionId)
-							update(read, "argumentProxy")
 						return;
 					}
-					if (util.checkIfReservedWord(read) && read.source()!="this") return;
-					if (read.source() == "this") {
-						if (functionId)
-							update(read, "thisProxy");
-						return
-					}
+					if (util.checkIfReservedWord(read) || read.source()=="this") return;
 					if (read.source() == "window")
 						update(read, options.proxyName)
 					else
@@ -764,33 +757,14 @@ var traceFilter = function (content, options) {
 			}
 		}
 
-		//Rewrite conditional expressions to if statements
-		try {
-			content = fala({
-				source:content
-			}, function(node){
-				if (node.type == "ConditionalExpression" && !util.isChildOfX(node.parent, "ConditionalExpression")){
-					var ifCode = babel.transform(node.source(),
-						{plugins: ["transform-ternary-to-if-else"]});
-					if (ifCode.code[ifCode.code.length-1] == ";")
-						ifCode.code = ifCode.code.substr(0,ifCode.code.length - 1);
-					update(node, ifCode.code);
-				} else if (node.type == "LogicalExpression"){
-					var ifCode = util.rewriteLogicalExprToIf(node);
-					var origCode = node.parent.source();
-					update(node,ifCode);
-				}
-			}).toString();
-		} catch (e){
-			console.error('error while parsing');
-		}
+		content = globalWrapper.wrap(content, fala);
 
 		// console.log(esprima.parse(content));
 		var instrumentedNodes = [];
 		m = fala({
 			source: content,
-			loc: true,
-			range: true,
+			locations: true,
+			ranges: true,
 			sourceFilename: options.sourceFilename || options.path,
 			generatedFilename: options.generatedFilename || options.path,
 			// tolerant: true,
@@ -901,8 +875,8 @@ var traceFilter = function (content, options) {
 				scope.addLocalVariable(node);
 			} 
 			else if (node.type == "TryStatement") {
-				if (node.handlers && node.handlers[0])
-					scope.addLocalVariable(node.handlers[0].param);
+				if (node.handler && node.handler[0])
+					scope.addLocalVariable(node.handler[0].param);
 			} else if (node.type == "IfStatement") {
 					var readArray = [];
 					var {readArray, local, argReads, antiLocal} = signature.handleReads(node.test);
@@ -915,15 +889,17 @@ var traceFilter = function (content, options) {
 			} else if (node.type === 'VariableDeclarator') {
 						scope.addLocalVariable(node);
 						var _functionId = util.getFunctionIdentifier(node);
-						if (_functionId && node.init){
-							var functionId = makeId('function', options.path, _functionId);
-							if (!functionAliasMap[functionId])
-								functionAliasMap[functionId] = {};
-							if (!functionToDOMtracking[functionId])
-								functionToDOMtracking[functionId] = {};
-							functionAliasMap[functionId][node.id.source()] = node.init;
-							if (node.init.source().indexOf("create")>=0)
-								functionToDOMtracking[functionId][node.id.source()] = "";
+						if (_functionId ){
+							if (node.init){
+								var functionId = makeId('function', options.path, _functionId);
+								if (!functionAliasMap[functionId])
+									functionAliasMap[functionId] = {};
+								if (!functionToDOMtracking[functionId])
+									functionToDOMtracking[functionId] = {};
+								functionAliasMap[functionId][node.id.source()] = node.init;
+								if (node.init.source().indexOf("create")>=0)
+									functionToDOMtracking[functionId][node.id.source()] = "";
+							} 
 						}
 
 			// Handles any global variable being assigned any value
@@ -1093,6 +1069,11 @@ var traceFilter = function (content, options) {
 				Some JS files don't have access to the global execution context and they have a dynamically generated
 				html file, therefore create dummy tracer functions, just to avoid runtime errors. 
 				*/
+
+				if (options.jsInHTML){
+                    update(node, node.source().replace(/^\s+|\s+$/g, ''));
+                }
+
 				var tracerCheck = `\n(function(){if (typeof __tracer == 'undefined' && typeof window != 'undefined')
 				 { __tracer = new window.top.__declTracerObject__(window);
 				 	// if (!window.___ranCUSTOMSHIMS___  && !__tracer.isPageLoaded()) {
@@ -1121,42 +1102,22 @@ var traceFilter = function (content, options) {
 			else if ( (node.type === 'VariableDeclaration' || node.type === 'VariableDeclarator')) {
 				if (node.type == "VariableDeclarator"){
 					var _functionId = util.getFunctionIdentifier(node);
-					if (_functionId){
-						if (node.init) {
-							var {readArray, local, argReads, antiLocal} = signature.handleReads(node.init);
+					if (node.init){
+						if (_functionId) {
+							// var {readArray, local, argReads, antiLocal} = signature.handleReads(node.init);
 							if (options.useProxy) {
-								antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-								antiLocal.forEach(function(read){
-									if (options.useProxy){
-											update(read, 'closureProxy.',read.source());
-									}
-								});
-								argReads.length && node.init.type != "FunctionExpression" && rewriteArguments(argReads);
-								readArray.forEach(function(read){
-									if (read.source() == "arguments"){
-										if (_functionId)
-											update(read, "argumentProxy")
-										return;
-									}
-									if (util.checkIfReservedWord(read)) return;
-									if (read.source() == "this") {
-										// if (node.init.source() != "this")
-											update(read, "thisProxy");
-										return
-									}
-									if (read.source() == "window")
-										update(read, options.proxyName)
-									else
-										update(read, options.proxyName, '.', read.source());
-								})
+								// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+								// antiLocal.forEach(function(read){
+								// 	if (options.useProxy){
+								// 			update(read, 'closureProxy.',read.source());
+								// 	}
+								// });
+								// argReads.length && node.init.type != "FunctionExpression" && rewriteArguments(argReads);
+								rewriteGlobals(node.init);
 							}
-						} 
-					} else {
-						var _functionId = util.getFunctionIdentifier(node, true);
-						if (!_functionId)
-							return;
-						var {readArray, local, argReads, antiLocal} = signature.handleReads(node.init);
-						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						}  else {
+						rewriteGlobals(node.init);
+						}
 					}
 
 			    }
@@ -1165,101 +1126,96 @@ var traceFilter = function (content, options) {
 			// Handles any global variable being assigned any value
 			// or a local variable becoming an alias of a global variable
 			} else if (node.type == "AssignmentExpression" || node.type == "LogicalExpression" || node.type == "BinaryExpression"){
-				var _functionId = util.getFunctionIdentifier(node);
-				if (_functionId) {
+				rewriteGlobals(node.right);
+				rewriteGlobals(node.left);
+				
+				// var _functionId = util.getFunctionIdentifier(node);
+				// if (_functionId) {
 
-					var {readArray,local,argReads, antiLocal} = signature.handleReads(node.right);
+				// 	var {readArray,local,argReads, antiLocal} = signature.handleReads(node.right);
 
-					argReads.length && rewriteArguments(argReads);
-					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-					antiLocal.forEach(function(read){
-						if (options.useProxy){
-								update(read, 'closureProxy.',read.source());
-						}
-					});
-					readArray.forEach(function(read){
-						var newRead = util.logReadsHelper(read, scope.checkAndReplaceAlias(read));
-						// console.log(read.source());
-						if (options.caching)
-							update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '],[', util.getAllIdentifiersFromMemberExpression(read),'])');
-						if (options.useProxy) {
-							if (read.source() == "arguments"){
-								if (_functionId)
-									update(read, "argumentProxy")
-								return;
-							}
-							if (util.checkIfReservedWord(read)) return;
-							//update this as long as it is not a simple assignment to this expression
-							if (read.source() == "this") {
-								if (node.right.source() != "this")
-									update(read, "thisProxy");
-								return;
-							}
-							if (read.source() == "window")
-									update(read, options.proxyName)
-								else
-									update(read, options.proxyName, '.', read.source());
-						}
-					});
+				// 	argReads.length && rewriteArguments(argReads);
+				// 	antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+				// 	antiLocal.forEach(function(read){
+				// 		if (options.useProxy){
+				// 				update(read, 'closureProxy.',read.source());
+				// 		}
+				// 	});
+				// 	readArray.forEach(function(read){
+				// 		var newRead = util.logReadsHelper(read, scope.checkAndReplaceAlias(read));
+				// 		// console.log(read.source());
+				// 		if (options.caching)
+				// 			update(read, options.tracer_name, '.logRead(', JSON.stringify(functionId),',[', newRead, '],[', util.getAllIdentifiersFromMemberExpression(read),'])');
+				// 		if (options.useProxy) {
+				// 			if (read.source() == "arguments"){
+				// 				if (_functionId)
+				// 					update(read, "argumentProxy")
+				// 				return;
+				// 			}
+				// 			if (util.checkIfReservedWord(read)) return;
+				// 			//update this as long as it is not a simple assignment to this expression
+				// 			if (read.source() == "this") {
+				// 				if (node.right.source() != "this")
+				// 					update(read, "thisProxy");
+				// 				return;
+				// 			}
+				// 			if (read.source() == "window")
+				// 					update(read, options.proxyName)
+				// 				else
+				// 					update(read, options.proxyName, '.', read.source());
+				// 		}
+				// 	});
 
-					/*
-					if assignment expressions and the right hand side is identifier then skip
-					*/
-					// if (node.type == "AssignmentExpression" && node.left.type == "Identifier") return;
-					var {readArray, local,argReads, antiLocal} = signature.handleReads(node.left);
-					/*
-					Don't rewrite arguments if the argument gets rewritten, because then the reference is broken. 
-					Can;t really do this, because the subsequent uses have been modified, and therefore will result in error
-					The real reason this would fail is if the argument is not passed during invocation, then subsequent 
-					changes won't be same as the actual variable being modified in this assignment expression
-					*/
-					// if (!(node.type == "AssignmentExpression" && node.left.type == "Identifier")) {
-					// 	argReads.length && rewriteArguments(argReads);
-					// }
-					// 
-					var argReWritten = false
-					argReads.forEach((arg)=>{
-						if (arg.val == node.left && node.type == "AssignmentExpression"){
-							scope.addLocalVariable(node.left);
-							argReWritten = true;
-						}
-					})
-					!argReWritten && argReads.length && rewriteArguments(argReads);
-					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-					antiLocal.forEach(function(read){
-						/*FIX
-						 If the entire closure variable gets rewritten, no way
-						 to currently track the changes and apply them propery 
-						 Read up about javascript pass by reference, for variables*/
-						if (options.useProxy){
-							// if (read.type == "Identifier") {
-							// 	update(read,read.source(),'=','closureProxy.',read.source());
-							// 	return;
-							// }
-							update(read, 'closureProxy.',read.source());
-						}
-					});
-					readArray.forEach(function(read){
-						if (util.checkIfReservedWord(read)) return;
-						if (read.source() == "this") {
-							update(read, "thisProxy");
-							return
-						}
-						if (read.source() == "window")
-							update(read, options.proxyName)
-						else
-							update(read, options.proxyName, '.', read.source());
-					});
+				// 	/*
+				// 	if assignment expressions and the right hand side is identifier then skip
+				// 	*/
+				// 	// if (node.type == "AssignmentExpression" && node.left.type == "Identifier") return;
+				// 	var {readArray, local,argReads, antiLocal} = signature.handleReads(node.left);
+					
+				// 	Don't rewrite arguments if the argument gets rewritten, because then the reference is broken. 
+				// 	Can;t really do this, because the subsequent uses have been modified, and therefore will result in error
+				// 	The real reason this would fail is if the argument is not passed during invocation, then subsequent 
+				// 	changes won't be same as the actual variable being modified in this assignment expression
+					
+				// 	// if (!(node.type == "AssignmentExpression" && node.left.type == "Identifier")) {
+				// 	// 	argReads.length && rewriteArguments(argReads);
+				// 	// }
+				// 	// 
+				// 	var argReWritten = false
+				// 	argReads.forEach((arg)=>{
+				// 		if (arg.val == node.left && node.type == "AssignmentExpression"){
+				// 			scope.addLocalVariable(node.left);
+				// 			argReWritten = true;
+				// 		}
+				// 	})
+				// 	!argReWritten && argReads.length && rewriteArguments(argReads);
+				// 	antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+				// 	antiLocal.forEach(function(read){
+				// 		/*FIX
+				// 		 If the entire closure variable gets rewritten, no way
+				// 		 to currently track the changes and apply them propery 
+				// 		 Read up about javascript pass by reference, for variables*/
+				// 		if (options.useProxy){
+				// 			// if (read.type == "Identifier") {
+				// 			// 	update(read,read.source(),'=','closureProxy.',read.source());
+				// 			// 	return;
+				// 			// }
+				// 			update(read, 'closureProxy.',read.source());
+				// 		}
+				// 	});
+				// 	readArray.forEach(function(read){
+				// 		if (util.checkIfReservedWord(read)) return;
+				// 		if (read.source() == "this") {
+				// 			update(read, "thisProxy");
+				// 			return
+				// 		}
+				// 		if (read.source() == "window")
+				// 			update(read, options.proxyName)
+				// 		else
+				// 			update(read, options.proxyName, '.', read.source());
+				// 	});
 
-				} else {
-						var _functionId = util.getFunctionIdentifier(node, true);
-						if (_functionId) {
-							var {readArray, local, argReads, antiLocal} = signature.handleReads(node.left);
-							antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-							var {readArray, local, argReads, antiLocal} = signature.handleReads(node.right);
-							antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-						}
-				}
+				// }
 
 
 				if (node.operator == "==" || node.operator == "===" || node.operator == "!==" || node.operator == "!="
@@ -1274,8 +1230,9 @@ var traceFilter = function (content, options) {
 							if (typeof lit == "string" || lit == null)
 								lit = JSON.stringify(lit);
 							var _functionId = util.getFunctionIdentifier(node);
-							if (_functionId)
-								update(ident, options.tracer_name,'.handleComparison(',ident.source(),',',JSON.stringify(node.operator), ',',lit,')');
+							if (_functionId){
+								// update(ident, options.tracer_name,'.handleComparison(',ident.source(),',',JSON.stringify(node.operator), ',',lit,')');
+							}
 							else 
 								update(ident, ' ',options.tracer_name,'.isProxy(', ident.source(), ')');
 						}
@@ -1331,17 +1288,16 @@ var traceFilter = function (content, options) {
 					readArrayT = readArrayT.concat(readArray),  argReadsT = argReadsT.concat(argReads)
 						antiLocalT = antiLocalT.concat(antiLocal);
 
-					argReadsT.length && rewriteArguments(argReadsT);
-					antiLocalT.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocalT);
-					antiLocalT.forEach(function(read){
-						if (options.useProxy){
-								update(read, 'closureProxy.',read.source());
-						}
-					});
+					// argReadsT.length && rewriteArguments(argReadsT);
+					// antiLocalT.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocalT);
+					// antiLocalT.forEach(function(read){
+					// 	if (options.useProxy){
+					// 			update(read, 'closureProxy.',read.source());
+					// 	}
+					// });
 					readArrayT.forEach((read) => {
 						if (util.checkIfReservedWord(read)) return;
 						if (read.source() == "this") {
-							update(read, "thisProxy");
 							return
 						}
 						if (read.source() == "window")
@@ -1354,16 +1310,29 @@ var traceFilter = function (content, options) {
 						if (!_functionId)
 							return;
 						var {readArray,local,argReads, antiLocal} = signature.handleReads(node.test);
-						antiLocalT = antiLocalT.concat(antiLocal);
+						antiLocalT = antiLocalT.concat(antiLocal); 
+						readArrayT = readArrayT.concat(readArray)
 						var {readArray,local,argReads, antiLocal} = signature.handleReads(node.consequent);
 						antiLocalT = antiLocalT.concat(antiLocal);
+						readArrayT = readArrayT.concat(readArray)
 						var {readArray,local,argReads, antiLocal} = signature.handleReads(node.alternate);
 						antiLocalT = antiLocalT.concat(antiLocal);
+						readArrayT = readArrayT.concat(readArray)
 						antiLocalT.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocalT);
+						readArrayT.forEach((read) => {
+							if (util.checkIfReservedWord(read)) return;
+							if (read.source() == "this") {
+								return
+							}
+							if (read.source() == "window")
+								update(read, options.proxyName)
+							else
+								update(read, options.proxyName, '.', read.source());
+						});
 				}
 
 			} else if (node.type == "UpdateExpression") {
-				var _functionId = util.getFunctionIdentifier(node);
+				var _functionId = util.getFunctionIdentifier(node) || true;
 				if (_functionId) {
 					var {readArray,local,argReads, antiLocal} = signature.handleReads(node.argument);
 					// var functionId = makeId('function', options.path, _functionId);
@@ -1371,17 +1340,17 @@ var traceFilter = function (content, options) {
 					// 	uncacheableFunctions.push(functionId);
 					// 	return;
 					// }
-					argReads.length && rewriteArguments(argReads);
-					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-					antiLocal.forEach(function(read){
-						if (options.useProxy){
-								update(read, 'closureProxy.',read.source());
-						}
-					});
+					// argReads.length && rewriteArguments(argReads);
+					// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+					// antiLocal.forEach(function(read){
+					// 	if (options.useProxy){
+					// 			update(read, 'closureProxy.',read.source());
+					// 	}
+					// });
 					readArray.forEach((read) => {
 						if (util.checkIfReservedWord(read)) return;
 						if (read.source() == "this") {
-							update(read, "thisProxy");
+							// update(read, "thisProxy");
 							return
 						}
 						if (read.source() == "window")
@@ -1390,13 +1359,16 @@ var traceFilter = function (content, options) {
 							update(read, options.proxyName, '.', read.source());
 					});
 				} else {
-						var _functionId = util.getFunctionIdentifier(node, true);
-						if (!_functionId)
-							return;
-						var {readArray, local, argReads, antiLocal} = signature.handleReads(node.argument);
-						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						rewriteGlobals(node.argument);
+						// var _functionId = util.getFunctionIdentifier(node, true);
+						// if (!_functionId)
+						// 	return;
+						// var {readArray, local, argReads, antiLocal} = signature.handleReads(node.argument);
+						// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
 				}
 			} else if (node.type == "UnaryExpression" && node.operator == "typeof") {
+				rewriteGlobals(node.argument);
+				return;
 				var _functionId = util.getFunctionIdentifier(node), argType;
 				if (_functionId){
 					var functionId = makeId('function', options.path, _functionId);
@@ -1428,69 +1400,63 @@ var traceFilter = function (content, options) {
 						}
 					});
 
-					update(node.argument,' ', options.tracer_name, '.handleTypeOf(',node.argument.source(),')');
-				} else {
-						var _functionId = util.getFunctionIdentifier(node, true);
-						if (!_functionId)
-							return;
-						var {readArray, local, argReads, antiLocal} = signature.handleReads(node.argument);
-						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-				}
+					// update(node.argument,' ', options.tracer_name, '.handleTypeOf(',node.argument.source(),')');
+				} 
 
 			} else if (node.type == "MemberExpression") {
-				var _functionId = util.getFunctionIdentifier(node);
+				var _functionId = util.getFunctionIdentifier(node) || true;
 				//Either the member expression is inside a function, or passed as an argument to a call expression outside function
 				if (_functionId /*|| util.isArgofCallExpression(node)*/) {
 					// only instrument the final memberexpression where object is identifier
 					//and the member expression is not a child of callexpression.
 					if ( (node.object.type == "Identifier" || node.object.type == "ThisExpression") /*&& !util.isChildOfCallExpression(node)*/) {
-						var {readArray,local, argReads, antiLocal} = signature.handleReads(node.object);
-						if (_functionId) argReads.length && rewriteArguments(argReads);
-						if (_functionId){ 
-							antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-							antiLocal.forEach(function(read){
-								if (options.useProxy){
-										update(read, 'closureProxy.',read.source());
-								}
-							});
-						}
-						readArray.length && rewriteGlobals(readArray, _functionId);
+						// var {readArray,local, argReads, antiLocal} = signature.handleReads(node.object);
+						// if (_functionId) argReads.length && rewriteArguments(argReads);
+						// if (_functionId){ 
+						// 	antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						// 	// antiLocal.forEach(function(read){
+						// 	// 	if (options.useProxy){
+						// 	// 			update(read, 'closureProxy.',read.source());
+						// 	// 	}
+						// 	// });
+						// }
+						rewriteGlobals(node.object, _functionId);
 					}
 					if (_functionId && node.computed){
-						var {readArray,local, argReads, antiLocal} = signature.handleReads(node.property);
-						argReads.length && rewriteArguments(argReads);
-						readArray.length && rewriteGlobals(readArray);
-						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-						antiLocal.forEach(function(read){
-							if (options.useProxy){
-									update(read, 'closureProxy.',read.source());
-							}
-						});
+						// var {readArray,local, argReads, antiLocal} = signature.handleReads(node.property);
+						// argReads.length && rewriteArguments(argReads);
+						rewriteGlobals(node.property);
+						// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						// antiLocal.forEach(function(read){
+						// 	if (options.useProxy){
+						// 			update(read, 'closureProxy.',read.source());
+						// 	}
+						// });
 					}
 				} else {
-					var _functionId = util.getFunctionIdentifier(node, true);
-					if (!_functionId)
-						return;
-					var {readArray, local, argReads, antiLocal} = signature.handleReads(node.object);
-					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-					if (node.computed){
-						var {readArray,local, argReads, antiLocal} = signature.handleReads(node.property);
-						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-					}
+					// var _functionId = util.getFunctionIdentifier(node, true);
+					// if (!_functionId)
+					// 	return;
+					// var {readArray, local, argReads, antiLocal} = signature.handleReads(node.object);
+					// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+					// if (node.computed){
+					// 	var {readArray,local, argReads, antiLocal} = signature.handleReads(node.property);
+					// 	antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+					// }
 				}
 			} else if (node.type == "SwitchStatement"){
 				var {readArray,local, argReads, antiLocal} = signature.handleReads(node.discriminant);
-					var _functionId = util.getFunctionIdentifier(node);
+					var _functionId = util.getFunctionIdentifier(node) || true;
 					if (_functionId) {
-						var functionId = makeId('function', options.path, _functionId);
+						// var functionId = makeId('function', options.path, _functionId);
 						// 	if (uncacheableFunctions.indexOf(functionId) >= 0) return;
-						argReads.length && rewriteArguments(argReads);
-						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-						antiLocal.forEach(function(read){
-							if (options.useProxy){
-									update(read, 'closureProxy.',read.source());
-							}
-						});
+						// argReads.length && rewriteArguments(argReads);
+						// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						// antiLocal.forEach(function(read){
+						// 	if (options.useProxy){
+						// 			update(read, 'closureProxy.',read.source());
+						// 	}
+						// });
 						readArray.forEach(function(read){
 							var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
 							if (options.caching)
@@ -1498,7 +1464,7 @@ var traceFilter = function (content, options) {
 							if (options.useProxy){
 								if (util.checkIfReservedWord(read)) return;
 								if (read.source() == "this") {
-									update(read, "thisProxy");
+									// update(read, "thisProxy");
 									return
 								}
 								if (read.source() == "window")
@@ -1509,28 +1475,28 @@ var traceFilter = function (content, options) {
 								
 						});
 
-						node.cases.forEach((cs)=>{
-							var _t = cs.test
-							var cfgTag = `sc-${_t ? _t.source() : ''}`;
-							//only prepend the logging statement before the very first expression
-							cs.consequent.length && insertCFGTrackingSC(cs.consequent[0], functionId, cfgTag);
-						});
+						// node.cases.forEach((cs)=>{
+						// 	var _t = cs.test
+						// 	var cfgTag = `sc-${_t ? _t.source() : ''}`;
+						// 	//only prepend the logging statement before the very first expression
+						// 	cs.consequent.length && insertCFGTrackingSC(cs.consequent[0], functionId, cfgTag);
+						// });
 							
 					}
 			}
 			else if (node.type == "IfStatement") {
 					var {readArray,local, argReads, antiLocal} = signature.handleReads(node.test);
-					var _functionId = util.getFunctionIdentifier(node);
+					var _functionId = util.getFunctionIdentifier(node) || true;
 					if (_functionId) {
-						var functionId = makeId('function', options.path, _functionId);
+						// var functionId = makeId('function', options.path, _functionId);
 						// 	if (uncacheableFunctions.indexOf(functionId) >= 0) return;
-						argReads.length && rewriteArguments(argReads);
-						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-						antiLocal.forEach(function(read){
-							if (options.useProxy){
-									update(read, 'closureProxy.',read.source());
-							}
-						});
+						// argReads.length && rewriteArguments(argReads);
+						// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						// antiLocal.forEach(function(read){
+						// 	if (options.useProxy){
+						// 			update(read, 'closureProxy.',read.source());
+						// 	}
+						// });
 						readArray.forEach(function(read){
 							var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
 							if (options.caching)
@@ -1538,7 +1504,7 @@ var traceFilter = function (content, options) {
 							if (options.useProxy){
 								if (util.checkIfReservedWord(read)) return;
 								if (read.source() == "this") {
-									update(read, "thisProxy");
+									// update(read, "thisProxy");
 									return
 								}
 								if (read.source() == "window")
@@ -1549,14 +1515,14 @@ var traceFilter = function (content, options) {
 								
 						});
 
-						if (node.consequent){
-							var cfgTag = "if";
-							insertCFGTrackingIF(node.consequent,functionId, cfgTag)
-						}
-						if (node.alternate && node.alternate.type != "IfStatement") {
-							var cfgTag = "else";
-							insertCFGTrackingIF(node.alternate,functionId, cfgTag);
-						}
+						// if (node.consequent){
+						// 	var cfgTag = "if";
+						// 	insertCFGTrackingIF(node.consequent,functionId, cfgTag)
+						// }
+						// if (node.alternate && node.alternate.type != "IfStatement") {
+						// 	var cfgTag = "else";
+						// 	insertCFGTrackingIF(node.alternate,functionId, cfgTag);
+						// }
 							
 					} else {
 						var _functionId = util.getFunctionIdentifier(node, true);
@@ -1586,18 +1552,18 @@ var traceFilter = function (content, options) {
 				//Arguments read don't depend on whether we consider invocations as read or not, 
 				// because the replacement logic needs to be consistent
 				// var {argReads} = signature.handleReads(node.callee);
-				var _functionId = util.getFunctionIdentifier(node);
+				var _functionId = util.getFunctionIdentifier(node) || true;
 
 				if (_functionId) {
 
-					var functionId = makeId('function', options.path, _functionId);
+					// var functionId = makeId('function', options.path, _functionId);
 
-					argReads.length && node.callee.type != "FunctionExpression" && rewriteArguments(argReads);
+					// argReads.length && node.callee.type != "FunctionExpression" && rewriteArguments(argReads);
 					readArray.forEach(function(read){
 						if (options.useProxy){
 							if (util.checkIfReservedWord(read)) return;
 							if (read.source() == "this") {
-								update(read, "thisProxy");
+								// update(read, "thisProxy");
 								return
 							}
 							if (read.source() == "window") {
@@ -1608,12 +1574,12 @@ var traceFilter = function (content, options) {
 							}
 						}
 					});
-					antiLocal.length && Array.prototype.push.apply(functionToNonLocals[functionId], antiLocal);
-					antiLocal.forEach(function(read){
-						if (options.useProxy){
-								update(read, 'closureProxy.',read.source());
-						}
-					});
+					// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[functionId], antiLocal);
+					// antiLocal.forEach(function(read){
+					// 	if (options.useProxy){
+					// 			update(read, 'closureProxy.',read.source());
+					// 	}
+					// });
 
 					var globalReads = [], args = [], antiLocals = [], locals = [], IBFlocals = [];
 					node.arguments && node.arguments.forEach(function(param){
@@ -1632,14 +1598,14 @@ var traceFilter = function (content, options) {
 					});
 					/* Either the call expression is inside a function or it is a self invoking call expression in the global scope*/
 					if (_functionId) {
-						args.length && rewriteArguments(args);
+						// args.length && rewriteArguments(args);
 					}
-					antiLocals.length && Array.prototype.push.apply(functionToNonLocals[functionId], antiLocals);
-					antiLocals.forEach(function(read){
-						if (options.useProxy){
-								update(read, 'closureProxy.',read.source());
-						}
-					});
+					// antiLocals.length && Array.prototype.push.apply(functionToNonLocals[functionId], antiLocals);
+					// antiLocals.forEach(function(read){
+					// 	if (options.useProxy){
+					// 			update(read, 'closureProxy.',read.source());
+					// 	}
+					// });
 					globalReads.forEach(function(read){
 						var newRead = util.logReadsHelper(read,scope.checkAndReplaceAlias(read));
 						if (options.caching)
@@ -1647,7 +1613,7 @@ var traceFilter = function (content, options) {
 						if (options.useProxy){
 							if (util.checkIfReservedWord(read)) return;
 							if (read.source() == "this") {
-								update(read, "thisProxy");
+								// update(read, "thisProxy");
 								return
 							}
 							if (read.source() == "window") {
@@ -1681,6 +1647,7 @@ var traceFilter = function (content, options) {
 					Certain functions should not be tracked, for example if the function has a getter, or if the function is a method of an array 
 					objects, because it will be tracked anyway. 
 					*/
+					return;
 					var getIBFSource = ["get",".push"];
 					if ( (node.parent.type == "ExpressionStatement" || node.parent.type == "SequenceExpression" || node.parent.type == "LogicalExpression" || (
 						node.parent.type == "ConditionalExpression" && node.parent.test != node && (!node.parent.parent || node.parent.parent.type != "ReturnStatement")) )
@@ -1768,16 +1735,16 @@ var traceFilter = function (content, options) {
 			} else if (node.type == "ThrowStatement"){
 				var _functionId = util.getFunctionIdentifier(node);
 				if (_functionId) {
-					update(node, "throw ", options.tracer_name,'.logThrowStatement(',node.argument.source(),');',);
+					// update(node, "throw ", options.tracer_name,'.logThrowStatement(',node.argument.source(),');',);
 				}
 			} else if (node.type == "ReturnStatement") {
-				var _functionId = util.getFunctionIdentifier(node);
+				var _functionId = util.getFunctionIdentifier(node) || true;
 				if (_functionId) {
 					node.containsReturn = true;
-					var functionId = makeId('function', options.path, _functionId);
+					// var functionId = makeId('function', options.path, _functionId);
 					var _traceEnd = options.tracer_name + ".exitFunction(";
 					if (node.argument){
-						var functionId = makeId('function', options.path, _functionId);
+						// var functionId = makeId('function', options.path, _functionId);
 						var {readArray,local, argReads, antiLocal} = signature.handleReads(node.argument);
 						readArray.forEach(function(read){
 							if (options.useProxy){
@@ -1790,17 +1757,17 @@ var traceFilter = function (content, options) {
 								}
 							}
 						});
-						argReads.forEach(function(read){
-							if (options.useProxy){
-									update(read.val, 'argumentProxy[',read.ind, ']');
-							}
-						});
-						antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
-						antiLocal.forEach(function(read){
-							if (options.useProxy){
-									update(read, 'closureProxy.',read.source());
-							}
-						});
+						// argReads.forEach(function(read){
+						// 	if (options.useProxy){
+						// 			update(read.val, 'argumentProxy[',read.ind, ']');
+						// 	}
+						// });
+						// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
+						// antiLocal.forEach(function(read){
+						// 	if (options.useProxy){
+						// 			update(read, 'closureProxy.',read.source());
+						// 	}
+						// });
 					}
 					if (node.argument && node.argument.type == "SequenceExpression" ) {
 						var returnValue = node.argument.expressions[node.argument.expressions.length - 1];
@@ -1839,7 +1806,7 @@ var traceFilter = function (content, options) {
 				var index = makeId('function', options.path, node);
 				if (node.containsReturn) containsReturn = true;
 				if (functionToNonLocals[index].length) {
-					closures = insertClosureProxy(node, index);
+					// closures = insertClosureProxy(node, index);
 				}
 				if ( (options.rti || options.myCg)){
 					if (uncacheableFunctions["RTI"].indexOf(node)>=0 || 
@@ -1847,6 +1814,11 @@ var traceFilter = function (content, options) {
 						return
 					}
 				}
+
+				var isRoot = node.id && node.id.name == IIFE_NAME ? true : false;
+                if (!isRoot)
+                    return;
+
 				var isCacheable = true,
 					enableRecord = node.nullTimeNode == null ? true : false;
 
@@ -1867,17 +1839,17 @@ var traceFilter = function (content, options) {
 				// 	 ')) \n return __tracerRet; \n',
 				// 	 nodeBody,' \n');
 
-				insertArgumentProxy(node);
+				// insertArgumentProxy(node);
 				if (functionsContainingThis.indexOf(index)>=0) {
 					var proxyStr = 'var thisProxy = ' + options.tracer_name + '.createThisProxy(this);\n';
-					update(node.body, '\n',proxyStr, node.body.source());
+					// update(node.body, '\n',proxyStr, node.body.source());
 				}
-				if (closures[1]) update(node.body, closures[1], node.body.source());
+				// if (closures[1]) update(node.body, closures[1], node.body.source());
 				
 
-				update(node.body, '\n', closures[0] ? closures[0] : '' ,' var __tracerRet; \n __tracerRet = ', _traceBegin, JSON.stringify(index)
-					,replayObjects,') \n if (__tracerRet[0]) return __tracerRet[1]; \n',
-					 node.body.source(),' \n');
+				// update(node.body, '\n', closures[0] ? closures[0] : '' ,' var __tracerRet; \n __tracerRet = ', _traceBegin, JSON.stringify(index)
+				// 	,replayObjects,') \n if (__tracerRet[0]) return __tracerRet[1]; \n',
+				// 	 node.body.source(),' \n');
 				update(node.body, '{ \ntry {\n',options.tracer_name,'.cacheInit(', JSON.stringify(index),',arguments, new.target',',',JSON.stringify(enableRecord),');\n',
 					node.body.source());
 

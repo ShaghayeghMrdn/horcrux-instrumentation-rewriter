@@ -2,6 +2,7 @@
 var fs = require('fs');
 var util = require('util')
 var {spawnSync} = require('child_process');
+var {cpuProfileParser} = require("../devtool-cpu-model/analyze_cpu_profile.js");
 
 if (process.argv.length < 4) {
 	console.error("Invalid command: Usage: node small.js <flag> <filename>");
@@ -32,6 +33,18 @@ function topKFromRTI(rti, k){
     // console.log(rtiCounter +  "of " + rtiLength + "gives us " + k + " percent");
     return relevantRTI;
 }   
+
+
+var getUserDefinedTime = function(cpu){
+    var time = 0;
+    cpu.parsed.children.forEach((child)=>{
+        if (child.profileNode.url.startsWith("http"))
+            time += child.self
+    })
+    return time;
+}
+
+
 var computeCategories = function(){
     var categories = ["urlWithHttp", "urlNoHttp", "nourl"]
     var result = {};
@@ -387,10 +400,20 @@ else if (flag == "-map") {
     while (m = sizeR.exec(memMsg)){ sizes.push(Number.parseInt(m[0].split(' ')[0])) }
     // console.log(Math.max(...sizes))    
     process.stdout.write(Math.max(...sizes) + " ");
-} else if (flag == "-sum"){
-    var data = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
-    var sum = Object.values(data).reduce((acc, cur)=>{if (cur.length == 2) return acc+cur[1]-cur[0]; else return acc},0);
-    console.log(sum);
+} else if (flag == "--logs"){
+    var logs = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
+    logs.forEach((l)=>{
+        try {
+            var _ind = l.exceptionDetails.exception.description.indexOf("Illegal invocation")
+            if (_ind>=0){
+                var errMesg = l.exceptionDetails.exception.description.substr(0,_ind);
+                console.log(errMesg);
+            }
+        } catch (e){
+            return;
+        }
+    });
+
 
  } else if (flag == "-dictComp") {
     var dict1 = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
@@ -408,42 +431,16 @@ else if (flag == "-map") {
         }
     })
     process.stdout.write(util.format(match,total,match/total + " "));
- } else if (flag == "-sigMatch") {
-    var sig1 = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
-    var sig2 = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+ } else if (flag == "--compareTime") {
+    var prof = cpuProfileParser( 
+        JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
+        )
+    var rootSig = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
 
-    var srcSig = Object.keys(sig1).length <= Object.keys(sig2).length ? sig1 : sig2
-    var dstSig = srcSig == sig1 ? sig2 : sig1;
-    keys1 = makeUnique(Object.keys(srcSig)), keys2 = makeUnique(Object.keys(dstSig));
-    total = keys1.length, match = [];
-    var dstLib2key = genLibToKeys(dstSig);
-    keys1.forEach((key1)=>{
-        var f = false
-        for (m of match){
-            if (matchSignature(srcSig[key1], key1, srcSig[m],m)){
-                // console.log("already matched before")
-                f = true;
-                break;
-            }
-        }
-        if (f){
-            match.push(key1);
-            return;
-        }
-        var key1Lib = key1.split("-function-")[0];
-        if (!dstLib2key[key1Lib]) return false;
-        for (key2 of dstLib2key[key1Lib]){
-            if (matchSignature(srcSig[key1], key1, dstSig[key2], key2)){
-                f = true;
-                break;
-            }
-        }
-        if (f){
-            match.push(key1);
-        }
-    })
-    console.log(total, match.length);
+    var origTime = getUserDefinedTime(prof);
+    var rootTime = Object.values(rootSig).reduce((acc,cur)=>{if (cur.length == 2) return acc + cur[1] - cur[0]; else return acc;},0);
 
+    console.log(origTime, rootTime);
 
 
  } else if (flag == "-nc"){

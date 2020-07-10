@@ -274,8 +274,8 @@ var isChildOfCallExpression = function(node){
 /*node -> input node, x -> array of types*/
 var isChildOfX = function(node,...x){
     if (node == null) return false;
-    var parent = node;
-    while (parent != null && parent.type != "BlockStatement") {
+    var parent = node.parent;
+    while (parent != null) {
         if (x.filter(e=>e == parent.type).length > 0)
             return parent;
         parent = parent.parent;

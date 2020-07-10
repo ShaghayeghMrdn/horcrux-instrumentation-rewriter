@@ -44,7 +44,7 @@ var extractIdentifiers = function(node){
             // readRecursively(node.alternate);
         } else if (node.type == "ObjectExpression") {
             node.properties.forEach(function(elem){
-                readRecursively(elem.value);
+                !elem.shorthand && readRecursively(elem.value);
             });
             // readArray.push(node);
         } else if (node.type == "ArrayExpression") {
@@ -99,7 +99,7 @@ var extractAllIdentifiers = function(node, isAA){
             readRecursively(node.alternate);
         } else if (node.type == "ObjectExpression") {
             node.properties.forEach(function(elem){
-                readRecursively(elem.value);
+                !elem.shorthand && (readRecursively(elem.value));
             });
             // readArray.push(node);
         } else if (node.type == "ArrayExpression") {
@@ -180,7 +180,7 @@ var handleReads = function(node, haveIds, all, isAA) {
         readArray = [node];
     else if (!all) readArray = extractIdentifiers(node);
     else readArray = extractAllIdentifiers(node, isAA);
-    if (readArray == null) return [];
+    if (readArray == null) return {readArray: [], local: [], argReads: [], antiLocal: []};
     var globalReads = [];
     var argReads = [];
     var antiLocal = [];

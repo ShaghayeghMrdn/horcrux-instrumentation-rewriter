@@ -212,7 +212,7 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         else:
             command = " {} -i {} -n '{}' -t {} -p {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType, args.instOutput)
 
-        if (args.debug) and fileType == "js":
+        if (args.debug) and fileType == args.debug:
             command = "node --inspect-brk={}".format(node_debugging_port) + command
         else:
             command = "node " + command
@@ -386,8 +386,7 @@ if __name__ == "__main__":
     parser.add_argument('logDir', help='path to log output directory')
     parser.add_argument('--jsProfile', help='path to the js profile')
     parser.add_argument('--cgInfo',help="path to the cg info")
-    parser.add_argument('--debug',help="enable node debugging using -inspect flag", 
-        action='store_true')
+    parser.add_argument('--debug',help="enable node debugging using -inspect flag")
     args = parser.parse_args()
     main(args)
 

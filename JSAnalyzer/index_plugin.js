@@ -9,6 +9,7 @@ var mergeDeep = require('deepmerge');
 var scope = require('./scopeAnalyzer.js');
 var util = require('./util.js');
 var signature = require('./signature.js');
+var globalWrapper = require('./global-code-wrapper.js');
 var e2eTesting = false;
 var anonCounter = 0;
 var node2index = new Map();
@@ -16,6 +17,8 @@ var staticInfo = {};
 var uncacheableFunctions = util.uncacheableFunctions;
 staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matchedUrls: []};
 staticInfo.uncacheableFunctions = uncacheableFunctions;
+
+var IIFE_NAME="__HORCRUX__";
 
 
 function mergeInto(options, defaultOptions) {
@@ -192,11 +195,13 @@ var traceFilter = function (content, options) {
             }
         }
 
+        content = globalWrapper.wrap(content, fala);
+
         var instrumentedNodes = [];
         m = fala({
             source: content,
-            loc: true,
-            range: true,
+            locations: true,
+            ranges: true,
             sourceFilename: options.sourceFilename || options.path,
             generatedFilename: options.generatedFilename || options.path,
             // tolerant: true,
@@ -222,28 +227,24 @@ var traceFilter = function (content, options) {
                     }
                 }
             })
+        } 
+        // else if (options.cg) {
+        //     var instrumentedNodes = [], remainingRTINodes =[];
+        //     ASTNodes.forEach((node)=>{
+        //         if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
+        //             var index = makeId('function', options.path, node);
+        //             if (options.myCg.indexOf(index)>=0){
+        //                 // staticInfo.rtiDebugInfo.matchedNodes.push(node);
+        //                 instrumentedNodes.push(node);
+        //             } else {
+        //                 markFunctionUnCacheable(node,"RTI");
+        //             }
+        //         }
 
-            // if (remainingRTINodes.length){
-            //  //Throw error since not all rti nodes found a match. 
-            //  console.error("Match not found for " + remainingRTINodes.length + " number of RTI nodes");
-            //  console.error("Quiting instrumentation");
-            //  return processed;
-            // }
-        } else if (options.cg) {
-            var instrumentedNodes = [], remainingRTINodes =[];
-            ASTNodes.forEach((node)=>{
-                if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
-                    var index = makeId('function', options.path, node);
-                    if (options.myCg.indexOf(index)>=0){
-                        // staticInfo.rtiDebugInfo.matchedNodes.push(node);
-                        instrumentedNodes.push(node);
-                    } else {
-                        markFunctionUnCacheable(node,"RTI");
-                    }
-                }
+        //     });
+        // }  
 
-            });
-        }  
+
 
 
         var interceptDecl = "___tracerINT";
@@ -262,11 +263,20 @@ var traceFilter = function (content, options) {
 
         ASTNodes.forEach((node)=>{
             if (node.type === "Program") { 
-                // total += node.source().length;
+                /*
+                Is Js is appended with whitespaces, remove it before updating the program node
+                since the whitespace is included in the program source in falafel v 2.1.0
+                */
+
+                if (options.jsInHTML){
+                    update(node, node.source().replace(/^\s+|\s+$/g, ''));
+                }
+
                 /*
                 Some JS files don't have access to the global execution context and they have a dynamically generated
                 html file, therefore create dummy tracer functions, just to avoid runtime errors. 
                 */
+
                 var tracerCheck = `\n(function(){if (typeof __tracer == 'undefined' && typeof window != 'undefined')
                  { __tracer = {cacheInit:(arg)=>{}, 
                     exitFunction: (arg,ret)=>{return ret}};
@@ -307,6 +317,7 @@ var traceFilter = function (content, options) {
 
             else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
 
+
                 var fnName = util.getNameFromFunction(node)
                 if  ((options.rti || options.cg) && instrumentedNodes.indexOf(node)>=0 && ((fnName && inBuiltOverrides.filter(e=>fnName.toLowerCase().indexOf(e)>=0).length)
                     || isInBuiltFunction(fnName)) ) {
@@ -314,14 +325,16 @@ var traceFilter = function (content, options) {
                     markFunctionUnCacheable(node,"RTI");
                 }
 
-                var containsReturn = false;
                 var index = makeId('function', options.path, node);
                 if ( (options.myRti || options.myCg)&& uncacheableFunctions["RTI"].indexOf(node)>=0)
                     return;
-                if (node.containsReturn) containsReturn = true;
+
+                var isRoot = node.id && node.id.name == IIFE_NAME ? true : false;
+                if (!isRoot)
+                    return;
                 var nodeBody = node.body.source().substring(1, node.body.source().length-1);
                 staticInfo.rtiDebugInfo.matchedNodes.push([index,node.time]);
-                update(node.body, '{ \n try {',options.tracer_name,'.cacheInit(',JSON.stringify(index),',arguments);\n var ',interceptDecl,'\n;',
+                update(node.body, '{ \n try {',options.tracer_name,'.cacheInit(',JSON.stringify(index),',',JSON.stringify(isRoot),');\n',
                     node.body.source().substring(1, node.body.source().length-1),'\n');
 
                 var _traceEnd = options.tracer_name + ".exitFunction(";// + args + ");";
@@ -361,8 +374,8 @@ var traceFilter = function (content, options) {
         // console.log("[STATIC] " , total, totalInJs )
         return processed
     } catch (e) {
-        return processed;
         console.error('[PARSING EXCEPTION]' + e);
+        return processed;
     }
 }
 

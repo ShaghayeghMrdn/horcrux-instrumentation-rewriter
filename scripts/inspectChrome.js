@@ -523,6 +523,7 @@ async function extractCustomInformation(Runtime, program, path){
         // await customCodes.getInvocationProperties(Runtime, program.output + "/leafNodes" + path, 'leafNodes',1);
         await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo", '__tracer.getTimingInfo()');
         await customCodes.getInvocationProperties(Runtime, program.output + "/cg", '__tracer.getCallGraph()');
+        await customCodes.getInvocationProperties(Runtime, program.output + "/roots", '__tracer.getRootInvocs()');
         // await customCodes.getInvocationProperties(Runtime, program.output + "/rc", 'window.proxyReadCount');
         // await customCodes.getInvocationProperties(Runtime, program.output + "/wc", 'window.proxyWriteCount');
         // await customCodes.getInvocationProperties(Runtime, program.output + "/parentNodes", '__tracer.getParentNodes()');
