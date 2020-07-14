@@ -12,6 +12,8 @@ from Naked.toolshed.shell import execute_js
 import json
 import time
 import unicodedata
+import multiprocessing as mp
+from functools import partial
 
 deflate_compress = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS)
 zlib_compress = zlib.compressobj(9, zlib.DEFLATED, zlib.MAX_WBITS)
@@ -141,9 +143,10 @@ def get_valid_filename(s):
     s = str(s).strip().replace(' ', '_')
     return re.sub(r'(?u)[^-\w.]', '', s)
 
-def instrument(file,root, childPids, fileType, output_directory,args):
+
+def instrument(root, fileType, output_directory,args,file):
     f = open(os.path.join(root,file), "rb")
-    global http_response
+    http_response = http_record_pb2.RequestResponse()
     http_response.ParseFromString(f.read())
     f.close()
     filename = http_response.request.first_line.split()[1]
@@ -164,147 +167,140 @@ def instrument(file,root, childPids, fileType, output_directory,args):
         filename = url+filename
 
     global node_debugging_port
-    global static_analysis_overhead
-    static_analysis_overhead += 3
 
     node_debugging_port+=1
-    pid = os.fork()
-    childPids.append(pid)
+    # pid = os.fork()
 
-    if pid == 0:
-        TEMP_FILE = str(os.getpid())
-        TEMP_FILE_zip = TEMP_FILE + ".gz"
-        for header in http_response.response.header:
-            if header.key.lower() == "content-encoding":
-                # print "GZIIPED FILE is " , file
-                gzip = True
-                gzipType = header.value
-                # markedToBeDeleted.append(header.key)
+    # if pid == 0:
+    TEMP_FILE = str(os.getpid())
+    TEMP_FILE_zip = TEMP_FILE + ".gz"
+    for header in http_response.response.header:
+        if header.key.lower() == "content-encoding":
+            # print "GZIIPED FILE is " , file
+            gzip = True
+            gzipType = header.value
+            # markedToBeDeleted.append(header.key)
 
-            elif header.key.lower() == "transfer-encoding" and header.value == "chunked":
-                http_response.response.body = unchunk(http_response.response.body)
-                markedToBeDeleted.append(header.key)
+        elif header.key.lower() == "transfer-encoding" and header.value == "chunked":
+            http_response.response.body = unchunk(http_response.response.body)
+            markedToBeDeleted.append(header.key)
 
-        print "Marked to be deleted headers are: " , markedToBeDeleted
+    print "Marked to be deleted headers are: " , markedToBeDeleted
 
-        print "Instrumenting: {} is a {} file".format(file, fileType)
-        f = open(TEMP_FILE, "w")
-        if gzip:
-            try:
-                print "Decompressing {} ...with type {}".format(file, gzipType)
-                if gzipType.lower() != "br":
-                    decompressed_data = zlib.decompress(bytes(bytearray(http_response.response.body)), zlib.MAX_WBITS|32)
-                else:
-                    decompressed_data = brotli.decompress(http_response.response.body)
-                f.write(decompressed_data)
-            except zlib.error as e:
-                print "Corrupted decoding: " + file + str(e)
-                print "Simply copying the file"
-                copy(os.path.join(root,file), os.path.join(args.output, output_directory))
-                os._exit(0)
-        else: f.write(http_response.response.body)
-        f.close()
-        if (args.jsProfile):
-        #Pass into the nodejs instrumentation script
-            command = " {} -i {} -n '{}' -t {} -j {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile, args.instOutput)
-        elif (args.cgInfo):
-            command = " {} -i {} -n '{}' -t {} -c {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.cgInfo, args.instOutput)
-        else:
-            command = " {} -i {} -n '{}' -t {} -p {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType, args.instOutput)
-
-        if (args.debug) and fileType == args.debug:
-            command = "node --inspect-brk={}".format(node_debugging_port) + command
-        else:
-            command = "node " + command
-        _log_path = log_directory+"/"+output_directory+"/" + get_valid_filename(filename) + "/"
-        subprocess.call("mkdir -p {}".format(_log_path), shell=True)
-
-        log_file=open(_log_path+"logs","w")
-        error_file=open(_log_path+"errors","w")
-        # if (args.instOutput != "ND" or fileType == "html"):
-        print "Executing ", command
-        _sa_begin_time = time.time()
-        cmd = subprocess.call(command, stdout=log_file, stderr =error_file, shell=True)
-        _sa_end_time = time.time()
-        static_analysis_overhead = _sa_end_time - _sa_begin_time
-        print "overhead: ", static_analysis_overhead
-        # read the information returned from the script if inst type was recording
-        # if args.instOutput == "caching":
+    print "Instrumenting: {} is a {} file".format(file, fileType)
+    f = open(TEMP_FILE, "w")
+    if gzip:
         try:
-            returnInfoFile = TEMP_FILE + ".info";
-            returnInfo = open(returnInfoFile,'r').readline();
-
-            open(_log_path + "info","w").write(returnInfo)
-            # open (TEMP_FILE + ".time","w").write(str(static_analysis_overhead))
-        except IOError as e:
-            print "Error while reading info file" + str(e)
-
-        if gzip:
-            file_with_content = TEMP_FILE_zip
+            print "Decompressing {} ...with type {}".format(file, gzipType)
             if gzipType.lower() != "br":
-                zipUtil = "gzip"
-            else: zipUtil = "brotli"
-            zipCommand = "{} -c {} > {}".format(zipUtil, TEMP_FILE, TEMP_FILE_zip)
-            cmd = subprocess.Popen(zipCommand, shell=True)
-            while cmd.poll() is None:
-                continue
-        else:
-            file_with_content = TEMP_FILE
+                decompressed_data = zlib.decompress(bytes(bytearray(http_response.response.body)), zlib.MAX_WBITS|32)
+            else:
+                decompressed_data = brotli.decompress(http_response.response.body)
+            f.write(decompressed_data)
+        except zlib.error as e:
+            print "Corrupted decoding: " + file + str(e)
+            print "Simply copying the file"
+            copy(os.path.join(root,file), os.path.join(args.output, output_directory))
+            f.close()
+            return
+            # os._exit(0)
+    else: f.write(http_response.response.body)
+    f.close()
+    if (args.jsProfile):
+    #Pass into the nodejs instrumentation script
+        command = " {} -i {} -n '{}' -t {} -j {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile, args.instOutput)
+    elif (args.cgInfo):
+        command = " {} -i {} -n '{}' -t {} -c {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.cgInfo, args.instOutput)
+    else:
+        command = " {} -i {} -n '{}' -t {} -p {}".format("record.js",TEMP_FILE, url + ";;;;" + origPath,fileType, args.instOutput)
 
-        tmpFile = open(file_with_content, "rb")
-        modifiedContent = tmpFile.read()
-        modifiedLength = len(modifiedContent)
-        # print modifiedContent
-        # if gzip:
-        #     print "Compressing the modified content.."
-        #     if gzipType.lower() == "gzip":
-        #         compress = gzip_compress
-        #         output_http_response.response.body = compress.compress(modifiedContent) + compress.flush()
-        #         modifiedLength = len(output_http_response.response.body)
-        #     elif gzipType.lower() =="deflate":
-        #         compress = deflate_compress
-        #         output_http_response.response.body = compress.compress(modifiedContent) + compress.flush()
-        #         modifiedLength = len(output_http_response.response.body)
-        #     elif gzipType.lower() == "br":
-        #         output_http_response.response.body = brotli.compress(modifiedContent)
-        #         modifiedLength = len(output_http_response.response.body)
-        # else:
-        # print "Length of modified content is: ", len(modifiedContent);
-        output_http_response.response.body = modifiedContent
+    if (args.debug) and fileType == args.debug:
+        command = "node --inspect-brk={}".format(node_debugging_port) + command
+    else:
+        command = "node " + command
+    _log_path = log_directory+"/"+output_directory+"/" + get_valid_filename(filename) + "/"
+    subprocess.call("mkdir -p {}".format(_log_path), shell=True)
 
-        for key in markedToBeDeleted:
-            for header in http_response.response.header:
-                if header.key == key:
-                    output_http_response.response.header.remove(header)
-                    break
+    log_file=open(_log_path+"logs","w")
+    error_file=open(_log_path+"errors","w")
+    # if (args.instOutput != "ND" or fileType == "html"):
+    print "Executing ", command
+    cmd = subprocess.call(command, stdout=log_file, stderr =error_file, shell=True)
+    
+    try:
+        returnInfoFile = TEMP_FILE + ".info";
+        returnInfo = open(returnInfoFile,'r').readline();
 
-        length_header_exists = False
-        for header in output_http_response.response.header:
-            if header.key == "Content-Length":
-                header.value = bytes(modifiedLength)
-                length_header_exists = True
-            if header.key.lower() == "content-security-policy" or header.key.lower() == "content-security-policy-report-only":
-                header.value = ""
-            if header.key == "Access-Control-Allow-Origin":
-                header.value = "*"
-        if not length_header_exists:
-            length_header = output_http_response.response.header.add()
-            length_header.key = "Content-Length"
-            length_header.value = bytes(modifiedLength)
+        open(_log_path + "info","w").write(returnInfo)
+        # open (TEMP_FILE + ".time","w").write(str(static_analysis_overhead))
+    except IOError as e:
+        print "Error while reading info file" + str(e)
 
-        # print " response header looks like " , output_http_response.response.header
-        outputFile = open(os.path.join(args.output, output_directory, file), "w")
-        
-        outputFile.write(output_http_response.SerializeToString())
+    if gzip:
+        file_with_content = TEMP_FILE_zip
+        if gzipType.lower() != "br":
+            zipUtil = "gzip"
+        else: zipUtil = "brotli"
+        zipCommand = "{} -c {} > {}".format(zipUtil, TEMP_FILE, TEMP_FILE_zip)
+        subprocess.call(zipCommand, shell=True)
+        # while cmd.poll() is None:
+            # continue
+    else:
+        file_with_content = TEMP_FILE
 
-        outputFile.close()
-        tmpFile.close()
+    tmpFile = open(file_with_content, "rb")
+    modifiedContent = tmpFile.read()
+    modifiedLength = len(modifiedContent)
+    # print modifiedContent
+    # if gzip:
+    #     print "Compressing the modified content.."
+    #     if gzipType.lower() == "gzip":
+    #         compress = gzip_compress
+    #         output_http_response.response.body = compress.compress(modifiedContent) + compress.flush()
+    #         modifiedLength = len(output_http_response.response.body)
+    #     elif gzipType.lower() =="deflate":
+    #         compress = deflate_compress
+    #         output_http_response.response.body = compress.compress(modifiedContent) + compress.flush()
+    #         modifiedLength = len(output_http_response.response.body)
+    #     elif gzipType.lower() == "br":
+    #         output_http_response.response.body = brotli.compress(modifiedContent)
+    #         modifiedLength = len(output_http_response.response.body)
+    # else:
+    # print "Length of modified content is: ", len(modifiedContent);
+    output_http_response.response.body = modifiedContent
 
-        subprocess.Popen("rm {} {} {}".format(TEMP_FILE, TEMP_FILE_zip, TEMP_FILE +".info"),stderr=open("/dev/null","r"), shell=True)
-        os._exit(0)
+    for key in markedToBeDeleted:
+        for header in http_response.response.header:
+            if header.key == key:
+                output_http_response.response.header.remove(header)
+                break
+
+    length_header_exists = False
+    for header in output_http_response.response.header:
+        if header.key.lower() == "content-length":
+            header.value = bytes(modifiedLength)
+            length_header_exists = True
+        if header.key.lower() == "content-security-policy" or header.key.lower() == "content-security-policy-report-only":
+            header.value = ""
+        if header.key == "Access-Control-Allow-Origin":
+            header.value = "*"
+    if not length_header_exists:
+        length_header = output_http_response.response.header.add()
+        length_header.key = "Content-Length"
+        length_header.value = bytes(modifiedLength)
+
+    # print " response header looks like " , output_http_response.response.header
+    outputFile = open(os.path.join(args.output, output_directory, file), "w")
+    
+    outputFile.write(output_http_response.SerializeToString())
+
+    outputFile.close()
+    tmpFile.close()
+
+    subprocess.call("rm {} {} {}".format(TEMP_FILE, TEMP_FILE_zip, TEMP_FILE +".info"),stderr=open("/dev/null","r"), shell=True)
+    # os._exit(0)
 
 node_debugging_port=9229
-http_response = http_record_pb2.RequestResponse()
 
 static_analysis_overhead = 0
 
@@ -315,10 +311,12 @@ def main(args):
     iframe_script_path = "iframeJs2/"
     output_directory = args.input.split('/')[-2]
     print output_directory
-    childPids = []
 
     subprocess.Popen("mkdir -p {}".format(args.output), shell=True)
     subprocess.Popen("mkdir -p {}".format(os.path.join(args.output, output_directory)), shell=True)
+
+
+    http_response = http_record_pb2.RequestResponse()
 
     for root, folder, files in os.walk(args.input):
         print "This directory has ", len(files), " number of files"
@@ -332,7 +330,6 @@ def main(args):
             try:
                 file_counter += 1
                 f = open(os.path.join(root,file), "rb")
-                # print file
                 http_response.ParseFromString(f.read())
                 f.close()
 
@@ -358,19 +355,33 @@ def main(args):
 
             except IOError as e:
                 print args.input + ": Could not open file ", e
+
+    pool = mp.Pool(mp.cpu_count())
+
+    instrument_singleton = partial(instrument, root, "js",output_directory, args)
         
-    for jsFile in jsFiles:
-        instrument(jsFile,root, childPids, "js", output_directory,args)
-    for pid in childPids:
-        print "waiting on pid", pid
-        os.waitpid(pid,0)
+    pool.map(instrument_singleton, jsFiles)
+    pool.close()
+    pool.join()
+    # for jsFile in jsFiles:
+    #     instrument(jsFile,root, "js", output_directory,args)
+
+    instrument_singleton = partial(instrument, root, "html",output_directory, args)
+    # for pid in childPids:
+    #     print "waiting on pid", pid
+    #     os.waitpid(pid,0)
     print "All the JS child processes died..\n Main thread terminating"
-    childPids = []
-    for htmlFile in htmlFiles:
-        instrument(htmlFile,root, childPids, "html", output_directory,args)
-    for pid in childPids:
-        print "waiting on pid", pid
-        os.waitpid(pid,0)
+
+    pool = mp.Pool(mp.cpu_count())
+
+    pool.map(instrument_singleton, htmlFiles)
+    pool.close()
+    pool.join()
+    # for htmlFile in htmlFiles:
+    #     instrument(htmlFile,root, "html", output_directory,args)
+    # for pid in childPids:
+    #     print "waiting on pid", pid
+    #     os.waitpid(pid,0)
     print "All the HTML child processes died..\n Main thread terminating"
     print "Static analysis time:", static_analysis_overhead
 

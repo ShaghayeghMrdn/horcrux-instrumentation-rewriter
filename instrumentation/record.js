@@ -347,11 +347,11 @@ var main = function(){
     if (program.cgInfo){
         try{
             var _cg = JSON.parse(fs.readFileSync(program.cgInfo),"utf-8");
-            var cg = _cg.map(e=>e[0]);
-            // cg = unique(cg);
-            var cgTime = _cg.map(e=>e[2]);
+            // var cg = _cg.map(e=>e[0]);
+            var cg = _cg; 
+            // var cgTime = _cg.map(e=>e[2]);
             // console.log(cg);
-            fondueOptions = mergeInto(fondueOptions, {cg: cg, cgTime:cgTime, rawCg: _cg});
+            fondueOptions = mergeInto(fondueOptions, {cg: cg});
             staticInfo.rtiDebugInfo.ALL = cg.length;
             // console.log("cg nodes:" + cg);
         } catch (err){

@@ -329,9 +329,13 @@ var traceFilter = function (content, options) {
                 if ( (options.myRti || options.myCg)&& uncacheableFunctions["RTI"].indexOf(node)>=0)
                     return;
 
-                var isRoot = node.id && node.id.name == IIFE_NAME ? true : false;
-                if (!isRoot)
-                    return;
+                var isRoot = node.id && node.id.name.indexOf(IIFE_NAME)>=0 ? true : false;
+                // if (!isRoot)
+                //     return;
+
+                if (node.id && node.id.name.indexOf("____")>=0){
+                    update(node.id, node.id.source().split('____')[1]);
+                }
                 var nodeBody = node.body.source().substring(1, node.body.source().length-1);
                 staticInfo.rtiDebugInfo.matchedNodes.push([index,node.time]);
                 update(node.body, '{ \n try {',options.tracer_name,'.cacheInit(',JSON.stringify(index),',',JSON.stringify(isRoot),');\n',

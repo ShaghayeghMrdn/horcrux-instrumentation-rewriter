@@ -106,8 +106,7 @@ function instrumentationPrefix(options) {
 		proxyName: options.proxyName,
 		pageLoaded: options.pageLoaded,
 		invocation_limit:options.invocation_limit,
-		instrumentationPattern:JSON.stringify(options.pattern),
-		runtimeInfo:JSON.stringify(options.rawCg)
+		instrumentationPattern:JSON.stringify(options.pattern)
 	});
 
 	// Object.keys(uncacheableFunctions).forEach((reason)=>{
@@ -814,15 +813,15 @@ var traceFilter = function (content, options) {
 						/*Check if node time is enough for the node to be worth
 						instrumented*/
 						var origCgInd = options.cg.indexOf(index);
-						var nodeTime = options.cgTime[origCgInd];
-						console.log("[Matched node]: ", index, " with time: ", nodeTime );
-						if (nodeTime == null || nodeTime < minFunctionTime){
-							node.nullTimeNode = true
-						}
-						node.time = nodeTime;
+						// var nodeTime = options.cgTime[origCgInd];
+						// console.log("[Matched node]: ", index, " with time: ", nodeTime );
+						// if (nodeTime == null || nodeTime < minFunctionTime){
+						// 	node.nullTimeNode = true
+						// }
+						// node.time = nodeTime;
 						instrumentedNodes.push(node);
 					} else {
-						if (!node.id || (node.id && node.id.name != COND_TO_IF_FN))
+						// if (!node.id || (node.id && node.id.name != COND_TO_IF_FN))
 							markFunctionUnCacheable(node,"RTI");
 					}
 				}
@@ -1809,15 +1808,18 @@ var traceFilter = function (content, options) {
 					// closures = insertClosureProxy(node, index);
 				}
 				if ( (options.rti || options.myCg)){
-					if (uncacheableFunctions["RTI"].indexOf(node)>=0 || 
-						(node.id && node.id.name == COND_TO_IF_FN)) {
+					if (uncacheableFunctions["RTI"].indexOf(node)>=0) {
 						return
 					}
 				}
 
-				var isRoot = node.id && node.id.name == IIFE_NAME ? true : false;
-                if (!isRoot)
-                    return;
+				// var isRoot = node.id && node.id.name.indexOf(IIFE_NAME)>=0 ? true : false;
+    //             if (!isRoot)
+    //                 return;
+
+                if (node.id && node.id.name.indexOf("____")>=0){
+                    update(node.id, node.id.source().split('____')[1]);
+                }
 
 				var isCacheable = true,
 					enableRecord = node.nullTimeNode == null ? true : false;

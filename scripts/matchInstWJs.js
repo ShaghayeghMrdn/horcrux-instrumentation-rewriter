@@ -421,19 +421,19 @@ function i2j(){
     // console.log("Number of inst nodes: ", uniqueCg.length, " and number of jsProfiler nodes: ", proccProf.parsed.children.length);
 
     var matched = matchFunctionWithRTI(uniqueCg, proccProf);
-    // patchSigWithTime(cg, matched, fn2invoc);
+    patchSigWithTime(cg, matched, fn2invoc);
     // program.output && fs.writeFileSync(program.output, JSON.stringify(cg));
-    console.log("Number of matched nodes: " + matched.length + " total time inside matched "  + matched.map(e=>e.stime).reduce((acc,cur)=>{return acc+cur}) 
-        + " and total user defined time " + getUserDefinedTime(proccProf) + " actual scripting time " + cpuTimeWoProgram)
-    console.log(matched.map(e=>e.stime).reduce((acc,cur)=>{return acc+cur},0) , getUserDefinedTime(proccProf));
-    // console.log(getInvocationsFor80Time(matched, Object.keys(cg)))
+    // console.log("Number of matched nodes: " + matched.length + " total time inside matched "  + matched.map(e=>e.stime).reduce((acc,cur)=>{return acc+cur}) 
+    //     + " and total user defined time " + getUserDefinedTime(proccProf) + " actual scripting time " + cpuTimeWoProgram)
+    // console.log(matched.map(e=>e.stime).reduce((acc,cur)=>{return acc+cur},0) , getUserDefinedTime(proccProf));
+    // // console.log(getInvocationsFor80Time(matched, Object.keys(cg)))
 
-    var subTree2time = getSubtreeTime(matched, cg)
-    // // console.log(Object.entries(subTree2time).sort((b,a)=>{return a[1]-b[1]}).slice(0,10))
-    var finalNodes = getNodestoInst(matched,proccProf);
-    console.log("Final:" + unique2(finalNodes).length)
-    console.log("Final time: " ,finalNodes.reduce((acc, cur)=>{if (cur[1]>=0 )return acc+cur[1]; else return acc},0));
-    program.output && fs.writeFileSync(program.output, JSON.stringify(unique2(finalNodes) ));
+    // var subTree2time = getSubtreeTime(matched, cg)
+    // // // console.log(Object.entries(subTree2time).sort((b,a)=>{return a[1]-b[1]}).slice(0,10))
+    // var finalNodes = getNodestoInst(matched,proccProf);
+    // console.log("Final:" + unique2(finalNodes).length)
+    // console.log("Final time: " ,finalNodes.reduce((acc, cur)=>{if (cur[1]>=0 )return acc+cur[1]; else return acc},0));
+    // program.output && fs.writeFileSync(program.output, JSON.stringify(unique2(finalNodes) ));
 }
 
 /*Taken two instNodes files and creates a new one where the replay time

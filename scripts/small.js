@@ -435,40 +435,35 @@ else if (flag == "-map") {
     var prof = cpuProfileParser( 
         JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
         )
-    var rootSig = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+    var roots = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+    var times = JSON.parse(fs.readFileSync(process.argv[5], "utf-8")).value;
 
     var origTime = getUserDefinedTime(prof);
-    var rootTime = Object.values(rootSig).reduce((acc,cur)=>{if (cur.length == 2) return acc + cur[1] - cur[0]; else return acc;},0);
+    var rootTime = 0;
+    (roots).forEach((r)=>{
+        rootTime+= (times[r] && times[r].length == 2) ? times[r][1] - times[r][0] : 0;
+    });
 
     console.log(origTime, rootTime);
 
 
- } else if (flag == "-nc"){
-    var aggrReasonTime = {},
-        rCount = {}
-    var files = fs.readdirSync(process.argv[3]),
-        nFiles = files.length;
-    files.forEach((f)=>{
-        var filename = process.argv[3]+f;
-        var ncStats = JSON.parse(fs.readFileSync(filename, "utf-8"));
-        Object.keys(ncStats).forEach((r)=>{
-            if (!(r in aggrReasonTime)){
-                rCount[r] = 0
-                aggrReasonTime[r] = 0;
-            }
-            rCount[r]++;
-            aggrReasonTime[r] += ncStats[r];
-            // aggrReasons[r].push(ncStats[r]);
-        });
+ } else if (flag == "--compareTime2") {
+    var prof = cpuProfileParser( 
+        JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
+        )
+    var rootSig = JSON.parse(fs.readFileSync(process.argv[4], "utf-8"));
 
-        /*pretty print*/
+    var origTime = getUserDefinedTime(prof);
+    var rootTime = Object.values(rootSig).reduce((acc,cur)=>{if (cur.time) return acc + cur.time; else return acc;},0);
 
-    })
+    console.log(origTime, rootTime);
 
-    Object.keys(aggrReasonTime).forEach((r)=>{
-        aggrReasonTime[r] = aggrReasonTime[r]/(rCount[r]); 
-        console.log(aggrReasonTime[r] + "," + r)
-    })
+
+ } else if (flag == "--getRoots"){
+    var rootInvocs = JSON.parse(fs.readFileSync(process.argv[3])).value;
+    var rootFns = makeUnique(rootInvocs);
+    fs.writeFileSync(process.argv[4],JSON.stringify(rootFns));
+
  } else if (flag == "-replayOverhead") {
     var timeInfo = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
     var sigSizes = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
@@ -531,7 +526,6 @@ function genLibToKeys(sig){
  }
 
  function makeUnique(list){
-    return list;
     var u = [...new Set(list.map(e=>e.split("_count")[0]))];
     return u;
 }

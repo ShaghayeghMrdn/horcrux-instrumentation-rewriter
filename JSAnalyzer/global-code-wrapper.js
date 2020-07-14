@@ -68,24 +68,24 @@ var isGlobalInvocation = function(node){
     if (_ret){
         var fn = getFnFromExprs(node);
         if (fn.id)
-            update(fn.id, IIFE_NAME);
+            update(fn.id, IIFE_NAME,'__',fn.id.source());
         else addNameToFn(fn);
     }
 
-    return _ret;
+    return false;
 }
 
 var isGlobalCodeStart = function(node){ 
     return !util.isChildOfX(node, ...fnTypes) && node.type != "FunctionDeclaration"
-    && !isGlobalInvocation(node)
+    // && !isGlobalInvocation(node)
     && node.type != "EmptyStatement"
     && node.type != "Program";
 }
 
 var isGlobalCodeEnd = function(node){
     return node.type == "FunctionDeclaration"
-     || isGlobalInvocation(node) || 
-    node.type == "Program";
+     // || isGlobalInvocation(node) || 
+     || node.type == "Program";
 };
 
 var fnTypes = ["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"];
@@ -105,7 +105,11 @@ function wrap(content, fala){
                         if (read.source() == node.id.source())
                             update(read, "window.",read.source());
                     })
-                    update(node.id,"window.",node.id.source());
+                    if (!node.init){
+                        update(node,"window.",node.id.source(),' = null');
+                    }
+                    else 
+                        update(node.id,"window.",node.id.source());
 
                 }
             }

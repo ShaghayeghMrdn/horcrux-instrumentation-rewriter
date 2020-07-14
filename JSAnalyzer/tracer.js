@@ -283,9 +283,9 @@ function __declTracerObject__(window) {
         delete customLocalStorage;
         // delete invocationToClosureProxy;
 
-        sigProcessor.setPropagationData(PMD, {i2a:invocationToArgProxy, i2c:invocationToClosureProxy
-            ,i2t: invocationToThisProxy, gph:globalProxyHandler}, processedSignature, nonCacheableNodes);
-        sigProcessor.signaturePropagate()
+        // sigProcessor.setPropagationData(PMD, {i2a:invocationToArgProxy, i2c:invocationToClosureProxy
+        //     ,i2t: invocationToThisProxy, gph:globalProxyHandler}, processedSignature, nonCacheableNodes);
+        // sigProcessor.signaturePropagate()
 
         console.log("Done propagating signatures..\nPurging expensive signatures");
         // purgeExpensiveSignatures();
@@ -2012,7 +2012,7 @@ function __declTracerObject__(window) {
         else invocationsIndName[nodeId] = 0;
 
         var cacheIndex = nodeId + "_count" + invocationsIndName[nodeId];
-        invocationList.push(cacheIndex);
+        // invocationList.push(cacheIndex);
 
 
         // if (instrumentationPattern == "cg"){
@@ -2021,8 +2021,8 @@ function __declTracerObject__(window) {
         //     if (sd.length == 4)
         //         isRoot = true;
         // }
-        if (isRoot)
-            rootInvocs.push(cacheIndex);
+        // if (isRoot)
+        //     rootInvocs.push(cacheIndex);
 
         timingInfo[cacheIndex] = [];
         // timingInfo[cacheIndex].push(window.performance.now());
@@ -2066,6 +2066,8 @@ function __declTracerObject__(window) {
             callGraph[cacheIndex] = [];
             if (_shadowStackHead) {
                 callGraph[_shadowStackHead].push(cacheIndex)
+            } else {
+                rootInvocs.push(cacheIndex);
             }
 
             timingInfo[cacheIndex].push(window.performance.now());

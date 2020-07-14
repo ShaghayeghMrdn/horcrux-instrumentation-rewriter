@@ -30,7 +30,7 @@ var parse = function(f){
 }
 
 var pruneSig = function(sig){
-    if (!sig) return []];
+    if (!sig) return [];
     return sig
         .filter(e=>e[0].indexOf("global")>=0)
         .map(e=>JSON.stringify([e[0],e[1]]));
@@ -38,11 +38,11 @@ var pruneSig = function(sig){
 
 var getRootFns = function(rootInvocs){
     var rootFns = [];
-    var _rootFns = [...new Set(rootInvocs.map(e=>e.split("_count")[0]))];
-    _rootFns.forEach((r)=>{
-        if (rootInvocs.filter(e=>e.indexOf(r)>=0).length == 1)
-            rootFns.push(r);
-    });
+     _rootFns = [...new Set(rootInvocs.map(e=>e.split("_count")[0]))];
+    // _rootFns.forEach((r)=>{
+    //     if (rootInvocs.filter(e=>e.indexOf(r)>=0).length == 1)
+    //         rootFns.push(r);
+    // });
     return rootFns;
 }
 
@@ -96,12 +96,12 @@ var cumulateRootSigs = function(rootFns, sigData, timingInfo){
 function main(){
     var ti = parse(program.timing).value, 
         sig = parse(program.sig).value,
-        _roots = parse(program.roots).value;
+        roots = parse(program.roots);
 
-    if (!sig || !ti || !_roots) return;
+    if (!sig || !ti || !roots) return;
     if (!(Object.keys(sig).length)) return;
 
-    var roots = getRootFns(_roots);
+    // var roots = getRootFns(_roots);
     var accSigs = cumulateRootSigs(roots, sig, ti);
     program.output &&
         fs.writeFileSync(program.output, JSON.stringify(accSigs));
