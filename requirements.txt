@@ -1,0 +1,5 @@
+brotlipy==0.7.0
+Naked==0.1.31
+brotli==1.0.7
+beautifulsoup4==4.9.1
+protobuf==3.12.2
