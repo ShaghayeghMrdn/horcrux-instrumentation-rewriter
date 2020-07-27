@@ -447,16 +447,19 @@ else if (flag == "-map") {
     console.log(origTime, rootTime);
 
 
- } else if (flag == "--compareTime2") {
-    var prof = cpuProfileParser( 
+ } else if (flag == "--compareTime2"){
+    var times = JSON.parse(fs.readFileSync(process.argv[3],"utf-8"));
+    console.log(Object.values(times).reduce((acc,cur)=>{return acc + cur.time},0));
+ }
+ else if (flag == "--compareFns") {
+    var inst = ( 
         JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
         )
-    var rootSig = JSON.parse(fs.readFileSync(process.argv[4], "utf-8"));
+    var sig = makeUnique(Object.keys(JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value));
 
-    var origTime = getUserDefinedTime(prof);
-    var rootTime = Object.values(rootSig).reduce((acc,cur)=>{if (cur.time) return acc + cur.time; else return acc;},0);
 
-    console.log(origTime, rootTime);
+
+    console.log(inst.length, sig.length);
 
 
  } else if (flag == "--getRoots"){
@@ -464,17 +467,41 @@ else if (flag == "-map") {
     var rootFns = makeUnique(rootInvocs);
     fs.writeFileSync(process.argv[4],JSON.stringify(rootFns));
 
- } else if (flag == "-replayOverhead") {
-    var timeInfo = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value;
-    var sigSizes = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+ } else if (flag == "--cumulate") {
+    var sig0 = JSON.parse(fs.readFileSync(process.argv[3], "utf-8"));
+    var sig1 = JSON.parse(fs.readFileSync(process.argv[4], "utf-8"));
+    var sig2 = JSON.parse(fs.readFileSync(process.argv[5], "utf-8"));
+    // var sig3 = JSON.parse(fs.readFileSync(process.argv[6], "utf-8"));
+    // var sig4 = JSON.parse(fs.readFileSync(process.argv[7], "utf-8"));
 
-    var proc = {};
-    Object.keys(timeInfo).forEach((invoc)=>{
-        proc[invoc] = {}
-        proc[invoc].time = timeInfo[invoc][1] - timeInfo[invoc][0]
-        proc[invoc].sig = sigSizes[invoc];
-    })
-    fs.writeFileSync(process.argv[5], JSON.stringify(proc));
+
+    var _merge = function(sig1, sig2){
+        var _s = new Set(
+            [ ...new Set(sig1.map(e=>JSON.stringify(e))),
+            ...new Set(sig2.map(e=>JSON.stringify(e)))
+            ]);
+
+        return [..._s].map(e=>JSON.parse(e));
+
+    }
+
+    var finalSig = {
+    },
+        sigs = [sig0,sig1,sig2];
+
+    sigs.forEach((sig)=>{
+        Object.keys(sig).forEach((func)=>{
+            if (!(func in finalSig))
+                finalSig[func] = {
+                    time:sig[func].time, sig:[]
+                };
+            finalSig[func].sig = _merge(finalSig[func].sig,sig[func].sig);
+            // if (finalSig[func].sig.length != sig[func].sig.length)
+            //     console.log(`${func} has different sigs`);
+        });
+    });
+
+    fs.writeFileSync(process.argv[8], JSON.stringify(finalSig));
  }
 
 function genLibToKeys(sig){

@@ -49,7 +49,7 @@ var instrumentor;
 if (program.pattern == "record")
     instrumentor = fondue;
 else if (program.pattern == "cg")
-    instrumentor = fondue_plugin;
+    instrumentor = fondue;
 else instrumentor = fondue_replay;
 
 var staticInfo = instrumentor.staticInfo;
@@ -93,7 +93,7 @@ function instrumentHTML(src, fondueOptions) {
     if (program.pattern == "record")
         instrumentor = fondue;
     else if (program.pattern == "cg")
-        instrumentor = fondue_plugin;
+        instrumentor = fondue;
     else instrumentor = fondue_replay;
         console.log("Pattern for current instrumentation: " + fondueOptions.pattern);
 
@@ -331,7 +331,8 @@ var main = function(){
     var path = origPath.length>50?origPath.substring(origPath.length-50,origPath.length) : origPath;
     var fondueOptions = mergeInto({}, {useProxy: true, caching: false,  include_prefix: false, path: path, origPath: origPath, 
         e2eTesting: false, pageLoaded: config[program.pattern].pageLoaded, invocation_limit:config[program.pattern].invocation_limit,
-         pattern:program.pattern});
+         pattern:program.pattern, proxyName:config[program.pattern].proxyName
+     });
     console.log("Options are " + JSON.stringify(fondueOptions))
 
     if (program.jsProfile) {

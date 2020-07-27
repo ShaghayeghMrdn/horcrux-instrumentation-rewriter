@@ -113,12 +113,12 @@ clean
 		fi
 		#for cgtime mode is in not in the path
 		# path="$2"/"$url"
-		for iter in $(seq $5 $5); do 
+		for ti in $(seq 0 0); do 
 			# mkdir -p $2/$ti/$iter/
-			path="$2"/$ti//"$url"
-			mkdir -p $2/$ti/
+			path="$2"//"$url"
+			# mkdir -p $2/$ti/
 			mkdir -p $3/$ti/$url
-			replay $path $line ${3}/$ti//"$url"/ $4 $mode $url
+			replay $path $line ${3}///"$url"/ $4 $mode $url
 			# replay $path $line ${3}/replay/"$url"/ $4 replay;
 			# replay $path $line ${3}2/"$url" $4;
 			sleep 2

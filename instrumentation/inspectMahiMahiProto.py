@@ -112,9 +112,8 @@ def main(args):
 
                 if isJS(http_response_orig.response.header):
                     u = http_response_orig.request.first_line.split()[1]
-                    # listOfJS[url].append(u.split('/')[-1].split('?')[0])
-
-                    print u
+                    if "site_type" in _u:
+                        print http_response_orig.response.header
             except:
                 print "error while processing file"
         # print "processed", url
@@ -137,7 +136,8 @@ def main(args):
                 if isJS(http_response_orig.response.header):
                     # jsData[url][1] = jsData[url][1] + 1
                     _u = http_response_orig.request.first_line.split()[1]
-                    print _u
+                    if "site_type" in _u:
+                        print http_response_orig.response.header, _u
                     # u = _u.split('/')[-1].split('?')[0]
                     # val = []
                     # for i in otherJS.values():

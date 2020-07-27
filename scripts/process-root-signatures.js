@@ -70,23 +70,31 @@ var cumulateRootSigs = function(rootFns, sigData, timingInfo){
                 fn2count[fn] = count;
             if (count < fn2count[fn])
                 console.error('out of order invocs', invoc,fn2count[fn])
-            if (count > 0){
-                delete rootFnSig[fn];
-                return;
-                // throw new Error('multiple invocations for the same root node' + invoc);
-            }
+            // if (count > 0){
+            //     delete rootFnSig[fn];
+            //     return;
+            //     // throw new Error('multiple invocations for the same root node' + invoc);
+            // }
             var sig = sigData[invoc];
             var sigVars = pruneSig(sig);
-            rootFnSig[fn].sig = new Set(sigVars);
+            if (rootFnSig[fn].sig)
+                rootFnSig[fn].sig = new Set([...rootFnSig[fn].sig, ...new Set(sigVars)])
+            else rootFnSig[fn].sig = new Set(sigVars);
 
             var time = timingInfo[invoc];
-            if (time && time.length == 2)
-                rootFnSig[fn].time = time[1] - time[0];
+            if (time && time.length == 2){
+                if (rootFnSig[fn].time === null) rootFnSig[fn].time = 0;
+                rootFnSig[fn].time += time[1] - time[0];
+            }
         }
     });
 
     //convert sets to array for printing purposes
     Object.keys(rootFnSig).forEach((fn)=>{
+        if (!rootFnSig[fn].time) {
+            delete rootFnSig[fn];
+            return;
+        }
         rootFnSig[fn].sig = rootFnSig[fn].sig ? [...rootFnSig[fn].sig].map(e=>JSON.parse(e)) : [];
     });
 

@@ -106,7 +106,7 @@ function wrap(content, fala){
                             update(read, "window.",read.source());
                     })
                     if (!node.init){
-                        update(node,"window.",node.id.source(),' = null');
+                        update(node,"window.",node.id.source(),' = undefined');
                     }
                     else 
                         update(node.id,"window.",node.id.source());

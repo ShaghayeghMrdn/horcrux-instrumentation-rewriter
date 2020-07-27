@@ -843,8 +843,8 @@ var traceFilter = function (content, options) {
                 scope.addLocalVariable(node);
             } 
             else if (node.type == "TryStatement") {
-                if (node.handler && node.handler[0])
-                    scope.addLocalVariable(node.handlers[0].param);
+                if (node.handler)
+                    scope.addLocalVariable(node.handler.param);
             } else if (node.type == "IfStatement") {
                     var readArray = [];
                     var {readArray, local, argReads, antiLocal} = signature.handleReads(node.test);

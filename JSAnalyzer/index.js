@@ -95,8 +95,10 @@ function instrumentationPrefix(options) {
 	});
 	// the inline comments below are markers for building the browser version of fondue
 	var tracerSource = /*tracer.js{*/fs.readFileSync(__dirname + '/tracer.js', 'utf8')/*}tracer.js*/;
-	if (!options.proxyName)
-		options.proxyName = options.name +"PROXY";
+	// if (!options.proxyName){
+	// 	// options.proxyName = options.name +"PROXY";
+	// 	options.proxyName = ""
+	// }
 	var s = template(tracerSource, {
 		name: options.name,
 		version: JSON.stringify(require('./package.json').version),
@@ -174,7 +176,7 @@ function instrument(src, options) {
 		src = src.slice(shebang.length);
 	}
 	// console.log(options);
-	options.proxyName = options.tracer_name +"PROXY";
+	// options.proxyName = options.tracer_name +"PROXY";
 	if (options.include_prefix) {
 		prefix += instrumentationPrefix(options);
 		options.prefix = prefix;
@@ -874,8 +876,8 @@ var traceFilter = function (content, options) {
 				scope.addLocalVariable(node);
 			} 
 			else if (node.type == "TryStatement") {
-				if (node.handler && node.handler[0])
-					scope.addLocalVariable(node.handler[0].param);
+				if (node.handler)
+					scope.addLocalVariable(node.handler.param);
 			} else if (node.type == "IfStatement") {
 					var readArray = [];
 					var {readArray, local, argReads, antiLocal} = signature.handleReads(node.test);
@@ -1817,9 +1819,9 @@ var traceFilter = function (content, options) {
     //             if (!isRoot)
     //                 return;
 
-                if (node.id && node.id.name.indexOf("____")>=0){
-                    update(node.id, node.id.source().split('____')[1]);
-                }
+                // if (node.id && node.id.name.indexOf("____")>=0){
+                //     update(node.id, node.id.source().split('____')[1]);
+                // }
 
 				var isCacheable = true,
 					enableRecord = node.nullTimeNode == null ? true : false;

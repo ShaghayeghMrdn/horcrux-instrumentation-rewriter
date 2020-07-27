@@ -80,7 +80,8 @@ function instrument(src, options) {
         src = src.slice(shebang.length);
     }
     // console.log(options);
-    options.proxyName = options.tracer_name +"PROXY";
+    // options.proxyName = options.tracer_name +"PROXY";
+    options.proxyName = "window";
     if (options.include_prefix) {
         prefix += instrumentationPrefix(options);
         options.prefix = prefix;
@@ -333,9 +334,10 @@ var traceFilter = function (content, options) {
                 // if (!isRoot)
                 //     return;
 
-                if (node.id && node.id.name.indexOf("____")>=0){
-                    update(node.id, node.id.source().split('____')[1]);
-                }
+                // if (node.id && node.id.name.indexOf("____")>=0){
+                //     update(node.id, node.id.source().split('____')[1]);
+                // }
+
                 var nodeBody = node.body.source().substring(1, node.body.source().length-1);
                 staticInfo.rtiDebugInfo.matchedNodes.push([index,node.time]);
                 update(node.body, '{ \n try {',options.tracer_name,'.cacheInit(',JSON.stringify(index),',',JSON.stringify(isRoot),');\n',
