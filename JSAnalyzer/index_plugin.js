@@ -15,7 +15,7 @@ var anonCounter = 0;
 var node2index = new Map();
 var staticInfo = {};
 var uncacheableFunctions = util.uncacheableFunctions;
-staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matchedUrls: []};
+staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matchedUrls: [], ND:[]};
 staticInfo.uncacheableFunctions = uncacheableFunctions;
 
 var IIFE_NAME="__HORCRUX__";
@@ -196,6 +196,15 @@ var traceFilter = function (content, options) {
             }
         }
 
+        var isNonDeterministic = function(src) {
+            var checks = ["new Date", "Math.random()"];
+            if (checks.filter(e=>src.indexOf(e)>=0).length > 0){
+                console.log('function source is ', src);
+                return true;
+            }
+            // return ((src.indexOf("random") >= 0) || (src.indexOf("Date") >= 0));
+        }
+
         content = globalWrapper.wrap(content, fala);
 
         var instrumentedNodes = [];
@@ -331,12 +340,10 @@ var traceFilter = function (content, options) {
                     return;
 
                 var isRoot = node.id && node.id.name.indexOf(IIFE_NAME)>=0 ? true : false;
-                // if (!isRoot)
-                //     return;
-
-                // if (node.id && node.id.name.indexOf("____")>=0){
-                //     update(node.id, node.id.source().split('____')[1]);
-                // }
+                
+                if (isNonDeterministic(node.source())){
+                    staticInfo.rtiDebugInfo.ND.push(index);
+                }
 
                 var nodeBody = node.body.source().substring(1, node.body.source().length-1);
                 staticInfo.rtiDebugInfo.matchedNodes.push([index,node.time]);

@@ -1,14 +1,14 @@
 # $1 -> path to the list of pages
 # $2 -> path to the recorded pages
 # $3 -> path to the output directory
-# $4 -> port for chrome
-# $5 -> number of iterations
+# $4 -> Mode ( record or replay)
 
 # set -v
 
 mmwebreplay=/home/goelayu/research/hotOS/origMahimahi/mahimahi/buildDir/bin/mm-webreplay
 mmwebreplay=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-webreplay
-mmwebrecord=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-webrecord
+mmwebrecord_old=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-webrecord
+mmwebrecord=/home/goelayu/research/mahimahi/build/bin/mm-webrecord
 mmdelay=/home/goelayu/research/hotOS/Mahimahi/buildDir/bin/mm-delay
 
 # ipfilePrefix=/home/goelayu/research/WebPeformance/output/unmodified/trace_5_15_record_v76_ssl1.0_c69/
@@ -32,23 +32,25 @@ clean(){
 	rm loadErrors
 }
 
-# @params: <path to recorded page> <url> <output directory> <chrome port> <mode> <url>
+# @params: <path to mm dir> <url> <output directory> <url>
 replay(){
 	echo "$@"
 	echo "url is",$url
-	# ls $ipfilePrefix/$url/ip2time
 	mkdir -p $3
-	# copy the ip time file
-	# sudo cp /dev/null $ipfileDst
-	# sudo cp $ipfilePrefix/$url/ip2time $ipfileDst
 	echo "Launching chrome"
-	sleep 3
-    # $mmwebreplay $1 $mmdelay 3 node inspectChrome.js -u $2 -l -n --log -o $3 -p $4 --mode $5
-    $mmwebreplay $1 node inspectChrome.js -u $2 -o $3 -p $4 --mode $5 $DATAFLAGS
+	mmtool=$mmwebrecord
+	if [[ $5 == "replay" ]]; then
+		mmtool=$mmwebreplay
+		echo "REPLAY MODE"
+	else echo "RECORD MODE";
+	fi;
+	port=`shuf -i 9400-9800 -n 1`
+	echo "Running on port" $port
+    $mmtool $1 node inspectChrome.js -u $2 -o $3 -p $port --mode $mode $DATAFLAGS
     # node inspectChrome.js -u $2 -o $3 -p $4 $DATAFLAGS
 	replay_pid=$!
 	#waitForNode
-	waitForNode $4
+	waitForNode $port
 	echo "Done waiting"
 	sleep 1
 	# ps aux | grep replayshell | awk '{print $2}' | xargs kill -9
@@ -94,34 +96,17 @@ waitForChrome(){
 	done
 }
 
-help
-clean
+# help
+# clean
 
-# for ti in b2b; do
-	# while IFS='' read -r line || [[ -n "$line" ]]; do
-	while read line; do
-		echo "replaying url: " $line
-		url=`echo $line | cut -d'/' -f3-`
-		url=`echo $url | sed 's/\//_/g' | sed 's/\&/-/g'`
-		echo "mode is " $mode
-		if [[ $run == "original" ]]; then
-			path="$2"//"$url"
-		fi
-		if [[ $mode == "original" ]]; then 
-			path=../traces/mobile/alexa_1000/"$url"
-			# path=$2///"$url"
-		fi
-		#for cgtime mode is in not in the path
-		# path="$2"/"$url"
-		for ti in $(seq 0 0); do 
-			# mkdir -p $2/$ti/$iter/
-			path="$2"//"$url"
-			# mkdir -p $2/$ti/
-			mkdir -p $3/$ti/$url
-			replay $path $line ${3}///"$url"/ $4 $mode $url
-			# replay $path $line ${3}/replay/"$url"/ $4 replay;
-			# replay $path $line ${3}2/"$url" $4;
-			sleep 2
-		done
-	done<"$1"
-# done
+while read url; do
+	echo "replaying url: " $url
+	clean_url=`echo $url | cut -d'/' -f3-`
+	clean_url=`echo ${clean_url} | sed 's/\//_/g' | sed 's/\&/-/g'`
+	mmpath=$2//${clean_url}
+	out=$3/${clean_url}
+	echo "clean url is " ${clean_url}
+	mkdir -p $out
+	replay $mmpath $url $out $clean_url $4
+	sleep 2
+done<"$1"

@@ -131,8 +131,9 @@ var handleDOMMethods = function(node, standAlone) {
 }
 
 /* 
-Returns 0 for local and -1 for non variables (literals, integers etc)
-Returns 1 for global
+Returns -2 for local and the function object itself for closures 
+-3 for global, >=0 for argument depending on the argument position
+
 */
 var IsLocalVariable = function (node){
     var identNode;
@@ -174,16 +175,16 @@ var IsLocalVariable = function (node){
             if (parent.type == "FunctionExpression" && parent.id && parent.id.source() == identNode.name) {
                 if (foundInImmediateParent == 1)
                     return -2;
-                else return -1; 
+                else return parent; 
             }
             if (parent.localVariables.map(function(e){return e.source() || e.name}).includes(identNode.name) /*|| isGlobalAlias(identNode)*/) { /* Removed checking if the variable exists inside params or not as params also considered global*/
                 if (foundInImmediateParent == 1)
                     return -2;
-                else return -1;
+                else return parent;
             } else if (functionArguments.includes(identNode.name)) {
                 if (foundInImmediateParent == 1)
                     return functionArguments.indexOf(identNode.name);
-                else return -1;
+                else return parent;
             }
             // return 1;
         }

@@ -111,6 +111,9 @@ function __declTracerObject__(window) {
     var INVOCATION_LIMIT = {invocation_limit};
     var domCounter =0;
     var invocationToWrites = {};
+    var ND = [];
+    var curRoot = null;
+    var functionToScopes = {};
     // var omniStringifier = Omni ? new Omni() : "";
     // var parse = omniStringifier.parse;
     var rootInvocs = [];
@@ -223,6 +226,21 @@ function __declTracerObject__(window) {
         // sigProcessor.postProcess();
         // sigProcessor.signaturePropogate();
         processedSignature = sigProcessor.processedSig;
+
+        Object.keys(customLocalStorage).forEach((invocationId)=>{
+            var invocationSignature = {};
+            invocationSignature[invocationId] = processedSignature[invocationId];
+            if (!invocationSignature[invocationId]) return;
+            //For each invocation get all the scopes it touches
+            functionToScopes[invocationId].forEach((i_scope)=>{
+                var closureProxyHandler = invocationToClosureProxy[i_scope];
+                var proxyPrivates = closureProxyHandler.accessToPrivates();
+                var sigProcessor = new SignatureProcessor(invocationSignature, proxyPrivates.ObjectTree, callGraph, `closure_${i_scope}`);
+                sigProcessor.process();
+                // sigProcessor.postProcess();
+                processedSignature[invocationId] = sigProcessor.processedSig[invocationId];
+            })
+        })
 
         //Now individual iterate the invocations and convert object ids to strings
         // Object.keys(invocationToArgProxy).forEach((invocationId)=>{
@@ -488,6 +506,18 @@ function __declTracerObject__(window) {
 
     this.getPMD = function(){
         return PMD;
+    }
+
+    this.getND = function(){
+        return ND;
+    }
+
+    this.getCurRoot = function(){
+        return curRoot;
+    }
+
+    this.addND = function(f){
+        ND.push(f);
     }
 
     this.getRootInvocs = function(){
@@ -863,7 +893,8 @@ function __declTracerObject__(window) {
         PMD[stackHead][transferState].push([argInd,objId[0],state]) // transferState(arguments or this) -> [objId of parent Object, argInd in case the object was passed as a specific index, state (which parent state it belonged to)]
     }
 
-    var proxyEncapsulation =  function(rootObject, type) {
+    // closure_id is only applicable when the type is closure
+    var proxyEncapsulation =  function(rootObject, type, closure_id) {
 
         var ObjectTree = {};
         var objectIdCounter = 1;
@@ -881,6 +912,10 @@ function __declTracerObject__(window) {
         idToObject[0] = rootObject;
         ObjectTree[0] = {};
 
+        var closureScope;
+        if (type == "closure"){
+            closureScope = `closure_${closure_id}`;
+        }
 
         var appendObjectTree = function(rootId, key, childId){
             var _edge = ObjectTree[rootId];
@@ -927,6 +962,9 @@ function __declTracerObject__(window) {
         }
 
         var getObjectId = function(obj){
+            if (obj.__isClosureObj){
+                return [0, false];
+            }
             var rootId = ObjectToId.get(obj);
             if (rootId != null) return [rootId, false];
             rootId = objectIdCounter;
@@ -956,8 +994,8 @@ function __declTracerObject__(window) {
                     value = value.__target;
             }
 
-            if (logType.indexOf("argument")>=0 || logType.indexOf("this")>=0 || logType.indexOf("closure")>=0)
-                nodeId = parentFunctionId;
+            // if (logType.indexOf("argument")>=0 || logType.indexOf("this")>=0 || logType.indexOf("closure")>=0)
+            //     nodeId = parentFunctionId;
 
             //This check implies that the function where the proxy is being accessed
             // is different from where it was created
@@ -1060,15 +1098,19 @@ function __declTracerObject__(window) {
             if (!customLocalStorage[nodeId][logType])
                 customLocalStorage[nodeId][logType]=[];
             if (logType.indexOf("reads")>=0) {
+                if (logType.indexOf('closure')>=0)
+                    logType = `${closureScope}_reads`;
                 var log = [logType, rootId, key, childLogStr,childId ];
                 customLocalStorage[nodeId].readKeys.add(logType);
                 customLocalStorage[nodeId].push(log);
-                customLocalStorage[nodeId][logType].push(log);
+                // customLocalStorage[nodeId][logType].push(log);
             } else { 
+                if (logType.indexOf('closure')>=0)
+                    logType = `${closureScope}_writes`;
                 customLocalStorage[nodeId].writeKeys.add(logType);
                 var log = [logType, rootId, key, childLogStr ];
                 customLocalStorage[nodeId].push(log);
-                customLocalStorage[nodeId][logType].push(log);
+                // customLocalStorage[nodeId][logType].push(log);
                 // if (customLocalStorage[nodeId].filter(e=>e[0].indexOf("reads")>=0 && e[3] === rootId).length)
                 //     freezeReadState(nodeId);
             }
@@ -1110,7 +1152,8 @@ function __declTracerObject__(window) {
         }
 
         /*You can set the prototype of an object, there fore you need to track changes to prototype*/
-        var outOfScopeProperties = [/*"location", "body", */"Promise", "top", "parent", "__proto__", "self"];
+        var outOfScopeProperties = [/*"location", "body", */"Promise", "top", "parent", "__proto__", "self",
+        "getRegistration","digest", "query","getBattery"];
 
         var specialSetKets = ["prototype", "constructor","__proto__"];
 
@@ -1248,7 +1291,7 @@ function __declTracerObject__(window) {
                 value = value.__target;
             /*if rewriting closure object, rewrite the underlying object as well*/
             if (target.__isClosureObj){
-                var setter = "set"+key;
+                var setter = "set_"+key;
                 target[setter](value);
             }
             return Reflect.set(target, key, value);
@@ -1402,7 +1445,7 @@ function __declTracerObject__(window) {
         window.{proxyName} = window;
     }
 
-    this.getShadowStackHead = function(clear){
+    this.getShadowStackHead = function(){
         return _shadowStackHead;
     }
 
@@ -2024,7 +2067,6 @@ function __declTracerObject__(window) {
         // if (isRoot)
         //     rootInvocs.push(cacheIndex);
 
-        timingInfo[cacheIndex] = [];
         // timingInfo[cacheIndex].push(window.performance.now());
         if (instrumentationPattern == "record" || instrumentationPattern == "replay") {
 
@@ -2063,14 +2105,17 @@ function __declTracerObject__(window) {
             // customLocalStorage[cacheIndex].startTime = window.performance.now();
         } else {
             // if (!(cacheIndex in callGraph))
-            callGraph[cacheIndex] = [];
+            // callGraph[cacheIndex] = [];
             if (_shadowStackHead) {
-                callGraph[_shadowStackHead].push(cacheIndex)
+                // callGraph[_shadowStackHead].push(cacheIndex)
             } else {
+                timingInfo[cacheIndex] = [];
                 rootInvocs.push(cacheIndex);
+                curRoot = cacheIndex;
+                timingInfo[cacheIndex].push(window.performance.now());
             }
 
-            timingInfo[cacheIndex].push(window.performance.now());
+            
             shadowStack.push(cacheIndex);
             _shadowStackHead = cacheIndex;
         }
@@ -2364,18 +2409,16 @@ function __declTracerObject__(window) {
         // var cacheIndexExp = nodeId + "_count" + invocationsIndName[nodeId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
         if (!cacheIndex) return;
-        timingInfo[cacheIndex].push(window.performance.now());
+        
         if (instrumentationPattern == "replay")
             return;
-        // customLocalStorage[cacheIndex].endTime = window.performance.now();
-        // !pageLoaded && freezeReadState(cacheIndex);
-        // if (window.performance.getEntriesByName(cacheIndex).length)
         shadowStack.pop();
         if (shadowStack.length) 
             _shadowStackHead = shadowStack[shadowStack.length - 1];
-        else _shadowStackHead = null;
-        if (enableRecord) {
-            pageLoaded = oldPageLoaded.pop();
+        else {
+            if (instrumentationPattern == "cg")
+                timingInfo[cacheIndex].push(window.performance.now());
+            _shadowStackHead = null;
         }
         
     }
@@ -2493,16 +2536,25 @@ function __declTracerObject__(window) {
         return argProxy
     }
 
-    this.createClosureProxy = function(closureObj){
+    this.createClosureProxy = function(closureObj, scopeId){
         if (pageLoaded || _shadowStackHead in nonCacheableNodes) return closureObj;
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
         if (!nodeId ) return closureObj;
         if (!Object.keys(closureObj).length) return closureObj;
         if (closureObj.__isProxy) closureObj = closureObj.__target;
-        var proxyHandler = proxyEncapsulation(closureObj,"closure");
+        var proxyHandler;
+        if (!(nodeId in functionToScopes))
+            functionToScopes[nodeId] = [];
+        if (functionToScopes[nodeId].indexOf(scopeId)<0)
+            functionToScopes[nodeId].push(scopeId);
+        if (scopeId in invocationToClosureProxy)
+            proxyHandler = invocationToClosureProxy[scopeId];
+        else {
+            proxyHandler = proxyEncapsulation(closureObj,"closure", scopeId);
+            invocationToClosureProxy[scopeId] = proxyHandler;
+        }
         var closureProxy = new Proxy(closureObj, proxyHandler);
         // proxyHandler.accessToPrivates().proxyToMethod.set(closureProxy, closureObj);
-        invocationToClosureProxy[nodeId] = proxyHandler;
         return closureProxy;
     }
 

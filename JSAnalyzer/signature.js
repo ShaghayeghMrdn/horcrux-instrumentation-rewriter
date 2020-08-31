@@ -188,15 +188,15 @@ var handleReads = function(node, haveIds, all, isAA) {
     readArray.forEach(function(read){
         if (!read) return;
         var _isLocal = scope.IsLocalVariable(read)
-        if (_isLocal == -3  )
+        if (typeof _isLocal == "object")
+            antiLocal.push([read, _isLocal]);
+        else if (_isLocal == -3  )
             globalReads.push(read);
         else if (_isLocal >= 0) {
             if (!isParamOfFunction(read))
                 argReads.push({ind:_isLocal,val:read});
         } else if (_isLocal == -2)
             localReads.push(read);
-        else
-            antiLocal.push(read);
     });
     return {readArray: globalReads, local: localReads, argReads: argReads, antiLocal: antiLocal};
 }

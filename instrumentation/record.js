@@ -49,7 +49,7 @@ var instrumentor;
 if (program.pattern == "record")
     instrumentor = fondue;
 else if (program.pattern == "cg")
-    instrumentor = fondue;
+    instrumentor = fondue_plugin;
 else instrumentor = fondue_replay;
 
 var staticInfo = instrumentor.staticInfo;
@@ -176,7 +176,7 @@ function instrumentHTML(src, fondueOptions) {
         // options.scriptOffset = loc;
         var prefix = src.slice(0, loc.start).replace(/[^\n]/g, " "); // padding it out so line numbers make sense
         // console.log("Instrumenting " + JSON.stringify(loc));
-        src = src.slice(0, loc.start) + instrumentJavaScript(prefix + script, options, true) + src.slice(loc.end);
+        src = src.slice(0, loc.start)  + instrumentJavaScript(prefix + script, options, true) + src.slice(loc.end);
         // console.log("And the final src is :" + src)
     }
 
@@ -206,7 +206,7 @@ function instrumentHTML(src, fondueOptions) {
     }
     // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
     // src = doctype + src;
-    src = doctype + "\n<script>\n" +  fondue.instrumentationPrefix(options) + "\n</script>\n" + src;
+    src = doctype + "\n<script>\n" +  deterministicCode + /*omniStringify*/ fondue.instrumentationPrefix(options, program.pattern) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
