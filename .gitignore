@@ -11,6 +11,11 @@ pids
 *.seed
 *.pid.lock
 
+#txt files
+*.txt
+
+#Any file containing the "tmp" word
+*tmp*
 #misc
 misc
 
@@ -38,7 +43,7 @@ build/Release
 #specific directories
 reports
 plots
-tests
+
 page_list
 
 # Dependency directories
@@ -72,3 +77,20 @@ package.json
 
 #Ds store files
 .DS_Store
+
+
+#ignore every not script file inside scripts folder
+/scripts/*
+
+# Folder to not ignore
+#!/scripts/*.sh
+#!/scripts/*.js
+#!/scripts/*.py
+
+
+/tests/*
+
+# Folder to not ignore
+#!/tests/*.sh
+#!/tests/*.js
+#!/tests/*.py

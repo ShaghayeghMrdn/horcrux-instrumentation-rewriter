@@ -435,21 +435,30 @@ else if (flag == "-map") {
     var prof = cpuProfileParser( 
         JSON.parse(fs.readFileSync(process.argv[3], "utf-8"))
         )
-    var roots = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
-    var times = JSON.parse(fs.readFileSync(process.argv[5], "utf-8")).value;
+    // var roots = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
+    var times = JSON.parse(fs.readFileSync(process.argv[4], "utf-8")).value;
 
     var origTime = getUserDefinedTime(prof);
     var rootTime = 0;
-    (roots).forEach((r)=>{
+    Object.keys(times).forEach((r)=>{
         rootTime+= (times[r] && times[r].length == 2) ? times[r][1] - times[r][0] : 0;
     });
 
-    console.log(origTime, rootTime);
+    process.stdout.write(util.format(origTime,rootTime));
 
 
  } else if (flag == "--compareTime2"){
-    var times = JSON.parse(fs.readFileSync(process.argv[3],"utf-8"));
-    console.log(Object.values(times).reduce((acc,cur)=>{return acc + cur.time},0));
+    var origTimes = JSON.parse(fs.readFileSync(process.argv[3], "utf-8")).value,
+    sigTimes = JSON.parse(fs.readFileSync(process.argv[4], "utf-8"));
+
+    var torig = tsig = 0;
+    Object.keys(origTimes).forEach((r)=>{
+        torig+= (origTimes[r] && origTimes[r].length == 2) ? origTimes[r][1] - origTimes[r][0] : 0;
+    });
+    Object.keys(sigTimes).forEach((sig)=>{
+        tsig += sigTimes[sig].time;
+    });
+    console.log(torig, tsig);
  }
  else if (flag == "--compareFns") {
     var inst = ( 

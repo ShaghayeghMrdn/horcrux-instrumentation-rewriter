@@ -1114,8 +1114,8 @@ var traceFilter = function (content, options) {
 							console.log("[Static Analyzer] Unhandled: setTimeout in source code");
 							return;
 						}
-						var evalString = getCompleteExpression(node);
-						ceToFinalExpression.set(node, evalString);
+						// var evalString = getCompleteExpression(node);
+						// ceToFinalExpression.set(node, evalString);
 					}
 				}
 			} else if (node.type == "AssignmentExpression"){
@@ -1897,7 +1897,7 @@ var traceFilter = function (content, options) {
 					// update(node.body, '\n',proxyStr, node.body.source());
 				}
 
-				// rewriteClosure.insertClosureObj(node, nodeBody);
+				rewriteClosure.insertClosureProxy(node, node.body.source());
 
 				update(node.body, '{ \ntry {\n',options.tracer_name,'.cacheInit(', JSON.stringify(index),',arguments, new.target',',',JSON.stringify(enableRecord),');\n',
 					node.body.source());

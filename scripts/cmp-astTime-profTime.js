@@ -19,6 +19,20 @@ var readAndParseFile = function(f){
     return p;
 }
 
+var getUserDefinedTime = function(cpu){
+    var time = 0;
+    var topUDFns = []
+    cpu.parsed.children.sort((a,b)=>{return b.self - a.self}).forEach((child)=>{
+        if (child.profileNode.url.startsWith("http")){
+            // console.log(child.profileNode.callFrame, child.self);
+            time += child.self
+        } else {
+            // console.log(child.profileNode.callFrame)
+        }
+    })
+    return time;
+}
+
 var unique = function(arr){
     return [...new Set(arr.map(e=>e.split("_count")[0])) ] 
 }
@@ -37,21 +51,20 @@ var computeTotalASTTime = function(astTimeArray){
 
 
 var compareASTProfTime = function(ast, prof){
-    var astNodes = Object.keys(ast);
-    var fns = unique(astNodes);
-    var fn2time = computeTotalASTTime(ast);
-    var astFn2Prof = nodeMatcher.match(fns,prof);
+    // var astNodes = Object.keys(ast);
+    // var fns = unique(astNodes);
+    // var fn2time = computeTotalASTTime(ast);
+    var astFn2Prof = nodeMatcher.match(ast,prof);
 
     var astTime = profTime = 0;
     Object.keys(astFn2Prof).forEach((fn)=>{
-        astTime+=fn2time[fn];
-        profTime += astFn2Prof[fn].ttime;
+        astTime += astFn2Prof[fn].ttime;
     });
-    process.stdout.write(util.format(astTime, profTime));
+    process.stdout.write(util.format(astTime, getUserDefinedTime(prof)));
 }
 
 function main(){
-    var astTimeArray = readAndParseFile(program.ast).value;
+    var astTimeArray = readAndParseFile(program.ast);
     var cpuProf = cpuProfileParser(readAndParseFile(program.prof));
 
     compareASTProfTime(astTimeArray, cpuProf);

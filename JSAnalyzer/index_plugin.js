@@ -205,7 +205,8 @@ var traceFilter = function (content, options) {
             // return ((src.indexOf("random") >= 0) || (src.indexOf("Date") >= 0));
         }
 
-        content = globalWrapper.wrap(content, fala);
+        if (options.pattern == "timing")
+            content = globalWrapper.wrap(content, fala);
 
         var instrumentedNodes = [];
         m = fala({
@@ -219,6 +220,9 @@ var traceFilter = function (content, options) {
             ASTNodes.push(node);
             ASTSourceMap.set(node,node.source());
         });
+
+        if (options.pattern == "timing")
+            return m;
 
         if (options.rti) {
             var remainingRTINodes =[];

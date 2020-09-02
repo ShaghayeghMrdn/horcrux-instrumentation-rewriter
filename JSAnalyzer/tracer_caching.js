@@ -111,12 +111,8 @@ function __declTracerObject__(window) {
     var INVOCATION_LIMIT = {invocation_limit};
     var domCounter =0;
     var invocationToWrites = {};
-    var ND = [];
-    var curRoot = null;
-    var functionToScopes = {};
     var omniStringifier = Omni ? new Omni() : "";
-    // var parse = omniStringifier.parse;
-    var rootInvocs = [];
+    var parse = omniStringifier.parse;
     var sigSizeLimit = 500; // Number of reads and writes allowed per invocations
     var OMNI_SIZE_LIMIT=10000; //Length of string allowed to be read or written
     var instrumentationPattern = {instrumentationPattern};
@@ -226,21 +222,6 @@ function __declTracerObject__(window) {
         // sigProcessor.postProcess();
         // sigProcessor.signaturePropogate();
         processedSignature = sigProcessor.processedSig;
-
-        Object.keys(customLocalStorage).forEach((invocationId)=>{
-            var invocationSignature = {};
-            invocationSignature[invocationId] = processedSignature[invocationId];
-            if (!invocationSignature[invocationId]) return;
-            //For each invocation get all the scopes it touches
-            functionToScopes[invocationId] && functionToScopes[invocationId].forEach((i_scope)=>{
-                var closureProxyHandler = invocationToClosureProxy[i_scope];
-                var proxyPrivates = closureProxyHandler.accessToPrivates();
-                var sigProcessor = new SignatureProcessor(invocationSignature, proxyPrivates.ObjectTree, callGraph, `closure_${i_scope}`);
-                sigProcessor.process();
-                // sigProcessor.postProcess();
-                processedSignature[invocationId] = sigProcessor.processedSig[invocationId];
-            })
-        })
 
         //Now individual iterate the invocations and convert object ids to strings
         // Object.keys(invocationToArgProxy).forEach((invocationId)=>{
@@ -498,7 +479,7 @@ function __declTracerObject__(window) {
 
     this.processFinalSignature = processFinalSignature;
 
-    // this.omni = omniStringifier;
+    this.omni = omniStringifier;
 
     this.getKeysToStdKeys = function(){
         return keysToStdKeys;
@@ -506,22 +487,6 @@ function __declTracerObject__(window) {
 
     this.getPMD = function(){
         return PMD;
-    }
-
-    this.getND = function(){
-        return ND;
-    }
-
-    this.getCurRoot = function(){
-        return curRoot;
-    }
-
-    this.addND = function(f){
-        ND.push(f);
-    }
-
-    this.getRootInvocs = function(){
-        return rootInvocs;
     }
 
     this.getRuntimePurged = function(){
@@ -893,8 +858,7 @@ function __declTracerObject__(window) {
         PMD[stackHead][transferState].push([argInd,objId[0],state]) // transferState(arguments or this) -> [objId of parent Object, argInd in case the object was passed as a specific index, state (which parent state it belonged to)]
     }
 
-    // closure_id is only applicable when the type is closure
-    var proxyEncapsulation =  function(rootObject, type, closure_id) {
+    var proxyEncapsulation =  function(rootObject, type) {
 
         var ObjectTree = {};
         var objectIdCounter = 1;
@@ -912,10 +876,6 @@ function __declTracerObject__(window) {
         idToObject[0] = rootObject;
         ObjectTree[0] = {};
 
-        var closureScope;
-        if (type == "closure"){
-            closureScope = `closure_${closure_id}`;
-        }
 
         var appendObjectTree = function(rootId, key, childId){
             var _edge = ObjectTree[rootId];
@@ -962,9 +922,6 @@ function __declTracerObject__(window) {
         }
 
         var getObjectId = function(obj){
-            if (obj.__isClosureObj){
-                return [0, false];
-            }
             var rootId = ObjectToId.get(obj);
             if (rootId != null) return [rootId, false];
             rootId = objectIdCounter;
@@ -994,8 +951,8 @@ function __declTracerObject__(window) {
                     value = value.__target;
             }
 
-            // if (logType.indexOf("argument")>=0 || logType.indexOf("this")>=0 || logType.indexOf("closure")>=0)
-            //     nodeId = parentFunctionId;
+            if (logType.indexOf("argument")>=0 || logType.indexOf("this")>=0 || logType.indexOf("closure")>=0)
+                nodeId = parentFunctionId;
 
             //This check implies that the function where the proxy is being accessed
             // is different from where it was created
@@ -1036,12 +993,12 @@ function __declTracerObject__(window) {
                 var _childId = getObjectId(value);
                 childId = _childId[0];
             
-                // Only add to tree if the value is type object and it is a new object
+                // Only add to tree if the value is type object
                 _childId[1] && appendObjectTree(rootId, key, childId);
-                // if (currentObjectTree) {
-                //     var remoteChildId = currentObjectTree(value);
-                //     remotePrivates.appendObjectTree(remoteRootId, key, remoteChildId);
-                // }
+                if (currentObjectTree) {
+                    var remoteChildId = currentObjectTree(value);
+                    remotePrivates.appendObjectTree(remoteRootId, key, remoteChildId);
+                }
 
                 if ( (logType.indexOf("reads")>=0) && typeof value != "function") {
                     childLogStr = childId;
@@ -1077,9 +1034,9 @@ function __declTracerObject__(window) {
                 return 0;
             }
 
-            // if (customLocalStorage[nodeId].length > sigSizeLimit){
-            //     nonCacheableNodes[nodeId] = "signature size exceeds limit";
-            // }
+            if (customLocalStorage[nodeId].length > sigSizeLimit){
+                nonCacheableNodes[nodeId] = "signature size exceeds limit";
+            }
 
             if (childLogStr == null) {
 
@@ -1098,21 +1055,17 @@ function __declTracerObject__(window) {
             if (!customLocalStorage[nodeId][logType])
                 customLocalStorage[nodeId][logType]=[];
             if (logType.indexOf("reads")>=0) {
-                if (logType.indexOf('closure')>=0)
-                    logType = `${closureScope}_reads`;
                 var log = [logType, rootId, key, childLogStr,childId ];
                 customLocalStorage[nodeId].readKeys.add(logType);
                 customLocalStorage[nodeId].push(log);
-                // customLocalStorage[nodeId][logType].push(log);
+                customLocalStorage[nodeId][logType].push(log);
             } else { 
-                if (logType.indexOf('closure')>=0)
-                    logType = `${closureScope}_writes`;
                 customLocalStorage[nodeId].writeKeys.add(logType);
                 var log = [logType, rootId, key, childLogStr ];
                 customLocalStorage[nodeId].push(log);
-                // customLocalStorage[nodeId][logType].push(log);
-                // if (customLocalStorage[nodeId].filter(e=>e[0].indexOf("reads")>=0 && e[3] === rootId).length)
-                //     freezeReadState(nodeId);
+                customLocalStorage[nodeId][logType].push(log);
+                if (customLocalStorage[nodeId].filter(e=>e[0].indexOf("reads")>=0 && e[3] === rootId).length)
+                    freezeReadState(nodeId);
             }
             return 0;
         }
@@ -1152,8 +1105,7 @@ function __declTracerObject__(window) {
         }
 
         /*You can set the prototype of an object, there fore you need to track changes to prototype*/
-        var outOfScopeProperties = [/*"location", "body", */"Promise", "top", "parent", "__proto__", "self",
-        "getRegistration","digest", "query","getBattery"];
+        var outOfScopeProperties = [/*"location", "body", */"Promise", "top", "parent", "__proto__", "self","getBattery","getRegistration","digest","query"];
 
         var specialSetKets = ["prototype", "constructor","__proto__"];
 
@@ -1279,8 +1231,8 @@ function __declTracerObject__(window) {
           },
           set (target, key, value, receiver) {
             var cors={}, method;
-            if (!isWindow(value,cors))
-                loggerFunction(target, key, value,rootType + "_writes");
+            // if (!isWindow(value,cors))
+            //     loggerFunction(target, key, value,rootType + "_writes");
             window.proxyWriteCount++;
             if (specialSetKets.indexOf(key)>=0 && value && value.__isProxy){
                 value = value.__target;
@@ -1291,7 +1243,7 @@ function __declTracerObject__(window) {
                 value = value.__target;
             /*if rewriting closure object, rewrite the underlying object as well*/
             if (target.__isClosureObj){
-                var setter = "set_"+key;
+                var setter = "set"+key;
                 target[setter](value);
             }
             return Reflect.set(target, key, value);
@@ -1347,7 +1299,7 @@ function __declTracerObject__(window) {
 
                 /*If target is indexed inside arguments, that means arguments was set as the 
                 thisObj due to instrumentation*/
-                if (thisArg && (thisArg.__isClosureObj ))
+                if (thisArg && (thisArg.__isClosureObj || isArguments(thisArg, target) ))
                     thisArg = window
 
                 /*Try catch can't catch certain errors, handle separately
@@ -1445,7 +1397,7 @@ function __declTracerObject__(window) {
         window.{proxyName} = window;
     }
 
-    this.getShadowStackHead = function(){
+    this.getShadowStackHead = function(clear){
         return _shadowStackHead;
     }
 
@@ -1820,7 +1772,7 @@ function __declTracerObject__(window) {
         //     return returnValue;
         // }
         // return returnValue;
-        // var _retString = omniStringifier.stringify(returnValue,"read",2);
+        // var _retString = omniStringifier.stringify(returnValue,"write",1);
         // if (_retString && _retString instanceof Error) {
         //         nonCacheableNodes[cacheIndex] = _retString.message;
         // }
@@ -2049,24 +2001,23 @@ function __declTracerObject__(window) {
         return nodeId.split("_count")[1] > INVOCATION_LIMIT;
     }
 
-    this.cacheInit = function(nodeId, isRoot){
+    this.cacheInit = function(nodeId, params, isNew, enableRecord){
+        if (enableRecord){
+            oldPageLoaded.push(pageLoaded);
+            pageLoaded = false;
+        }
         if (invocationsIndName[nodeId] != null)
             invocationsIndName[nodeId]++;
         else invocationsIndName[nodeId] = 0;
 
         var cacheIndex = nodeId + "_count" + invocationsIndName[nodeId];
-        // invocationList.push(cacheIndex);
+        invocationList.push(cacheIndex);
+        if (instrumentationPattern == "replay")
+            return;
+        // _shadowStackHead = cacheIndex;
+        // shadowStack.push(cacheIndex);
 
-
-        // if (instrumentationPattern == "cg"){
-        //     var _e = new Error;
-        //     var sd = _e.stack.split('\n');
-        //     if (sd.length == 4)
-        //         isRoot = true;
-        // }
-        // if (isRoot)
-        //     rootInvocs.push(cacheIndex);
-
+        // timingInfo[cacheIndex] = [];
         // timingInfo[cacheIndex].push(window.performance.now());
         if (instrumentationPattern == "record" || instrumentationPattern == "replay") {
 
@@ -2079,7 +2030,7 @@ function __declTracerObject__(window) {
                 // if (customLocalStorage[_shadowStackHead])
                 customLocalStorage[_shadowStackHead].push(cacheIndex)
                 // Before entering child function, freeze the state of the parent function
-                // freezeReadState(_shadowStackHead);
+                freezeReadState(_shadowStackHead);
             } else {
                 parentNodes.push(cacheIndex);
             }
@@ -2097,25 +2048,22 @@ function __declTracerObject__(window) {
             //     return;
             // } 
             customLocalStorage[cacheIndex]["IBF"] = "";
-            customLocalStorage[cacheIndex].CFG = [];
             customLocalStorage[cacheIndex]["ec"] = window && window.document ? 
                 window.document.location.href : null;
             customLocalStorage[cacheIndex].readKeys = new Set();
             customLocalStorage[cacheIndex].writeKeys = new Set();
-            // customLocalStorage[cacheIndex].startTime = window.performance.now();
+
+            // if (customLocalStorage[cacheIndex])
+            //     console.error("Same function with same invocation id", cacheIndex);
+            // timingInfo[cacheIndex].push(window.performance.now());
         } else {
             // if (!(cacheIndex in callGraph))
-            // callGraph[cacheIndex] = [];
+            callGraph[cacheIndex] = [];
             if (_shadowStackHead) {
-                // callGraph[_shadowStackHead].push(cacheIndex)
-            } else {
-                timingInfo[cacheIndex] = [];
-                rootInvocs.push(cacheIndex);
-                curRoot = cacheIndex;
-                timingInfo[cacheIndex].push(window.performance.now());
+                callGraph[_shadowStackHead].push(cacheIndex)
             }
 
-            
+            // timingInfo[cacheIndex].push(window.performance.now());
             shadowStack.push(cacheIndex);
             _shadowStackHead = cacheIndex;
         }
@@ -2375,8 +2323,7 @@ function __declTracerObject__(window) {
             var rootObjects = getRootIds(signature.filter(e=>e[0].split("_")[0]==state));
             // customLocalStorage[nodeId] = signature.filter((e)=> { return e[0] != key || 
             //     (rootObjects.indexOf(e[4])<0 && currStateWrites.indexOf(e[4])<0)} );
-            //Disable filtering of signature entriesinde
-            // customLocalStorage[nodeId] = signature.filter((e)=>{return filterSignature(e, rootObjects, currStateWrites, key)});
+            customLocalStorage[nodeId] = signature.filter((e)=>{return filterSignature(e, rootObjects, currStateWrites, key)});
             (signature.returnValue != null) && (customLocalStorage[nodeId].returnValue = signature.returnValue)
             signature.IBF && (customLocalStorage[nodeId].IBF = signature.IBF)
             customLocalStorage[nodeId].ec = signature.ec
@@ -2409,24 +2356,18 @@ function __declTracerObject__(window) {
         // var cacheIndexExp = nodeId + "_count" + invocationsIndName[nodeId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
         if (!cacheIndex) return;
-        
         if (instrumentationPattern == "replay")
             return;
+        !pageLoaded && freezeReadState(cacheIndex);
+        // if (window.performance.getEntriesByName(cacheIndex).length)
         shadowStack.pop();
         if (shadowStack.length) 
             _shadowStackHead = shadowStack[shadowStack.length - 1];
-        else {
-            if (instrumentationPattern == "cg")
-                timingInfo[cacheIndex].push(window.performance.now());
-            _shadowStackHead = null;
+        else _shadowStackHead = null;
+        if (enableRecord) {
+            pageLoaded = oldPageLoaded.pop();
         }
         
-    }
-
-    this.logBranchTaken = function(nodeId, branchInfo){
-        var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
-        if (!cacheIndex) return;
-        customLocalStorage[cacheIndex].CFG.push(branchInfo);
     }
 
     this.updateClosureCache = function(cacheIndex, closureObj){
@@ -2481,40 +2422,40 @@ function __declTracerObject__(window) {
             // TODO callee has no string method, can't store metedata information
             // console.error("Callee has no toString method")
         }
-        var ibfStr = IBFStrCall, argsConverted = [],val;
+        var ibfStr = IBFStrDecl, argsConverted = [],val;
         // var cacheIndex = functionId + "_count" + invocationsIndName[functionId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
         if (!cacheIndex || nonCacheableNodes[cacheIndex] || pageLoaded) 
             return IBF;
 
-        // if ((IBFStrDecl != null && IBFStrDecl.indexOf("createElement")>=0 )){
-        //     nonCacheableNodes[cacheIndex] = "DOM element being created";
-        //     return IBF;
-        // }
+        if ((IBFStrDecl != null && IBFStrDecl.indexOf("createElement")>=0 )){
+            nonCacheableNodes[cacheIndex] = "DOM element being created";
+            return IBF;
+        }
         /*
         Commented the bottom part, because all the arguments are being statically handled
         However moving forward, we need to dynamically handle these, as static analysis 
         doesn't completely create everything we need. 
         */
         var stringificationErr = false;
-        // argVals.forEach((arg,i)=>{
-        //     var _argStr = omniStringifier.stringify(arg,"write",2);
-        //     if (_argStr && _argStr instanceof Error){
-        //         nonCacheableNodes[cacheIndex] = _argStr.message;
-        //         stringificationErr = true;
-        //     }
-        //     if (typeof _argStr == "object") {
-        //         val = _argStr[0];
-        //     } else val  = " omniStringifier.parse(\"" + escapeRegExp(_argStr) + "\");\n"; 
+        argVals.forEach((arg,i)=>{
+            var _argStr = omniStringifier.stringify(arg,"write",2);
+            if (_argStr && _argStr instanceof Error){
+                nonCacheableNodes[cacheIndex] = _argStr.message;
+                stringificationErr = true;
+            }
+            if (typeof _argStr == "object") {
+                val = _argStr[0];
+            } else val  = " omniStringifier.parse(\"" + escapeRegExp(_argStr) + "\");\n"; 
 
-        //     if (typeof arg == "string" && (arg.indexOf("arg[")>=0 || arg.indexOf("closure.")>=0))
-        //         ibfStr += argStrs[i] + " = " + arg + ";\n"
-        //     else ibfStr +=  argStrs[i]+ ' = ' + val + ";\n";
-        // })
-        // if (stringificationErr)
-        //     return IBF;
+            if (typeof arg == "string" && (arg.indexOf("arg[")>=0 || arg.indexOf("closure.")>=0))
+                ibfStr += argStrs[i] + " = " + arg + ";\n"
+            else ibfStr +=  argStrs[i]+ ' = ' + val + ";\n";
+        })
+        if (stringificationErr)
+            return IBF;
 
-        // ibfStr += IBFStrCall;
+        ibfStr += IBFStrCall;
         if (customLocalStorage[cacheIndex]["IBF"] == null)
             customLocalStorage[cacheIndex]["IBF"] = ""
         customLocalStorage[cacheIndex]["IBF"] += "\n" + ibfStr + "\n";
@@ -2536,25 +2477,16 @@ function __declTracerObject__(window) {
         return argProxy
     }
 
-    this.createClosureProxy = function(closureObj, scopeId){
+    this.createClosureProxy = function(closureObj){
         if (pageLoaded || _shadowStackHead in nonCacheableNodes) return closureObj;
         var nodeId = _shadowStackHead ? _shadowStackHead : null;
         if (!nodeId ) return closureObj;
         if (!Object.keys(closureObj).length) return closureObj;
         if (closureObj.__isProxy) closureObj = closureObj.__target;
-        var proxyHandler;
-        if (!(nodeId in functionToScopes))
-            functionToScopes[nodeId] = [];
-        if (functionToScopes[nodeId].indexOf(scopeId)<0)
-            functionToScopes[nodeId].push(scopeId);
-        if (scopeId in invocationToClosureProxy)
-            proxyHandler = invocationToClosureProxy[scopeId];
-        else {
-            proxyHandler = proxyEncapsulation(closureObj,"closure", scopeId);
-            invocationToClosureProxy[scopeId] = proxyHandler;
-        }
+        var proxyHandler = proxyEncapsulation(closureObj,"closure");
         var closureProxy = new Proxy(closureObj, proxyHandler);
         // proxyHandler.accessToPrivates().proxyToMethod.set(closureProxy, closureObj);
+        invocationToClosureProxy[nodeId] = proxyHandler;
         return closureProxy;
     }
 
@@ -2857,8 +2789,8 @@ function __declTracerObject__(window) {
                             else str = entry[2] + '';
                             var path = parentPath + pathDelim + str;
                             var val = entry[3];
-                            // if (state == "write")
-                            //     val = omniStringifier.stringify(val, state, 2);
+                            if (state == "write")
+                                val = omniStringifier.stringify(val, state, 2);
                             sig[1] = path;
                             sig[2] = val;
 
@@ -2947,27 +2879,17 @@ function __declTracerObject__(window) {
 
                     if (logType == "global"){
                         if (signature[nodeId].returnValue !== undefined) { 
-                            // var _ret = omniStringifier.stringify(signature[nodeId].returnValue,"write",2);
-                            var _ret = signature[nodeId].returnValue
-                            if (!(_ret instanceof Error)) {
-                                processedSig[nodeId].push(['returnValue',_ret]);
-                                // processedSig[nodeId].returnValue = _ret;
-                            }
+                            var _ret = omniStringifier.stringify(signature[nodeId].returnValue,"write",2);
+                            if (!(_ret instanceof Error))
+                                processedSig[nodeId].returnValue = _ret;
                             else delete processedSig[nodeId];
 
                         }
                         signature[nodeId] &&  signature[nodeId].IBF && processedSig[nodeId] && (
-                            processedSig[nodeId].push(['IBF',signature[nodeId].IBF]));
+                            processedSig[nodeId].push(['IBF', signature[nodeId].IBF]))
 
                         signature[nodeId] &&  signature[nodeId].ec && processedSig[nodeId] && (
                             processedSig[nodeId].push(['ec', signature[nodeId].ec]));
-
-                        signature[nodeId] &&  signature[nodeId].CFG && processedSig[nodeId] && (
-                            processedSig[nodeId].push(['CFG', signature[nodeId].CFG]));
-                        // signature[nodeId] &&  signature[nodeId].startTime && processedSig[nodeId] && (
-                        //     processedSig[nodeId].push(['startTime', signature[nodeId].startTime]));
-                        // signature[nodeId] &&  signature[nodeId].endTime && processedSig[nodeId] && (
-                        //     processedSig[nodeId].push(['endTime', signature[nodeId].endTime]));
                     }
 
                     // Object.keys(signature[nodeId]).forEach((key)=>{

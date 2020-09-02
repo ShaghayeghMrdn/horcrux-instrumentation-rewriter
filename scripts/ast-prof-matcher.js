@@ -93,6 +93,7 @@ var _matchFunctionWithRTI = function(astNode,cpu){
     if (foundMatch){
         return true;
     }
+    console.log(`no match for ${astNode.f}`);
     return false;
 }
 

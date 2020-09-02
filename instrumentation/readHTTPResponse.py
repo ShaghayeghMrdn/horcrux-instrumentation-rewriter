@@ -14,6 +14,7 @@ import time
 import unicodedata
 import multiprocessing as mp
 from functools import partial
+import random
 
 deflate_compress = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS)
 zlib_compress = zlib.compressobj(9, zlib.DEFLATED, zlib.MAX_WBITS)
@@ -166,9 +167,7 @@ def instrument(root, fileType, output_directory,args,file):
     if filename == "/":
         filename = url+filename
 
-    global node_debugging_port
-
-    node_debugging_port+=1
+    node_debugging_port = random.randint(9300,9600)
     # pid = os.fork()
 
     # if pid == 0:
@@ -300,8 +299,6 @@ def instrument(root, fileType, output_directory,args,file):
     subprocess.call("rm {} {} {}".format(TEMP_FILE, TEMP_FILE_zip, TEMP_FILE +".info"),stderr=open("/dev/null","r"), shell=True)
     # os._exit(0)
 
-node_debugging_port=9229
-
 static_analysis_overhead = 0
 
 def main(args):
@@ -393,7 +390,7 @@ if __name__ == "__main__":
     parser.add_argument('input', help='path to input directory')
     parser.add_argument('output', help='path to output directory')
     parser.add_argument('instOutput', help='type of instrumentation to perform',
-     default="record", choices=["cg","record", "replay"])
+     default="record", choices=["cg","record", "replay","timing"])
     parser.add_argument('logDir', help='path to log output directory')
     parser.add_argument('--jsProfile', help='path to the js profile')
     parser.add_argument('--cgInfo',help="path to the cg info")

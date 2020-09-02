@@ -18,6 +18,8 @@ var vm = require('vm');
 var libxmljs = require("libxmljs");
 var deterministic = require('deterministic');
 var UglifyJS = require('uglify-es')
+var pretty = require('pretty');
+var jsBeauty = require('js-beautify');
 
 spawnSync("ls ../JSAnalyzer",{shell:true});
 var OMNISTRINGIFYPATH = "../JSAnalyzer/omni.min.js";
@@ -48,7 +50,7 @@ HTML pages
 var instrumentor;
 if (program.pattern == "record")
     instrumentor = fondue;
-else if (program.pattern == "cg")
+else if (program.pattern == "cg" || program.pattern == "timing")
     instrumentor = fondue_plugin;
 else instrumentor = fondue_replay;
 
@@ -89,11 +91,14 @@ function instrumentHTML(src, fondueOptions) {
     if (!isHtml)
         return instrumentJavaScript(src, fondueOptions);
 
+    //pretty print HTML
+    // src = pretty(src);
+
     //set instrumentor for testing phase which doesn't call the main script
     if (program.pattern == "record")
         instrumentor = fondue;
-    else if (program.pattern == "cg")
-        instrumentor = fondue;
+    else if (program.pattern == "cg" || program.pattern == "timing")
+        instrumentor = fondue_plugin;
     else instrumentor = fondue_replay;
         console.log("Pattern for current instrumentation: " + fondueOptions.pattern);
 
@@ -175,6 +180,8 @@ function instrumentHTML(src, fondueOptions) {
         //Add the script offset to be sent to the instrumentation script
         // options.scriptOffset = loc;
         var prefix = src.slice(0, loc.start).replace(/[^\n]/g, " "); // padding it out so line numbers make sense
+        if (program.pattern == "timing")
+            prefix="";
         // console.log("Instrumenting " + JSON.stringify(loc));
         src = src.slice(0, loc.start)  + instrumentJavaScript(prefix + script, options, true) + src.slice(loc.end);
         // console.log("And the final src is :" + src)
@@ -205,8 +212,8 @@ function instrumentHTML(src, fondueOptions) {
         // console.log("updated instrumentation files");
     }
     // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
-    // src = doctype + src;
-    src = doctype + "\n<script>\n" +  deterministicCode + /*omniStringify*/ fondue.instrumentationPrefix(options, program.pattern) + "\n</script>\n" + src;
+    if (program.pattern != "timing")
+        src = doctype + "\n<script>\n" +  deterministicCode + omniStringify+ fondue.instrumentationPrefix(options, program.pattern) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
@@ -298,6 +305,9 @@ function instrumentJavaScript(src, fondueOptions, jsInHTML) {
             return src.replace(/^\s+|\s+$/g, '');
         else return src;
     }
+    // if (!jsInHTML){
+    //     src = jsBeauty(src);
+    // }
     // src = fondue_plugin.instrument(src, fondueOptions).toString();
     src = instrumentor.instrument(src, fondueOptions).toString();
     if (program.type == "js") {

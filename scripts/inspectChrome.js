@@ -190,13 +190,13 @@ function navigate(launcher){
 
                     chrome.close();
                     fatalKill();
-                }, 60000)
+                }, 90000)
             }
 
             if (program.sim){
-                var simConfig = JSON.parse(fs.readFileSync(program.sim, "utf-8"));
-                console.log("Loading sim data: " + JSON.stringify(simConfig))
-                Network.emulateNetworkConditions(simConfig);
+                // var simConfig = JSON.parse(fs.readFileSync(program.sim, "utf-8"));
+                console.log('Throttling CPU by 3x')
+                await Emulation.setCPUThrottlingRate({rate: 3.0});
             }
 
             if (!program.mobile) {
@@ -298,7 +298,7 @@ function navigate(launcher){
             console.log("Main load event fired");
             pageLoaded = true;
               // Pause the page is stop any further javascript computation
-            // Runtime.evaluate({expression:"debugger;"});
+            Runtime.evaluate({expression:"debugger;"});
             console.log("Page has been paused");
 
             var perfData = await Performance.getMetrics();
@@ -336,7 +336,7 @@ function navigate(launcher){
                    await extractCustomInformation(Runtime, program,1);
             } else 
                 dataReceived=true
-            await extractPageLoadTime(Runtime, "plt");
+            await extractPageLoadTime(Runtime, "/plt");
 
             if (program.coverage) {
                 var _coverageData = await Profiler.takePreciseCoverage();
@@ -520,7 +520,7 @@ async function extractCustomInformation(Runtime, program, path){
         await customCodes.getInvocationProperties(Runtime, program.output + "/setupStateTime", 'window.top.setupStateTime');
         // await customCodes.getDOM(Runtime, program.output +"/DOM");
    } else {
-        // await customCodes.getInvocationProperties(Runtime, program.output + "/leafNodes" + path, 'leafNodes',1);
+        // await customCodes.getInvocationProperties(Runtime, program.output + "/ND", '__tracer.getND()');
         await customCodes.getInvocationProperties(Runtime, program.output + "/timingInfo", '__tracer.getTimingInfo()');
         await customCodes.getInvocationProperties(Runtime, program.output + "/cg", '__tracer.getCallGraph()');
         await customCodes.getInvocationProperties(Runtime, program.output + "/roots", '__tracer.getRootInvocs()');
@@ -583,12 +583,12 @@ if (program.launch) {
         '--disable-web-security',
         '--disable-extensions ',
         // '--js-flags="--expose-gc"',
-        // '--auto-open-devtools-for-tabs',
+        '--auto-open-devtools-for-tabs',
         // '--enable-devtools-experiments',
         '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingAlways,CrossSiteDocumentBlockingIfIsolating',
         '--disable-site-isolation-trials',
         '--allow-running-insecure-content',
-		 // '--headless',
+	 // '--headless',
          // '--v8-cache-options=off',
          // '--js-flags="--compilation-cache false"',
          // '--user-data-dir=/tmp/chromeProfiles/' + program.url.split('//')[1]

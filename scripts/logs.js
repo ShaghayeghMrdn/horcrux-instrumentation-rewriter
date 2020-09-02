@@ -25,7 +25,7 @@ try {
 	// 	process.stderr.write("Empty logs: log2" + process.argv[3] + "\n");
 
 } catch (e) {
-	// console.error(e);
+	console.error(e);
 	if (flag != "-l") {
 		var unmodified = e.toString().indexOf("unmodified") >= 0 ? true : false; 
 		process.stderr.write(util.format("na", !unmodified, unmodified,"\n"));

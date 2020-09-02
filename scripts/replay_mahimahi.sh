@@ -40,7 +40,7 @@ replay(){
 	echo "Launching chrome"
 	mmtool=$mmwebrecord
 	if [[ $5 == "replay" ]]; then
-		mmtool=$mmwebreplay
+		mmtool=mm-webreplay
 		echo "REPLAY MODE"
 	else echo "RECORD MODE";
 	fi;
@@ -64,14 +64,14 @@ waitForNode(){
 	count=0
 	start_time=`date +'%s'`
 	while [[ $count != 1 ]]; do
-		count=`ps aux | grep $1 | wc | awk '{print $1}'` 
+		count=`ps aux | grep -w $1 | wc | awk '{print $1}'` 
 		echo "Current count is", $count
 		curr_time=`date +'%s'`
 		elapsed=`expr $curr_time - $start_time`
 		echo $elapsed
 		if [ $elapsed -gt $nodeTIMEOUT ]; then
 			echo "TIMED OUT..."
-			ps aux | grep $1 | awk '{print $2}' | xargs kill -9
+			ps aux | grep -w $1 | awk '{print $2}' | xargs kill -9
 		fi
 		sleep 2
 	done
