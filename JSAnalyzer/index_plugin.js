@@ -205,8 +205,7 @@ var traceFilter = function (content, options) {
             // return ((src.indexOf("random") >= 0) || (src.indexOf("Date") >= 0));
         }
 
-        if (options.pattern == "timing")
-            content = globalWrapper.wrap(content, fala);
+        content = globalWrapper.wrap(content, fala);
 
         var instrumentedNodes = [];
         m = fala({
@@ -220,9 +219,6 @@ var traceFilter = function (content, options) {
             ASTNodes.push(node);
             ASTSourceMap.set(node,node.source());
         });
-
-        if (options.pattern == "timing")
-            return m;
 
         if (options.rti) {
             var remainingRTINodes =[];
@@ -242,21 +238,21 @@ var traceFilter = function (content, options) {
                 }
             })
         } 
-        // else if (options.cg) {
-        //     var instrumentedNodes = [], remainingRTINodes =[];
-        //     ASTNodes.forEach((node)=>{
-        //         if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
-        //             var index = makeId('function', options.path, node);
-        //             if (options.myCg.indexOf(index)>=0){
-        //                 // staticInfo.rtiDebugInfo.matchedNodes.push(node);
-        //                 instrumentedNodes.push(node);
-        //             } else {
-        //                 markFunctionUnCacheable(node,"RTI");
-        //             }
-        //         }
+        else if (options.cg) {
+            var instrumentedNodes = [], remainingRTINodes =[];
+            ASTNodes.forEach((node)=>{
+                if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
+                    var index = makeId('function', options.path, node);
+                    if (options.myCg.indexOf(index)>=0){
+                        // staticInfo.rtiDebugInfo.matchedNodes.push(node);
+                        instrumentedNodes.push(node);
+                    } else {
+                        markFunctionUnCacheable(node,"RTI");
+                    }
+                }
 
-        //     });
-        // }  
+            });
+        }  
 
 
 

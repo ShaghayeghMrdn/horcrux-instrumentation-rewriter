@@ -144,7 +144,7 @@ var logWritesHelper = function(node, aliasValue) {
     return outputString;
 }
 
-/*If cacheable is true, only returns identifiers
+/*If notCacheable is false, only returns identifiers
 for cacheable functions, otherwise returns the identifier
 of the first parent function*/
 var getFunctionIdentifier = function(node, notCacheable) {
