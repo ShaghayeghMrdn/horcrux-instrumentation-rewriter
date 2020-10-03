@@ -56,18 +56,18 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 /*
-Keywords to manage code base better 
+Keywords to manage code base better
 
 TODO - code sections need to be reimplemented or handled better
 SUPPRESS - caught exceptions which our suppressed - need to be handled better
 LOG - log statements which are used to debug
 
-TODO 
+TODO
 
     - Fine tracking of arguments
         - Instead of stringifying the entire argument object, only track object level changes (read, write) to the individual object
     - Signature Propagation
-        - While trying to build the call graph, some nodes are not found: Is it because I am deleting nodes while stringifying? 
+        - While trying to build the call graph, some nodes are not found: Is it because I am deleting nodes while stringifying?
 */
 
 if (typeof window != "undefined"){
@@ -96,7 +96,7 @@ function __declTracerObject__(window) {
     var functionsSeen = [];
     var pageRecorded = false;
     var simpleReplay = true;
-    var cacheStats = {hits: [], misses: {error:[], empty:[], mismatch:[]}}; 
+    var cacheStats = {hits: [], misses: {error:[], empty:[], mismatch:[]}};
     var functionStats = {noarg:[], prim: [], prim_objects:[], function: []};
     var nonCacheableNodes = {};
     var invocationsIndName = {};
@@ -114,7 +114,7 @@ function __declTracerObject__(window) {
     var ND = [];
     var curRoot = null;
     var functionToScopes = {};
-    var omniStringifier = Omni ? new Omni() : "";
+    // var omniStringifier = Omni ? new Omni() : "";
     // var parse = omniStringifier.parse;
     var rootInvocs = [];
     var sigSizeLimit = 500; // Number of reads and writes allowed per invocations
@@ -137,7 +137,7 @@ function __declTracerObject__(window) {
     window.objStrCount = {
         argument_reads:0,
         argument_writes:0,
-        closure_reads:0, 
+        closure_reads:0,
         closure_writes:0,
         global_writes:0,
         global_reads:0,
@@ -153,7 +153,7 @@ function __declTracerObject__(window) {
     //temporary hack to store non stringifiable functions
     // var nodesByProperties = {
     //     "NOGSNOARG":[], "GS_f":[], "GS":[],
-    //     "Function":{}, "RTI":{RTI}, 
+    //     "Function":{}, "RTI":{RTI},
     //     "antiLocal":{antiLocal},"ND":{ND}, "DOM":{DOM}
     // };
 
@@ -205,11 +205,11 @@ function __declTracerObject__(window) {
             /*Delete performance shims since we need all the entries now
             However only do this when the top level page fires
             Some iframe with a sep*/
-            // delete window.performance.getEntries 
+            // delete window.performance.getEntries
             // delete window.performance.getEntriesByType
         } else {
             console.log("Page successfully replayed");
-        }  
+        }
         // if (window.top == window)
         //     debugger;
         // if (instrumentationPattern == "replay")
@@ -333,7 +333,7 @@ function __declTracerObject__(window) {
             invocs.forEach((i)=>{
                 var sig = processedSignature[i];
                 var sigSize = sig.reduce((acc, cur)=>{
-                        var len =0; 
+                        var len =0;
                         if (typeof cur[1] == "string")
                             len += cur[1].length
                         if (cur[2] && typeof cur[2] == "string")
@@ -430,7 +430,7 @@ function __declTracerObject__(window) {
                 _wl[k] = procSig[k];
             })
             workloads.push(_wl);
-        
+
             var worker  = new Worker("http://goelayu4929.eecs.umich.edu:99/hostSrc/signatureWorker.js");
             worker.addEventListener('message', function(e){
                 var _id = workerId++;
@@ -451,7 +451,7 @@ function __declTracerObject__(window) {
                     }
                     //Store the signature in local storage
                     localStorage.setItem("signature", JSON.stringify(cacheableSignature));
-                    //store the uniq keys map 
+                    //store the uniq keys map
                     localStorage.setItem("keyMap", JSON.stringify(keysToStdKeys));
                     //store a small key to check whether a signature is available or not
                     localStorage.setItem("fnCacheExists",1);
@@ -486,7 +486,7 @@ function __declTracerObject__(window) {
 
             //convert the original signature in the string format, to do a memory comparison
             strSignature[invocId] = strSig;
-            
+
         })
 
         createSigProcWorker(strSignature);
@@ -564,10 +564,10 @@ function __declTracerObject__(window) {
     window.proxyReadCount =0; window.proxyWriteCount = 0;
 
     /*
-    Declare your own inbuilt functions 
-    so that your instrumentation, doesn't end up calling the 
+    Declare your own inbuilt functions
+    so that your instrumentation, doesn't end up calling the
     actual user defined code in cases when the user defined code
-    has rewritten the in built functions 
+    has rewritten the in built functions
     */
 
     window.{name}Eval = window.eval;
@@ -577,10 +577,10 @@ function __declTracerObject__(window) {
 
     /*
     Rewrite inbuilt javascript APIs
-    to support the use of proxy objects. 
-    Since lots of objects are wrapped in proxy, 
-    these objects can end up inside function calls outside my instrumented code 
-    And therefore we need to rewrite these definitions 
+    to support the use of proxy objects.
+    Since lots of objects are wrapped in proxy,
+    these objects can end up inside function calls outside my instrumented code
+    And therefore we need to rewrite these definitions
 
     However, we don't need to rewrite these definitions during replay, when the page is
     replaying function signature from cache, since there are no proxy objects in memory
@@ -676,11 +676,11 @@ function __declTracerObject__(window) {
         The purpose of the shim is to check for proxy argument types*/
         function createShimForDOMMethods(self){
             var HTMLNames = [
-                "HTMLDocument", "HTMLLinkElement", "HTMLElement", "HTMLHtmlElement", 
-                "HTMLDivElement", "HTMLAnchorElement", "HTMLSelectElement", 
-                "HTMLOptionElement", "HTMLInputElement", "HTMLHeadElement", 
-                "HTMLSpanElement", "XULElement", "HTMLBodyElement", "HTMLTableElement", 
-                "HTMLTableCellElement", "HTMLTextAreaElement", "HTMLScriptElement", 
+                "HTMLDocument", "HTMLLinkElement", "HTMLElement", "HTMLHtmlElement",
+                "HTMLDivElement", "HTMLAnchorElement", "HTMLSelectElement",
+                "HTMLOptionElement", "HTMLInputElement", "HTMLHeadElement",
+                "HTMLSpanElement", "XULElement", "HTMLBodyElement", "HTMLTableElement",
+                "HTMLTableCellElement", "HTMLTextAreaElement", "HTMLScriptElement",
                 "HTMLAudioElement", "HTMLMediaElement", "HTMLParagraphElement", "DOMImplementation",
                 "HTMLButtonElement", "HTMLLIElement", "HTMLUListElement", "HTMLIFrameElement",
                 "HTMLFormElement", "HTMLHeadingElement", "HTMLImageElement", "IntersectionObserver",
@@ -693,7 +693,7 @@ function __declTracerObject__(window) {
 
             HTMLNames.forEach((_class)=>{
                 self[_class] && self[_class].prototype && Object.getOwnPropertyNames(self[_class].prototype).forEach((classKey)=>{
-                    try {    
+                    try {
                          if (typeof self[_class].prototype[classKey] == "function") {
                             var origMethod = self[_class].prototype[classKey];
                             if (classKey == "constructor") return;
@@ -708,7 +708,7 @@ function __declTracerObject__(window) {
                                     if (thisObj && thisObj.__isProxy)
                                         thisObj = thisObj.__target;
                                     var ret = origMethod.apply(thisObj,arguments);
-                                    // if ( (arguments[0].nodeName && arguments[0].nodeName.toLowerCase() == "iframe") || 
+                                    // if ( (arguments[0].nodeName && arguments[0].nodeName.toLowerCase() == "iframe") ||
                                     //         arguments[0].toLowerCase && arguments[0].toLowerCase() == "iframe" ){
                                     //     if (ret.contentWindow) {
                                     //         createShimForDOMMethods(ret.contentWindow);
@@ -720,7 +720,7 @@ function __declTracerObject__(window) {
                                     //     })
                                     // }
                                     return ret;
-                                }; 
+                                };
                                 self[_class].prototype[classKey].__isShimmed__ = true
                                 self[_class].prototype[classKey].__orig__ = origMethod;
                             } else {
@@ -799,10 +799,10 @@ function __declTracerObject__(window) {
 
 
         /*
-        This takes care of every inbuild api invocation where 
+        This takes care of every inbuild api invocation where
         the argument causes a different behavior due to the proxy wrapping
         for example: Object.prototype.toString.call(o);
-        here if o is wrapped in proxy, it will always return object type 
+        here if o is wrapped in proxy, it will always return object type
         */
 
         /*Not sure why we need these call exceptions*/
@@ -853,7 +853,7 @@ function __declTracerObject__(window) {
             return pageLoaded;
     }
 
-    // use hacks to detect if a method is a DOM object or not 
+    // use hacks to detect if a method is a DOM object or not
     // as sometimes even document objets are not instances of these parent objects
     // for reasons unknown
     // Despite window satisfying this criteria have this function return false for window
@@ -870,7 +870,7 @@ function __declTracerObject__(window) {
         var state = proxyObj.__isProxy || "global";
         var parentNodeId = proxyObj.__debug, proxyMap;
         switch (state) {
-            case "argument" : 
+            case "argument" :
                 proxyMap = invocationToArgProxy; break;
             case "global" :
                 proxyMap = globalProxyHandler; break;
@@ -980,11 +980,11 @@ function __declTracerObject__(window) {
             var retCode = 0;
 
             var nodeId = _shadowStackHead ? _shadowStackHead : null;
-            
-            var stringifier = omniStringifier,
-                 state = logType.split("_")[1] == "reads"  ? "read" : "write";
-            if ( (!nodeId && logType.indexOf("global")<0 ) || (nodeId && 
-                nonCacheableNodes[nodeId]) ) 
+
+            // var stringifier = omniStringifier;
+            var state = logType.split("_")[1] == "reads"  ? "read" : "write";
+            if ( (!nodeId && logType.indexOf("global")<0 ) || (nodeId &&
+                nonCacheableNodes[nodeId]) )
                 return 1;
 
             var rootId = getObjectId(target)[0];
@@ -1012,7 +1012,7 @@ function __declTracerObject__(window) {
             //             var remoteRootId = currentObjectTree(target);
             //             remoteLogType += "argument_" + logType.split('_')[1];
             //         }
-            //     } 
+            //     }
             //     if (!currentObjectTree && invocationToClosureProxy[_shadowStackHead]) {
             //         var remotePrivates = invocationToClosureProxy[_shadowStackHead].accessToPrivates();
             //         if (remotePrivates.hasObjectId(target)) {
@@ -1030,12 +1030,12 @@ function __declTracerObject__(window) {
             //         }
             //     }
             // }
-            
+
             var childId, childLogStr;
             if ((value instanceof Object) || (typeof value == "object" && value != null) || typeof value == "function") {
                 var _childId = getObjectId(value);
                 childId = _childId[0];
-            
+
                 // Only add to tree if the value is type object and it is a new object
                 _childId[1] && appendObjectTree(rootId, key, childId);
                 // if (currentObjectTree) {
@@ -1045,7 +1045,7 @@ function __declTracerObject__(window) {
 
                 if ( (logType.indexOf("reads")>=0) && typeof value != "function") {
                     childLogStr = childId;
-                } 
+                }
 
                 if (state == "write"){
                     if (_shadowStackHead && (!value || !value.__isProxy)){
@@ -1060,14 +1060,14 @@ function __declTracerObject__(window) {
                 return 0;
 
             //HACK
-            if (state == "write" && logType.indexOf("argument")>=0 && rootId === 0 
+            if (state == "write" && logType.indexOf("argument")>=0 && rootId === 0
                 && value === null)
                 return;
 
-               
-            // The only time when not having a nodeId is allowed, is when the logger function is closed for a 
+
+            // The only time when not having a nodeId is allowed, is when the logger function is closed for a
             // global read or write. However since the nodeId is not there, we won't be adding to any signature
-            //only appending the object in the tree. 
+            //only appending the object in the tree.
             //update: reads are important even when the value is undefined
             if (!nodeId ||  (_shadowStackHead != nodeId)) return 0;
 
@@ -1081,17 +1081,17 @@ function __declTracerObject__(window) {
             //     nonCacheableNodes[nodeId] = "signature size exceeds limit";
             // }
 
-            if (childLogStr == null) {
+            // if (childLogStr == null) {
 
-                childLogStr = stringifier.stringify(value,state,1);
-                if (childLogStr && childLogStr instanceof Error){
-                    nonCacheableNodes[nodeId] = childLogStr.message;
-                    // _shadowStackHead = null;
-                    return 1;
-            
-                 } //else if (!childLogStr && logType.indexOf("reads")>=0 && childLogStr != "")
-                    // childLogStr = "void 0";
-            }
+            //     childLogStr = stringifier.stringify(value,state,1);
+            //     if (childLogStr && childLogStr instanceof Error){
+            //         nonCacheableNodes[nodeId] = childLogStr.message;
+            //         // _shadowStackHead = null;
+            //         return 1;
+
+            //      } //else if (!childLogStr && logType.indexOf("reads")>=0 && childLogStr != "")
+            //         // childLogStr = "void 0";
+            // }
 
 
             // Doesn't make sense to log function reads, as I currently don't have a correct way of stringifying them
@@ -1104,7 +1104,7 @@ function __declTracerObject__(window) {
                 customLocalStorage[nodeId].readKeys.add(logType);
                 customLocalStorage[nodeId].push(log);
                 // customLocalStorage[nodeId][logType].push(log);
-            } else { 
+            } else {
                 if (logType.indexOf('closure')>=0)
                     logType = `${closureScope}_writes`;
                 customLocalStorage[nodeId].writeKeys.add(logType);
@@ -1116,7 +1116,7 @@ function __declTracerObject__(window) {
             }
             return 0;
         }
-            
+
 
         var _handleSymbolKey = function(target, key){
             if (!Reflect.get(target, key)){
@@ -1135,7 +1135,7 @@ function __declTracerObject__(window) {
             // if (_shadowStackHead)
             //     nonCacheableNodes[_shadowStackHead] = "non-configurable;" + key;
              return method;
-        } 
+        }
 
         var handleMetaProperties = function(target, key){
             switch(key){
@@ -1147,7 +1147,7 @@ function __declTracerObject__(window) {
                     break;
                 case 'bind':
                     return Reflect.get(target, key);
-                    break;            
+                    break;
             }
         }
 
@@ -1222,7 +1222,7 @@ function __declTracerObject__(window) {
             _ret = loggerFunction(target, key, method, rootType + "_reads");
 
             if (method && method.__isProxy) {
-                // if (rootType == "global" || method.__isProxy == "global") 
+                // if (rootType == "global" || method.__isProxy == "global")
                 //     return method;
 
                 // method = method.__target;
@@ -1238,7 +1238,7 @@ function __declTracerObject__(window) {
                 //     var actualMethod = method.__target;
                 //     var childId = getObjectId(actualMethod);
                 //     appendObjectTree(0, key, childId, ObjectTree);
-                
+
                 // return method;
             }
             /* If method type if function, don't wrap in proxy for now */
@@ -1261,7 +1261,7 @@ function __declTracerObject__(window) {
               //   return new Proxy(_method,);
               // }
               /*
-              The following check is kind of inconsequental, cause even if you have a proxy around the method call or apply, the apply handler 
+              The following check is kind of inconsequental, cause even if you have a proxy around the method call or apply, the apply handler
               will be anyway called
               */
               if (key == "apply" || key == "call") return method;
@@ -1302,8 +1302,8 @@ function __declTracerObject__(window) {
            - if p if a function itself, p(arg) : target -> p, thisArg -> window, args = args
            - if you do p.call or p.apply, first you go inside the get handler, read the value, and then go inside the apply handler
 
-           We need function calls to be wrapped in proxy so that the thisArg can be properly handled. 
-           if target.name exists, then simply call the target using thisArg[target](...args) // Doesn't work because target.name might not a property of thisArg, 
+           We need function calls to be wrapped in proxy so that the thisArg can be properly handled.
+           if target.name exists, then simply call the target using thisArg[target](...args) // Doesn't work because target.name might not a property of thisArg,
            otherwise follow the already implemented routine
           */
 
@@ -1311,7 +1311,7 @@ function __declTracerObject__(window) {
                 /*
                     If no thisArg, call it in the context of window ( this happens by default )
                     If the thisArg is a proxy object however it has no corresponding target method, call apply on the proxy object itself.
-                    If the thisArg is not a proxy object, call the method on the thisArg itself. 
+                    If the thisArg is not a proxy object, call the method on the thisArg itself.
                 */
 
                 // if (thisArg && (thisArg.__isClosureObj || isArguments(thisArg) ))
@@ -1329,7 +1329,7 @@ function __declTracerObject__(window) {
                 // if (target && target.name && thisArg[target.name])
                 //     return thisArg[target.name](...args);
 
-                if (thisArg && thisArg.__proto__ && ((thisArg.__proto__.constructor && 
+                if (thisArg && thisArg.__proto__ && ((thisArg.__proto__.constructor &&
                     applyTargetSpcl.indexOf(thisArg.__proto__.constructor.name)>=0) ||
                      thisArg.__target && thisArg.self == thisArg.__target) ){
                     // if (args.length){
@@ -1345,7 +1345,7 @@ function __declTracerObject__(window) {
                 if (Reflect.apply.__isProxy)
                     Reflect.apply = Reflect.apply.__target;
 
-                /*If target is indexed inside arguments, that means arguments was set as the 
+                /*If target is indexed inside arguments, that means arguments was set as the
                 thisObj due to instrumentation*/
                 if (thisArg && (thisArg.__isClosureObj ))
                     thisArg = window
@@ -1362,7 +1362,7 @@ function __declTracerObject__(window) {
                 if (thisArg && thisArg.__isProxy && thisArg.digest)
                     thisArg = thisArg.__target;
 
-                if ( (target.name == "valueOf"  || target.name == "toString"  || 
+                if ( (target.name == "valueOf"  || target.name == "toString"  ||
                     target == Function.prototype.toString) && thisArg && thisArg.__target)
                     thisArg = thisArg.__target;
 
@@ -1484,7 +1484,7 @@ function __declTracerObject__(window) {
     this.getSigSizes = function(){
         return sigSizes;
     }
-    
+
     this.setMutationContext = function(command, nodeId) {
         currentMutationContext = nodeId;
     }
@@ -1537,7 +1537,7 @@ function __declTracerObject__(window) {
             var lCallees = calleeMap[nodeId];
             if (lCallees) {
                 lCallees.forEach(function(callee){
-                    
+
                 });
             }
         }
@@ -1560,7 +1560,7 @@ function __declTracerObject__(window) {
         // return type;
         if (!pageLoaded && _shadowStackHead && obj && (state = obj.__isProxy)){
             switch (state) {
-                case "argument" : 
+                case "argument" :
                     proxyMap = invocationToArgProxy; break;
                 case "global" :
                     proxyMap = globalProxyHandler; break;
@@ -1589,7 +1589,7 @@ function __declTracerObject__(window) {
         var state, proxymap, type, readInd,cmpDelim = ";&;";
         if (_shadowStackHead && obj && (state = obj.__isProxy)){
             switch (state) {
-                case "argument" : 
+                case "argument" :
                     proxyMap = invocationToArgProxy; break;
                 case "global" :
                     proxyMap = globalProxyHandler; break;
@@ -1628,7 +1628,7 @@ function __declTracerObject__(window) {
             pathDelim = ";;;;";
         var state = path.split(pathDelim)[0],proxyMap;
             switch (state) {
-                case "argument" : 
+                case "argument" :
                     param = params[0];break;
                 case "global" :
                      param = window; break;
@@ -1651,7 +1651,7 @@ function __declTracerObject__(window) {
         var state, proxyMap;
         if (state = obj.__isProxy){
             switch (state) {
-                case "argument" : 
+                case "argument" :
                     proxyMap = invocationToArgProxy; break;
                 case "global" :
                     proxyMap = globalProxyHandler; break;
@@ -1672,7 +1672,7 @@ function __declTracerObject__(window) {
     this.getPathFromProxyId = function(id,state,nodeId){
         var proxyMap;
         switch (state) {
-            case "argument" : 
+            case "argument" :
                 proxyMap = invocationToArgProxy; break;
             case "global" :
                 proxyMap = globalProxyHandler; break;
@@ -1719,7 +1719,7 @@ function __declTracerObject__(window) {
             else return obj;
         } catch (e){
             return obj;
-        } 
+        }
     }
 
     this.logWrite = function(functionIdentifier, rhs, variableName, listOfProperties ){
@@ -1891,14 +1891,14 @@ function __declTracerObject__(window) {
         path2function.forEach((path)=>{
             fnRoot = getChildAccessor(log, newParams, path);
             var scopeObj = fnRoot.__getScope__();
-            //update the closure scope 
+            //update the closure scope
             //if path2function has more than 2 entries, then the second one
-            // has to be a closure, so update the closure params 
+            // has to be a closure, so update the closure params
             newParams[1] = scopeObj
         })
         var accessor = cmp ? "__get__" : "__set__";
         return fnRoot[accessor](prop,value)
-    }  
+    }
 
     var replay_childIBF = function(log, params){
         var fnRoot = getChildAccessor(log, params);
@@ -1955,13 +1955,13 @@ function __declTracerObject__(window) {
             var len = path.split(pathDelim).length;
             if ( target && (ind == len-1 || prop == "typeof")) {
                 if (cmp){
-                    if (specialMatchingPaths.indexOf(prop)>=0) 
+                    if (specialMatchingPaths.indexOf(prop)>=0)
                         result = true;
                     else if (prop == "typeof")
                         result = typeof target == value;
                     else if (prop == "self")
                         result = target[prop] == target;
-                    else if (prop.indexOf(cmpDelim)>=0) { 
+                    else if (prop.indexOf(cmpDelim)>=0) {
                         if ((opIndex = comparisonOperators.indexOf(prop.split(cmpDelim)[0]))>=0) {
                             var cmpOut = prop.split(cmpDelim)[1] === 'true';
                             switch (comparisonOperators[opIndex]){
@@ -1974,7 +1974,7 @@ function __declTracerObject__(window) {
                             }
                         }
                     }
-                    else { 
+                    else {
                         if (typeof value == "string"){
                             var [Ovalue, Otype, Olen] = value.split(';;&;;');
                             if (Otype){
@@ -2040,7 +2040,7 @@ function __declTracerObject__(window) {
 
     var getArgTypes = function(args, delim){
         var argTypes = "";
-        for (var a of args) 
+        for (var a of args)
             argTypes += typeof a + delim;
         return argTypes;
     }
@@ -2095,10 +2095,10 @@ function __declTracerObject__(window) {
             //     // window.performance.mark(cacheIndex);
             //     // timingInfo[cacheIndex].push(window.performance.now());
             //     return;
-            // } 
+            // }
             customLocalStorage[cacheIndex]["IBF"] = "";
             customLocalStorage[cacheIndex].CFG = [];
-            customLocalStorage[cacheIndex]["ec"] = window && window.document ? 
+            customLocalStorage[cacheIndex]["ec"] = window && window.document ?
                 window.document.location.href : null;
             customLocalStorage[cacheIndex].readKeys = new Set();
             customLocalStorage[cacheIndex].writeKeys = new Set();
@@ -2115,7 +2115,7 @@ function __declTracerObject__(window) {
                 timingInfo[cacheIndex].push(window.performance.now());
             }
 
-            
+
             shadowStack.push(cacheIndex);
             _shadowStackHead = cacheIndex;
         }
@@ -2153,7 +2153,7 @@ function __declTracerObject__(window) {
             var state = entry[0].split(delim)[0],proxyMap;
             fn = replay_arg;
             switch (state) {
-                case "argument" : 
+                case "argument" :
                     param = params[0];break;
                 case "global" :
                      param = window; break;
@@ -2187,7 +2187,7 @@ function __declTracerObject__(window) {
     }
 
     /*
-    Returns an array 
+    Returns an array
     [cacheHit, return value]
     params : argument, closure, this
     */
@@ -2234,7 +2234,7 @@ function __declTracerObject__(window) {
                 if (readStateMatch[0]) {
                     // cacheStats.hits.push(cacheIndex);
                     // timingInfo[cacheIndex].push(window.performance.now());
-                    var _wP = writeStateProcessed.get(sig); 
+                    var _wP = writeStateProcessed.get(sig);
                     if (_wP === undefined){
                         try {
                             preProcessWrites(writeSig, _ret, params);
@@ -2266,7 +2266,7 @@ function __declTracerObject__(window) {
                     cacheStats.hits.push(cacheIndex);
                     // timingInfo[cacheIndex].push(window.performance.now());
                     // sigSizes[cacheIndex]=sig.reduce((acc, cur)=>{
-                    //     var len =0; 
+                    //     var len =0;
                     //     if (typeof cur[1] == "string")
                     //         len += cur[1].length
                     //     if (cur[2] && typeof cur[2] == "string")
@@ -2278,7 +2278,7 @@ function __declTracerObject__(window) {
                     // timingInfo[cacheIndex].push(window.performance.now());
                     // var _ind = readStateMatch[1];
                     // sigSizes[cacheIndex]=sig.slice(0,_ind).reduce((acc, cur)=>{
-                    //     var len =0; 
+                    //     var len =0;
                     //     if (typeof cur[1] == "string")
                     //         len += cur[1].length
                     //     if (cur[2] && typeof cur[2] == "string")
@@ -2291,7 +2291,7 @@ function __declTracerObject__(window) {
                     cacheStats.hits.push(cacheIndex);
                     // timingInfo[cacheIndex].push(window.performance.now());
                     // sigSizes[cacheIndex]=sig.reduce((acc, cur)=>{
-                    //     var len =0; 
+                    //     var len =0;
                     //     if (typeof cur[1] == "string")
                     //         len += cur[1].length
                     //     if (cur[2] && typeof cur[2] == "string")
@@ -2300,7 +2300,7 @@ function __declTracerObject__(window) {
                     throw e;
                 }
                 cacheStats.misses.error.push([cacheIndex,e.message]);
-                
+
                 // if (e.message && e.message.indexOf("OMNI")<0) throw e;
                 // cacheStats.hits.pop();
                 // timingInfo[cacheIndex].push(window.performance.now());
@@ -2314,11 +2314,11 @@ function __declTracerObject__(window) {
 
     var getRootIds = function(readArr){
         var ids = [];
-        /*If the 4th index is string, it means the read has been processed already 
+        /*If the 4th index is string, it means the read has been processed already
         however if the logType is write, then add it regardless*/
         readArr.forEach((read)=>{
-            if (typeof read[3] != "string" || 
-                read[3].indexOf("__func__source")>=0 || 
+            if (typeof read[3] != "string" ||
+                read[3].indexOf("__func__source")>=0 ||
                 read[0].indexOf("_write")>=0)
                 ids.push(read[1]);
         })
@@ -2363,7 +2363,7 @@ function __declTracerObject__(window) {
             var state = key.split("_reads")[0],proxyMap;
             var currStateWrites = invocationToWrites[nodeId] ? invocationToWrites[nodeId].filter(e=>e[0]==state).map(e=>e[1]) : [];
             switch (state) {
-                case "argument" : 
+                case "argument" :
                     proxyMap = invocationToArgProxy; break;
                 case "global" :
                     proxyMap = globalProxyHandler; break;
@@ -2373,7 +2373,7 @@ function __declTracerObject__(window) {
                     proxyMap = invocationToClosureProxy; break;
             }
             var rootObjects = getRootIds(signature.filter(e=>e[0].split("_")[0]==state));
-            // customLocalStorage[nodeId] = signature.filter((e)=> { return e[0] != key || 
+            // customLocalStorage[nodeId] = signature.filter((e)=> { return e[0] != key ||
             //     (rootObjects.indexOf(e[4])<0 && currStateWrites.indexOf(e[4])<0)} );
             //Disable filtering of signature entriesinde
             // customLocalStorage[nodeId] = signature.filter((e)=>{return filterSignature(e, rootObjects, currStateWrites, key)});
@@ -2409,18 +2409,18 @@ function __declTracerObject__(window) {
         // var cacheIndexExp = nodeId + "_count" + invocationsIndName[nodeId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
         if (!cacheIndex) return;
-        
+
         if (instrumentationPattern == "replay")
             return;
         shadowStack.pop();
-        if (shadowStack.length) 
+        if (shadowStack.length)
             _shadowStackHead = shadowStack[shadowStack.length - 1];
         else {
             if (instrumentationPattern == "cg")
                 timingInfo[cacheIndex].push(window.performance.now());
             _shadowStackHead = null;
         }
-        
+
     }
 
     this.logBranchTaken = function(nodeId, branchInfo){
@@ -2484,7 +2484,7 @@ function __declTracerObject__(window) {
         var ibfStr = IBFStrCall, argsConverted = [],val;
         // var cacheIndex = functionId + "_count" + invocationsIndName[functionId];
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
-        if (!cacheIndex || nonCacheableNodes[cacheIndex] || pageLoaded) 
+        if (!cacheIndex || nonCacheableNodes[cacheIndex] || pageLoaded)
             return IBF;
 
         // if ((IBFStrDecl != null && IBFStrDecl.indexOf("createElement")>=0 )){
@@ -2493,8 +2493,8 @@ function __declTracerObject__(window) {
         // }
         /*
         Commented the bottom part, because all the arguments are being statically handled
-        However moving forward, we need to dynamically handle these, as static analysis 
-        doesn't completely create everything we need. 
+        However moving forward, we need to dynamically handle these, as static analysis
+        doesn't completely create everything we need.
         */
         var stringificationErr = false;
         // argVals.forEach((arg,i)=>{
@@ -2505,7 +2505,7 @@ function __declTracerObject__(window) {
         //     }
         //     if (typeof _argStr == "object") {
         //         val = _argStr[0];
-        //     } else val  = " omniStringifier.parse(\"" + escapeRegExp(_argStr) + "\");\n"; 
+        //     } else val  = " omniStringifier.parse(\"" + escapeRegExp(_argStr) + "\");\n";
 
         //     if (typeof arg == "string" && (arg.indexOf("arg[")>=0 || arg.indexOf("closure.")>=0))
         //         ibfStr += argStrs[i] + " = " + arg + ";\n"
@@ -2562,7 +2562,7 @@ function __declTracerObject__(window) {
     thisProxy is separate from argument Proxy, as the target object itself could
     be a proxy object, and we don't want to wrap a proxy on top a proxy
     therefore, first we check if it already is a proxy and get rid of it, before wrapping
-    it up in a proxy. 
+    it up in a proxy.
     */
     this.createThisProxy = function(thisObj){
         if (pageLoaded || !thisObj || (typeof thisObj != "function" && typeof thisObj != "object")
@@ -2815,7 +2815,7 @@ function __declTracerObject__(window) {
                     if (!objectTreeNode) return [];
 
                     var children = objectTreeNode['e_' + key];
-                    // FIX 
+                    // FIX
                     /*all future reads from this object should be removed*/
                     return children || [];
                     return [];
@@ -2898,8 +2898,8 @@ function __declTracerObject__(window) {
                         var parentPath = objectToPathPerOT[OT][write[1]];
                         if (!parentPath && parentPath != "") console.log("no parent path found for object id:" + JSON.stringify(write) + " " + nodeId);
                         if (typeof write[2] == "symbol")
-                            var path = parentPath + pathDelim + write[2].toString(); 
-                        else var path = parentPath + pathDelim + write[2]; 
+                            var path = parentPath + pathDelim + write[2].toString();
+                        else var path = parentPath + pathDelim + write[2];
                         try {
                             var writeVal = write[3];
                             // writeSignature = path + " = omniStringifier.parse(`" + escapeRegExp(writeVal) +"`)";
@@ -2943,10 +2943,10 @@ function __declTracerObject__(window) {
                     if (signature[nodeId].length)
                         process(nodeId)
 
-                    //Remove redundant reads, ie reads with same keys 
+                    //Remove redundant reads, ie reads with same keys
 
                     if (logType == "global"){
-                        if (signature[nodeId].returnValue !== undefined) { 
+                        if (signature[nodeId].returnValue !== undefined) {
                             // var _ret = omniStringifier.stringify(signature[nodeId].returnValue,"write",2);
                             var _ret = signature[nodeId].returnValue
                             if (!(_ret instanceof Error)) {
@@ -3039,7 +3039,7 @@ function __declTracerObject__(window) {
             }
             /*
             Pseudo code
-            - Traverse bottom up, for 
+            - Traverse bottom up, for
             */
             signaturePropagate() {
                 //Copy the call graph since we will be mutating it
@@ -3070,7 +3070,7 @@ function __declTracerObject__(window) {
                 var getPathFromId = function(objectId, functionId, stateType){
                     var proxyMap, newPath;
                     switch (stateType) {
-                        case "argument" : 
+                        case "argument" :
                             proxyMap = proxyData.i2a; break;
                         case "global" :
                             proxyMap = proxyData.gph; break;
@@ -3103,14 +3103,14 @@ function __declTracerObject__(window) {
                         var mainArg = sigEntry[1].split(';;;;')[1];
                         var _matchMD = metadata[sigType].find(e=>e[0]==mainArg)
                         if (!_matchMD) return null;
-                    } else 
+                    } else
                         var _matchMD = metadata[sigType][0]
                     var newPath = getPathFromId(_matchMD[1],parentNode, _matchMD[2])
                     if (newPath && newPath.stack)
                         return newPath;
                     var newArg = _matchMD[2] + "_" + sigCat,
-                        newKey = sigType == "argument" ? [newPath].concat(sigEntry[1].split(';;;;').slice(2,)).join(";;;;") : 
-                            newPath + sigEntry[1] 
+                        newKey = sigType == "argument" ? [newPath].concat(sigEntry[1].split(';;;;').slice(2,)).join(";;;;") :
+                            newPath + sigEntry[1]
                     return [newArg, newKey, sigEntry[2]];
                 }
 
@@ -3118,13 +3118,13 @@ function __declTracerObject__(window) {
                     var newKey = translatedSig[1].replace(origSig[1],"");
                     if (!alreadyChildClosure)
                         newKey = translatedSig[0].split("_")[0]  +  newKey   + ";&;" + origSig[1];
-                    else newKey = translatedSig[0].split("_")[0]  +  newKey 
+                    else newKey = translatedSig[0].split("_")[0]  +  newKey
                     return newKey;
                 }
 
                 //sigType = read or write
                 var insertClosureSig = function(parentSig, insertInd, translatedSig, sigType, origSig, alreadyChildClosure){
-                    var newSigType = sigType == "reads" ? "childClosure_reads" : 
+                    var newSigType = sigType == "reads" ? "childClosure_reads" :
                         sigType == "IBF" ? "childIBF" : "childClosure_writes";
                     var newKey = rewriteKey(translatedSig, origSig,alreadyChildClosure);
                     var finalSig = [newSigType,newKey,translatedSig[2]];
@@ -3138,11 +3138,11 @@ function __declTracerObject__(window) {
                     switch(sigType){
                         case "global": parentSig.splice(insertInd, 0, sigEntry); break;
                         case "argument":
-                        case "this": 
+                        case "this":
                         case "closure":
                         case "IBF":
                             /*Handling IBF propagation similar to closure propagation*/
-                            if (sigType == "IBF") 
+                            if (sigType == "IBF")
                                 var translatedSig = translateSigInParentScope(parentNode, childNode, sigEntry, "closure")
                             else var translatedSig = translateSigInParentScope(parentNode, childNode, sigEntry, sigType)
                             if (translatedSig && !translatedSig.stack){
@@ -3153,7 +3153,7 @@ function __declTracerObject__(window) {
                                     insertClosureSig(parentSig, insertInd, translatedSig, "IBF", sigEntry)
                                     break;
                                 }
-                                parentSig.splice(insertInd, 0, translatedSig); 
+                                parentSig.splice(insertInd, 0, translatedSig);
                             } else if (translatedSig && translatedSig.stack)
                                 nonCacheableNodes[parentNode] = "translatedSig.message"
                             break;
@@ -3162,15 +3162,15 @@ function __declTracerObject__(window) {
                             var [childRef, actualKey] = sigEntry[1].split(';&;');
                             var dummySigType = childRef.split(';;;;')[0]+"_"+sigEntry[0].split("_")[1];
                             /*
-                            if child accessed it through closure, simply append the key 
+                            if child accessed it through closure, simply append the key
                             however if the child accessed it through arguments or global, translate it accordingly
                             */
-                            var childAccessor = "closure"; 
+                            var childAccessor = "closure";
                             if (dummySigType.indexOf("argument")>=0 || dummySigType.indexOf("global")>=0){
                                 childAccessor = "argument";
                                 var dummySigEntry = [dummySigType, childRef.replace(childRef.split(';;;;')[0],""), sigEntry[2]];
                             }
-                            else 
+                            else
                                 var dummySigEntry = [dummySigType, "", sigEntry[2]];
                             var translatedSig = translateSigInParentScope(parentNode, childNode, dummySigEntry, childRef.split(';;;;')[0])
                             if (translatedSig && !translatedSig.stack){
@@ -3188,9 +3188,9 @@ function __declTracerObject__(window) {
 
                                     if (childAccessor == "closure")
                                         insertClosureSig(parentSig, insertInd, translatedSig, rwType, dummySigEntry, true)
-                                    else 
+                                    else
                                         insertClosureSig(parentSig, insertInd, translatedSig, rwType, dummySigEntry)
-                            }   
+                            }
 
                     }
                 }
@@ -3205,7 +3205,7 @@ function __declTracerObject__(window) {
                     if (phInd<0){
                         console.error("Parent node: " + parentNode + " has no placeholder for " + childNode );
                         return;
-                    } 
+                    }
                     //Make space to insert childsig into parent sig
                     parentSig.splice(phInd,1)
                     childSig.forEach((sigEntry)=>{

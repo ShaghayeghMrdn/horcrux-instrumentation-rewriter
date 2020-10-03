@@ -15,10 +15,8 @@ var fs =require("fs")
 var path = require("path")
 var program = require('commander');
 var vm = require('vm');
-var libxmljs = require("libxmljs");
 var deterministic = require('deterministic');
 var UglifyJS = require('uglify-es')
-var pretty = require('pretty');
 var jsBeauty = require('js-beautify');
 
 spawnSync("ls ../JSAnalyzer",{shell:true});
@@ -42,8 +40,8 @@ program
     .option("-p, --pattern [pattern]","instrumentation pattern, either cg, or signature")
     .parse(process.argv)
 
-/* 
-Instrument any scripts tags inside 
+/*
+Instrument any scripts tags inside
 HTML pages
 */
 
@@ -152,7 +150,7 @@ function instrumentHTML(src, fondueOptions) {
 
         /*
         The slicing takes care of whether there is. a new line
-        immediately after the <Script> tag or not, because 
+        immediately after the <Script> tag or not, because
         it will account for the correct offset
         */
         var _prevScript = src.slice(0,scriptBegin+1);
@@ -171,7 +169,7 @@ function instrumentHTML(src, fondueOptions) {
         var loc = scriptLocs[i];
         var script = src.slice(loc.start, loc.end);
         // console.log("Script to be instrumented: " + script)
-        
+
         //use to store the original value of path
         //since its value is modify to unqiue identify every in html script
         var options = mergeInto(fondueOptions, {});
@@ -213,7 +211,7 @@ function instrumentHTML(src, fondueOptions) {
     }
     // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
     if (program.pattern != "timing")
-        src = doctype + "\n<script>\n" +  deterministicCode + omniStringify+ fondue.instrumentationPrefix(options, program.pattern) + "\n</script>\n" + src;
+        src = doctype + "\n<script>\n" +  /*deterministicCode + omniStringify +*/ fondue.instrumentationPrefix(options, program.pattern) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
@@ -264,7 +262,7 @@ function mergeStaticInformation_uncacheable(options){
     scriptsStaticInfo.forEach((si)=>{
         Object.keys(si).forEach((reason)=>{
             // console.log("data: " + JSON.stringify(staticInfo.staticUncacheableFunctions), reason)
-            staticInfo.staticUncacheableFunctions[reason] = 
+            staticInfo.staticUncacheableFunctions[reason] =
             staticInfo.staticUncacheableFunctions[reason].concat(si[reason]);
         })
     })
@@ -329,7 +327,7 @@ function mergeInto(options, defaultOptions) {
 }
 
 var unique = function(arr){
-    return [...new Set(arr) ]; 
+    return [...new Set(arr) ];
 }
 
 var main = function(){
@@ -339,7 +337,7 @@ var main = function(){
     var origPath = program.name.split(';;;;')[1];
     origPath = origPath == "/" ? url + origPath : origPath;
     var path = origPath.length>50?origPath.substring(origPath.length-50,origPath.length) : origPath;
-    var fondueOptions = mergeInto({}, {useProxy: true, caching: false,  include_prefix: false, path: path, origPath: origPath, 
+    var fondueOptions = mergeInto({}, {useProxy: true, caching: false,  include_prefix: false, path: path, origPath: origPath,
         e2eTesting: false, pageLoaded: config[program.pattern].pageLoaded, invocation_limit:config[program.pattern].invocation_limit,
          pattern:program.pattern, proxyName:config[program.pattern].proxyName
      });
@@ -354,12 +352,12 @@ var main = function(){
         } catch (err){
             console.error("Error while reading the JS Profile " + err);
         }
-    } 
+    }
     if (program.cgInfo){
         try{
             var _cg = JSON.parse(fs.readFileSync(program.cgInfo),"utf-8");
             // var cg = _cg.map(e=>e[0]);
-            var cg = _cg; 
+            var cg = _cg;
             // var cgTime = _cg.map(e=>e[2]);
             // console.log(cg);
             fondueOptions = mergeInto(fondueOptions, {cg: cg});

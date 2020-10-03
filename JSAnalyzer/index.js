@@ -64,7 +64,7 @@ function topKFromRTI(rti, k){
 	var relevantRTI = [], percent =0, rtiLength = sortedRTI.length, rtiCounter =0;
 	for (var rtiIter = 0; rtiIter < rtiLength && percent <= k ; rtiIter++) {
 		var curFn = sortedRTI[rtiIter]
-		if (ignoreRTI.filter(fn => curFn.functionName.indexOf(fn)>=0).length > 0 || 
+		if (ignoreRTI.filter(fn => curFn.functionName.indexOf(fn)>=0).length > 0 ||
 			ignoreURLS.filter(url => curFn.url.indexOf(url)>=0).length>0)
 			continue;
 		relevantRTI.push(curFn);
@@ -73,7 +73,7 @@ function topKFromRTI(rti, k){
 	}
 	// console.log(rtiCounter +  "of " rtiLength + "gives us " + JSON.stringify(relevantRTI));
 	return relevantRTI;
-}	
+}
 
 function userDefinedFunctions(rti){
 	return rti.map((node)=>{if (node.url.startsWith("http")) return node}).filter((node=>{ if (node) return node}));
@@ -103,7 +103,7 @@ function instrumentationPrefix(options, pattern) {
 	// }
 	var s = template(tracerSource, {
 		name: options.name,
-		version: JSON.stringify(require('./package.json').version),
+		// version: JSON.stringify(require('./package.json').version),
 		nodejs: options.nodejs,
 		maxInvocationsPerTick: options.maxInvocationsPerTick,
 		e2eTesting: options.e2eTesting,
@@ -121,7 +121,7 @@ function instrumentationPrefix(options, pattern) {
 }
 
 var unique = function(arr){
-    return [...new Set(arr) ]; 
+    return [...new Set(arr) ];
 }
 
 /**
@@ -217,7 +217,7 @@ var makeId = function (type, path, node) {
 	    if (simpleFunctions[origPath])
 	    	return simpleFunctions[origPath];
 	    var name = node.id != undefined ? node.id.name : "function"
-		
+
 		// functionCounter = functionCounter + 1;
 		// console.log( " function counter is " + functionCounter)
 		// simpleFunctions[origPath] = id;
@@ -260,7 +260,7 @@ var traceFilter = function (content, options) {
 	var processed = content;
 
 	try {
-		var fala, update, sourceNodes, functionNameToLocation = {}; // Dictionary: key is function name, value is an array containing all the locations it was defined. 
+		var fala, update, sourceNodes, functionNameToLocation = {}; // Dictionary: key is function name, value is an array containing all the locations it was defined.
 		var inBuiltOverrides = ["tostring", "tojson", "toprimitive","typeof"];
 		var isInBuiltFunction = function(fn){
 			if (!fn)
@@ -299,7 +299,7 @@ var traceFilter = function (content, options) {
 
 		var addCalleesToCaller = function(node){
 
-			// This scenario will be handled in the second pass itself, as this function is declared and invoked at the same time. 
+			// This scenario will be handled in the second pass itself, as this function is declared and invoked at the same time.
 			if (node.callee.type == "FunctionExpression")
 				return
 
@@ -313,7 +313,7 @@ var traceFilter = function (content, options) {
 							functionName = parent.parent.id.name;
 						else if (parent.parent.type == "AssignmentExpression") {
 							functionName = parent.parent.left.source();
-						}				
+						}
 					}
 					if (functionName){
 						if (functionToCallees[functionName] == undefined)
@@ -347,7 +347,7 @@ var traceFilter = function (content, options) {
 					functionName = node.parent.id.name;
 				else if (node.parent.type == "AssignmentExpression") {
 					functionName = node.parent.left.source();
-				}				
+				}
 			}
 			_propogateSignature(functionName, node);
 		}
@@ -404,7 +404,7 @@ var traceFilter = function (content, options) {
 					else
 						update(read, options.proxyName, '.', read.source());
 				}
-					
+
 			});
 		}
 
@@ -461,7 +461,7 @@ var traceFilter = function (content, options) {
 						});
 						closureObjStr += '};\n'
 					});
-					
+
 					update(fId.body, closureObjStr, closureDecl, src);
 					return 1;
 				}
@@ -519,7 +519,7 @@ var traceFilter = function (content, options) {
 		}
 
 		var insertClosureProxy = function(fnNode, fnIndex){
-			var closurePrefixStr = "var closureProxy = " + options.tracer_name + 
+			var closurePrefixStr = "var closureProxy = " + options.tracer_name +
 				'.createClosureProxy(';
 			var closureObjStr = "var __closureObj = { __isClosureObj: true,";
 			var closureVarStr = "";
@@ -549,7 +549,7 @@ var traceFilter = function (content, options) {
 
 		/*
 		Arguments: <AST node, string>
-		returns <AST node> 
+		returns <AST node>
 		*/
 		var origSeenBefore = [];
         var getOriginalFromAlias = function(alias, functionId){
@@ -575,7 +575,7 @@ var traceFilter = function (content, options) {
 		}
 
 		var modifyNode = function(ceNode, srcStr, dstStr){
-			try {	
+			try {
 				return fala({
 						source:ceNode
 					}, function(node){
@@ -592,9 +592,9 @@ var traceFilter = function (content, options) {
 
 		/*
 		Arguments: CENode: Node to be statically analysed
-		localDeclHolder: local declarations 
+		localDeclHolder: local declarations
 		isAA: Is alias analysis or not, if yes, also statically analysis the arguments
-		if not, they would be taken care as a part of the dynamic analysis at runtime. 
+		if not, they would be taken care as a part of the dynamic analysis at runtime.
 		*/
 		var getCompleteExpression = function(CENode, localDeclHolder, isAA){
 			var localDecls = "";
@@ -730,13 +730,13 @@ var traceFilter = function (content, options) {
 					/*make sure the function declaration is inside the consequent*/
 					if (_h.consequent.type != "BlockStatement" && _h.consequent.source().indexOf(node.source())>=0) {
 						forcedBS = _h.consequent;
-						// update(_h.consequent, "{", _h.consequent.source(), "}"); 
+						// update(_h.consequent, "{", _h.consequent.source(), "}");
 					} else if (_h.alternate && _h.alternate.type != "BlockStatement" && _h.alternate.source().indexOf(node.source())>=0)
 						forcedBS = _h.alternate;
 				}
 				//TODO, handle function assignments inside object expression
 				if (node.parent.type == "Property" || node.parent.type == "ConditionalExpression"
-					|| util.isChildOfX(node,"ForStatement") || util.isChildOfX(node, "ReturnStatement") 
+					|| util.isChildOfX(node,"ForStatement") || util.isChildOfX(node, "ReturnStatement")
 					|| util.isChildOfX(node, "ConditionalExpression"))
 					return;
 				/*Different way to do the above thing: (a=function(){})(), now function inside callee*/
@@ -865,7 +865,7 @@ var traceFilter = function (content, options) {
 				if (matchedNode){
 					instrumentedNodes.push(matchedNode);
 					// staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
-				} 
+				}
 			})
 
 			ASTNodes.forEach((node)=>{
@@ -877,7 +877,7 @@ var traceFilter = function (content, options) {
 			})
 
 			// if (remainingRTINodes.length){
-			// 	//Throw error since not all rti nodes found a match. 
+			// 	//Throw error since not all rti nodes found a match.
 			// 	console.error("Match not found for " + remainingRTINodes.length + " number of RTI nodes");
 			// 	console.error("Quiting instrumentation");
 			// 	return processed;
@@ -917,11 +917,11 @@ var traceFilter = function (content, options) {
 				}
 				// console.log(node.parent.source());
 				var functionName;
-				if (node.id) { 
+				if (node.id) {
 					functionName = node.id.name;
 
-					// also add as local variable for the parent scope. 
-					// Hacky code: modifying the parent link, should never do that. 
+					// also add as local variable for the parent scope.
+					// Hacky code: modifying the parent link, should never do that.
 					node.id.parent = node.parent;
 					scope.addLocalVariable(node);
 				}
@@ -930,11 +930,11 @@ var traceFilter = function (content, options) {
 						functionName = node.parent.id.name;
 					else if (node.parent.type == "AssignmentExpression") {
 						functionName = node.parent.left.source();
-					}				
+					}
 				}
 
 				/*
-				function name to location is used during signature propogation 
+				function name to location is used during signature propogation
 				and there can be commented out as long as the code
 				for enabling signature propagation is commented out.
 				*/
@@ -943,7 +943,7 @@ var traceFilter = function (content, options) {
 				// 		functionNameToLocation[functionName] = [];
 				// 	console.log(functionNameToLocation[functionName])
 				// 	functionNameToLocation[functionName].push(node.loc);
-				// }	
+				// }
 
 			} else if (node.type == "ForInStatement" || node.type == "ForOfStatement"){
 				if (node.left.type == "Identifier"){
@@ -952,7 +952,7 @@ var traceFilter = function (content, options) {
 
 			} else if (node.type == "ClassDeclaration"){
 				scope.addLocalVariable(node);
-			} 
+			}
 			else if (node.type == "TryStatement") {
 				if (node.handler)
 					scope.addLocalVariable(node.handler.param);
@@ -978,14 +978,14 @@ var traceFilter = function (content, options) {
 								functionAliasMap[functionId][node.id.source()] = node.init;
 								if (node.init.source().indexOf("create")>=0)
 									functionToDOMtracking[functionId][node.id.source()] = "";
-							} 
+							}
 						}
 
 			// Handles any global variable being assigned any value
 			// or a local variable becoming an alias of a global variable
 			} else if (node.type == "AssignmentExpression" || node.type == "LogicalExpression" || node.type == "BinaryExpression"){
 				/*
-				if an argument is redefined inside a function, it is no longer an argument and only a 
+				if an argument is redefined inside a function, it is no longer an argument and only a
 				local variable and hence not to be tracked
 				*/
 				/*
@@ -1017,7 +1017,7 @@ var traceFilter = function (content, options) {
 				if (antiLocal.length)
 					markFunctionUnCacheable(node, "antiLocal");
 			} else if (node.type == "CallExpression") {
-				
+
 				// Check if the arguments passed are global or not
 				if (node.arguments) {
 					var globalReads = [];
@@ -1075,8 +1075,8 @@ var traceFilter = function (content, options) {
 			}
 		});
 
-		/* In this second iteration of the AST we will freeze the debug info 
-		ie all the global writes, reads and aliases 
+		/* In this second iteration of the AST we will freeze the debug info
+		ie all the global writes, reads and aliases
 		*/
 		ASTNodes.forEach(function(node) {
 
@@ -1143,10 +1143,10 @@ var traceFilter = function (content, options) {
 				update(node, "{",node.source(),"}")
 				nodeFutureModified=null;
 			}
-			if (node.type === "Program") { 
+			if (node.type === "Program") {
 				/*
 				Some JS files don't have access to the global execution context and they have a dynamically generated
-				html file, therefore create dummy tracer functions, just to avoid runtime errors. 
+				html file, therefore create dummy tracer functions, just to avoid runtime errors.
 				*/
 
 				if (options.jsInHTML){
@@ -1169,11 +1169,11 @@ var traceFilter = function (content, options) {
 				})();\n`;
 				if (node.source().indexOf("__tracer") >=0)
 					update(node, options.prefix,tracerCheck,sourceNodes(node))
-				else 
+				else
 					update(node, options.prefix,sourceNodes(node))
-			} 
+			}
 			/*
-			Log all non locals and prepend every global with the proxy object. 
+			Log all non locals and prepend every global with the proxy object.
 			Special case
 			- if you read a property of the arguments keyword, replace it with the argumentProxy object
 			- Do the same for the "this" keyword
@@ -1195,12 +1195,12 @@ var traceFilter = function (content, options) {
 								rewriteGlobals(readArray);
 								rewriteClosure(antiLocal, _functionId);
 							}
-						}  
+						}
 					}
 
 			    }
 			    // update(node, sourceNodes(node));
-			
+
 			// Handles any global variable being assigned any value
 			// or a local variable becoming an alias of a global variable
 			} else if (node.type == "AssignmentExpression" || node.type == "LogicalExpression" || node.type == "BinaryExpression"){
@@ -1212,10 +1212,10 @@ var traceFilter = function (content, options) {
 				var {readArray,local,argReads, antiLocal} = signature.handleReads(node.left);
 				rewriteGlobals(readArray);
 				rewriteClosure(antiLocal,_functionId);
-				
+
 				// if (_functionId) {
 
-				// 	
+				//
 
 				// 	argReads.length && rewriteArguments(argReads);
 					// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
@@ -1254,16 +1254,16 @@ var traceFilter = function (content, options) {
 				// 	*/
 				// 	// if (node.type == "AssignmentExpression" && node.left.type == "Identifier") return;
 				// 	var {readArray, local,argReads, antiLocal} = signature.handleReads(node.left);
-					
-				// 	Don't rewrite arguments if the argument gets rewritten, because then the reference is broken. 
+
+				// 	Don't rewrite arguments if the argument gets rewritten, because then the reference is broken.
 				// 	Can;t really do this, because the subsequent uses have been modified, and therefore will result in error
-				// 	The real reason this would fail is if the argument is not passed during invocation, then subsequent 
+				// 	The real reason this would fail is if the argument is not passed during invocation, then subsequent
 				// 	changes won't be same as the actual variable being modified in this assignment expression
-					
+
 				// 	// if (!(node.type == "AssignmentExpression" && node.left.type == "Identifier")) {
 				// 	// 	argReads.length && rewriteArguments(argReads);
 				// 	// }
-				// 	// 
+				// 	//
 				// 	var argReWritten = false
 				// 	argReads.forEach((arg)=>{
 				// 		if (arg.val == node.left && node.type == "AssignmentExpression"){
@@ -1276,7 +1276,7 @@ var traceFilter = function (content, options) {
 				// 	antiLocal.forEach(function(read){
 				// 		/*FIX
 				// 		 If the entire closure variable gets rewritten, no way
-				// 		 to currently track the changes and apply them propery 
+				// 		 to currently track the changes and apply them propery
 				// 		 Read up about javascript pass by reference, for variables*/
 				// 		if (options.useProxy){
 				// 			// if (read.type == "Identifier") {
@@ -1316,7 +1316,7 @@ var traceFilter = function (content, options) {
 							if (_functionId){
 								// update(ident, options.tracer_name,'.handleComparison(',ident.source(),',',JSON.stringify(node.operator), ',',lit,')');
 							}
-							else 
+							else
 								update(ident, ' ',options.tracer_name,'.isProxy(', ident.source(), ')');
 						}
 					}
@@ -1344,17 +1344,17 @@ var traceFilter = function (content, options) {
 				// if (node.type == "BinaryExpression" && (node.operator == "==" || node.operator == "!=" || node.operator == "===" || node.operator == "!==")){
 				// 	update(node ,'(',options.tracer_name,'.handleProxyComparisons(', node.left.source(), '))',node.operator, '(' ,options.tracer_name, '.handleProxyComparisons(', node.right.source(), '))');
 				// }
-				// dont' handle those assignment expressions which are a child of conditional expressions as they 
+				// dont' handle those assignment expressions which are a child of conditional expressions as they
 				// may or may not get executed
 				if (scope.IsLocalVariable(node.left) > 0){
 					var newWrite = util.logWritesHelper(node, scope.checkAndReplaceAlias(node.left));
 					if (options.caching)
 						update(node,node.left.source(),node.operator, options.tracer_name,'.logWrite(',JSON.stringify(functionId),newWrite,',[', util.getAllIdentifiersFromMemberExpression(node.left),'])');
 					if (options.useProxy) {
-			
+
 					}
 				} else if (scope.IsLocalVariable(node.right) > 0){
-					
+
 				}
 
 			}  else if (node.type == "ConditionalExpression") {
@@ -1441,7 +1441,7 @@ var traceFilter = function (content, options) {
 					});
 
 					// update(node.argument,' ', options.tracer_name, '.handleTypeOf(',node.argument.source(),')');
-				} 
+				}
 
 			} else if (node.type == "MemberExpression") {
 				var _functionId = util.getFunctionIdentifier(node,true);
@@ -1452,7 +1452,7 @@ var traceFilter = function (content, options) {
 					if ( (node.object.type == "Identifier" || node.object.type == "ThisExpression") /*&& !util.isChildOfCallExpression(node)*/) {
 						var {readArray,local, argReads, antiLocal} = signature.handleReads(node.object);
 						// if (_functionId) argReads.length && rewriteArguments(argReads);
-						// if (_functionId){ 
+						// if (_functionId){
 						// 	antiLocal.length && Array.prototype.push.apply(functionToNonLocals[makeId('function', options.path, _functionId)], antiLocal);
 						// 	// antiLocal.forEach(function(read){
 						// 	// 	if (options.useProxy){
@@ -1524,7 +1524,7 @@ var traceFilter = function (content, options) {
 						// 	//only prepend the logging statement before the very first expression
 						// 	cs.consequent.length && insertCFGTrackingSC(cs.consequent[0], functionId, cfgTag);
 						// });
-							
+
 					}
 			}
 			else if (node.type == "IfStatement") {
@@ -1555,7 +1555,7 @@ var traceFilter = function (content, options) {
 								else
 									update(read, options.proxyName, '.', read.source());
 							}
-								
+
 						});
 						rewriteClosure(antiLocal,_functionId);
 
@@ -1567,8 +1567,8 @@ var traceFilter = function (content, options) {
 						// 	var cfgTag = "else";
 						// 	insertCFGTrackingIF(node.alternate,functionId, cfgTag);
 						// }
-							
-					} 
+
+					}
 					// scope.addGlobalReads(readArray);
 
 
@@ -1587,7 +1587,7 @@ var traceFilter = function (content, options) {
 				var invocationIsRead = true;
 				var {readArray, local, argReads, antiLocal} = invocationIsRead || node.callee.source().includes("window")? signature.handleReads(node.callee) : {readArray: [], local:[], argReads: [], antiLocal:{}};
 				// console.log(readArray)
-				//Arguments read don't depend on whether we consider invocations as read or not, 
+				//Arguments read don't depend on whether we consider invocations as read or not,
 				// because the replacement logic needs to be consistent
 				// var {argReads} = signature.handleReads(node.callee);
 				var _functionId = util.getFunctionIdentifier(node,true);
@@ -1666,7 +1666,7 @@ var traceFilter = function (content, options) {
 						}
 					});
 					rewriteClosure(antiLocals,_functionId);
-					
+
 					if (!functionIBFArgs[functionId])
 						functionIBFArgs[functionId] = {};
 					if (!functionIBFArgs[functionId][functionIBFArgsCounter])
@@ -1680,12 +1680,12 @@ var traceFilter = function (content, options) {
 					/*
 					If an inbuilt function is a part of conditional expression, only log it if its not the test part of the expression
 					because the test returns a value which is used to make future decisions. Same as my logic for not logging call expressions
-					which are child of variable declarations. 
+					which are child of variable declarations.
 					Also make sure that despite being inside conditional expression, it is not a child of the return statement, because it was would redundant
 					*/
 					/*
-					Certain functions should not be tracked, for example if the function has a getter, or if the function is a method of an array 
-					objects, because it will be tracked anyway. 
+					Certain functions should not be tracked, for example if the function has a getter, or if the function is a method of an array
+					objects, because it will be tracked anyway.
 					*/
 					return;
 					var getIBFSource = ["get",".push"];
@@ -1696,9 +1696,9 @@ var traceFilter = function (content, options) {
 
 						if (evalString.join("") != "") {
 							var ibfArgs = [], ibfArgStrs, ibfArgVals = [];
-							functionIBFArgs[functionId][functionIBFArgsCounter] = 
+							functionIBFArgs[functionId][functionIBFArgsCounter] =
 									functionIBFArgs[functionId][functionIBFArgsCounter].concat(IBFlocals.map((e)=>{ if (varsDecl.indexOf(ASTSourceMap.get(e))<0) return ASTSourceMap.get(e)}).filter(e=>e));
-							functionsVarDecl[functionId] = functionsVarDecl[functionId].concat(IBFlocals.map(e=>e.source())); 
+							functionsVarDecl[functionId] = functionsVarDecl[functionId].concat(IBFlocals.map(e=>e.source()));
 							ibfArgs = functionIBFArgs[functionId][functionIBFArgsCounter];
 							ibfArgVals = ibfArgVals.concat(ibfArgs);
 
@@ -1727,8 +1727,8 @@ var traceFilter = function (content, options) {
 						// console.log("Node after IBF update", node.source());
 					}
 					if (node.parent.type == "CallExpression" || node.parent.type == "MemberExpression"){
-						functionIBFArgs[functionId][functionIBFArgsCounter] = 
-								functionIBFArgs[functionId][functionIBFArgsCounter].concat(IBFlocals.map((e)=>{ if (varsDecl.indexOf(ASTSourceMap.get(e))<0) return ASTSourceMap.get(e)}).filter(e=>e)); 
+						functionIBFArgs[functionId][functionIBFArgsCounter] =
+								functionIBFArgs[functionId][functionIBFArgsCounter].concat(IBFlocals.map((e)=>{ if (varsDecl.indexOf(ASTSourceMap.get(e))<0) return ASTSourceMap.get(e)}).filter(e=>e));
 						functionsVarDecl[functionId] = varsDecl.concat(IBFlocals.map(e=>ASTSourceMap.get(e)));
 					}
 
@@ -1814,12 +1814,12 @@ var traceFilter = function (content, options) {
 						var returnValue = node.argument.expressions[node.argument.expressions.length - 1];
 						var preReturns = node.argument.expressions.slice(0,-1).map(function(e){return e.source()}).join();
 						if (options.caching || options.useProxy) {
-							// update(node, 'return ',preReturns ,',', options.tracer_name, 
+							// update(node, 'return ',preReturns ,',', options.tracer_name,
 							// '.logReturnValue(', JSON.stringify(functionId), ',',returnValue.source() ,',arguments',');');
 							// update(node,  _traceEnd, JSON.stringify(functionId),',arguments', ');\n', node.source())
 						}
 						// if (options.useProxy)
-							// update(node, 'return ',preReturns ,',', options.tracer_name, 
+							// update(node, 'return ',preReturns ,',', options.tracer_name,
 							// '.logReturnValue(', JSON.stringify(functionId), ',', returnValue.source(),
 							// 	',',options.proxyName,'.',returnValue.source(),");");
 					} else {
@@ -1854,7 +1854,7 @@ var traceFilter = function (content, options) {
 					if (uncacheableFunctions["RTI"].indexOf(node)>=0) {
 						var ret = rewriteClosure.insertClosureProxy(node, nodeBody); // for both root and non-root functions
 						if (ret){
-							//closure object was inserted 
+							//closure object was inserted
 							nodeBody = node.body.source();
 						}
 						// rewriteClosure.insertClosureObj(node, nodeBody); //only for non-root functions
@@ -1875,8 +1875,8 @@ var traceFilter = function (content, options) {
 				var isCacheable = true,
 					enableRecord = node.nullTimeNode == null ? true : false;
 
-				// Make sure the length of the source is atleast 
-				//Start modifiying the function 
+				// Make sure the length of the source is atleast
+				//Start modifiying the function
 				staticInfo.rtiDebugInfo.matchedNodes.push([index,node.time]);
 
 				var replayObjects = ",arguments,";
@@ -1912,20 +1912,20 @@ var traceFilter = function (content, options) {
 				serializedArgs.returnValue = returnValue;
 				// serializedArgs = {};
 				var _traceEnd = options.tracer_name + ".exitFunction(";// + args + ");";
-				
+
 				var closureRestoreStr = "";
 				closures[2] && closures[2].forEach((obj)=>{
-					closureRestoreStr += "if (!(" + obj + " instanceof Object)) " 
+					closureRestoreStr += "if (!(" + obj + " instanceof Object)) "
 					+ obj  + "= __closureObj." + obj + ";\n";
 				})
 				var argumentRestoreStr = "";
 				node.params.length && node.params.forEach((obj,ind)=>{
-					argumentRestoreStr += "if (!(" + ASTSourceMap.get(obj) + " instanceof Object)) " 
+					argumentRestoreStr += "if (!(" + ASTSourceMap.get(obj) + " instanceof Object)) "
 					+ ASTSourceMap.get(obj)  + "= arguments[" + ind + "];\n";
 				})
 
 				update(node.body, node.body.source(),' \n} catch (e){ throw e} finally {',
-					// closureRestoreStr ?  closureRestoreStr :null, 
+					// closureRestoreStr ?  closureRestoreStr :null,
 					// argumentRestoreStr ? argumentRestoreStr :null,
 					 _traceEnd, JSON.stringify(index),',',JSON.stringify(enableRecord), ');\n }}');
 				var nodeName;
@@ -1937,7 +1937,7 @@ var traceFilter = function (content, options) {
 
 	} catch (e) {
 		console.error('[PARSING EXCEPTION]' + options.path + ": " + e + e.stack);
-		// mostly exception imples that it is a json file. 
+		// mostly exception imples that it is a json file.
 		return content;
 	}
 
