@@ -94,7 +94,7 @@ def scriptsToInstrument(stats):
         # print iScripts
         # iScripts =  [i.split('/')[-1] for i in iScripts]
         # bName = '/'.join(site.split('/')[6:])
-        # bName = bName.split('www.')[-1] 
+        # bName = bName.split('www.')[-1]
         scriptsPerUrl[site] = iScripts
         # print site, len(stats[site])
     return scriptsPerUrl
@@ -225,7 +225,7 @@ def instrument(root, fileType, output_directory,args,file):
     # if (args.instOutput != "ND" or fileType == "html"):
     print "Executing ", command
     cmd = subprocess.call(command, stdout=log_file, stderr =error_file, shell=True)
-    
+
     try:
         returnInfoFile = TEMP_FILE + ".info";
         returnInfo = open(returnInfoFile,'r').readline();
@@ -290,7 +290,7 @@ def instrument(root, fileType, output_directory,args,file):
 
     # print " response header looks like " , output_http_response.response.header
     outputFile = open(os.path.join(args.output, output_directory, file), "w")
-    
+
     outputFile.write(output_http_response.SerializeToString())
 
     outputFile.close()
@@ -306,6 +306,8 @@ def main(args):
     third_party_libraries = ["Bootstrap.js","show_ads_impl.js", "osd.js"]
     TEMP_FILE = "tmp"
     iframe_script_path = "iframeJs2/"
+    if args.input[-1] != '/':
+        args.input += '/'
     output_directory = args.input.split('/')[-2]
     print output_directory
 
@@ -356,7 +358,7 @@ def main(args):
     pool = mp.Pool(mp.cpu_count())
 
     instrument_singleton = partial(instrument, root, "js",output_directory, args)
-        
+
     pool.map(instrument_singleton, jsFiles)
     pool.close()
     pool.join()
@@ -383,7 +385,7 @@ def main(args):
     print "Static analysis time:", static_analysis_overhead
 
     subprocess.Popen("rm staticDump*",stderr=open("/dev/null","r"), shell=True)
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -114,7 +114,7 @@ function __declTracerObject__(window) {
     var ND = [];
     var curRoot = null;
     var functionToScopes = {};
-    // var omniStringifier = Omni ? new Omni() : "";
+    var omniStringifier = Omni ? new Omni() : "";
     // var parse = omniStringifier.parse;
     var rootInvocs = [];
     var sigSizeLimit = 500; // Number of reads and writes allowed per invocations
@@ -981,7 +981,7 @@ function __declTracerObject__(window) {
 
             var nodeId = _shadowStackHead ? _shadowStackHead : null;
 
-            // var stringifier = omniStringifier;
+            var stringifier = omniStringifier;
             var state = logType.split("_")[1] == "reads"  ? "read" : "write";
             if ( (!nodeId && logType.indexOf("global")<0 ) || (nodeId &&
                 nonCacheableNodes[nodeId]) )
