@@ -671,6 +671,37 @@ function __declTracerObject__(window) {
 
         customShims(window);
 
+        // --------------------------------------------------
+        /***** HORCRUX *****/
+        const DOMAccessHandler = {
+            get: function(target, property, receiver) {
+                if (property == '__isDOMNode') return true;
+
+                const oldValue = Reflect.get(target, property);
+                console.log(`called: ${property} on ${target} -> ${oldValue}`);
+                return oldValue;
+            }
+        };
+
+        const createDOMProxy = function(domObject, attachedToDOMTree) {
+            if (pageLoaded || _shadowStackHead in nonCacheableNodes) return domObject;
+            var nodeId = _shadowStackHead ? _shadowStackHead : null;
+            if (!nodeId) {
+                console.error('nodeId is null: THIS SHOULD NOT HAPPEN!');
+                return domObject;
+            }
+            if (domObject.__isProxy) {
+                console.log('domObj is already a proxy!!');
+                domObject = domObject.__target;
+            }
+            console.log(`DOM Node: ${domObject}, attached: ${attachedToDOMTree}`);
+            var proxyHandler = proxyEncapsulation(domObject, "DOMNode", null, attachedToDOMTree);
+            var domProxy = new Proxy(domObject, proxyHandler);
+            // TODO: Add this dom proxy to a map or something!!!
+            return domProxy;
+        }
+
+        // --------------------------------------------------
 
         /*Creates shim for every dom methods
         The purpose of the shim is to check for proxy argument types*/
@@ -685,67 +716,63 @@ function __declTracerObject__(window) {
                 "HTMLButtonElement", "HTMLLIElement", "HTMLUListElement", "HTMLIFrameElement",
                 "HTMLFormElement", "HTMLHeadingElement", "HTMLImageElement", "IntersectionObserver",
                 "HTMLStyleElement", "HTMLTableRowElement", "HTMLTableSectionElement", "PerformanceObserver",
-                "HTMLBRElement","Node","EventTarget","HTMLCollection","MutationObserver","Document",
-                "HTMLCanvasElement", "CanvasRenderingContext2D","CanvasGradient","CanvasPattern",
-                "ImageBitMap","ImageData","TextMetrics","Path2D","CSSCounterStyleRule","Element","RegExp","Crypto","Object","Map",
-                "MediaDevices","StorageManager","CacheStorage"
+                "HTMLBRElement", "Node", "EventTarget", "HTMLCollection", "MutationObserver", "Document",
+                "HTMLCanvasElement", "CanvasRenderingContext2D", "CanvasGradient", "CanvasPattern",
+                "ImageBitMap", "ImageData", "TextMetrics", "Path2D", "CSSCounterStyleRule", "Element",
+                "RegExp", "Crypto", "Object", "Map", "MediaDevices","StorageManager","CacheStorage",
+                "NodeList"
             ];
 
             HTMLNames.forEach((_class)=>{
                 self[_class] && self[_class].prototype && Object.getOwnPropertyNames(self[_class].prototype).forEach((classKey)=>{
                     try {
-                         if (typeof self[_class].prototype[classKey] == "function") {
+                        if (typeof self[_class].prototype[classKey] == "function") {
                             var origMethod = self[_class].prototype[classKey];
                             if (classKey == "constructor") return;
-                            if (origMethod.name == "appendChild" || origMethod.name == "append" || origMethod.name == "createElement"){
-                               self[_class].prototype[classKey] = function(){
-                                    var thisObj = this;
-                                    for (var i=0;i<arguments.length;i++){
-                                        var arg = arguments[i];
-                                        if (arg && arg.__isProxy)
-                                            arguments[i] = arg.__target;
+                            self[_class].prototype[classKey] = function() {
+                                var thisObj = this;
+                                /***** HORCRUX *****/
+                                // indicating whether the retVal is a node already attached to DOM tree or not
+                                let attachedToDOMTree = false;
+                                if (origMethod.name == "appendChild" || origMethod.name == "insertBefore") {
+                                    // this object is attached to DOM tree.
+                                    // so any changes to it affects the DOM  tree.
+                                    if (thisObj && thisObj.__isAttachedToDOMTree) {
+                                        customLocalStorage[_shadowStackHead]["DOM_write"] = true;
+                                        attachedToDOMTree = true;
                                     }
-                                    if (thisObj && thisObj.__isProxy)
-                                        thisObj = thisObj.__target;
-                                    var ret = origMethod.apply(thisObj,arguments);
-                                    // if ( (arguments[0].nodeName && arguments[0].nodeName.toLowerCase() == "iframe") ||
-                                    //         arguments[0].toLowerCase && arguments[0].toLowerCase() == "iframe" ){
-                                    //     if (ret.contentWindow) {
-                                    //         createShimForDOMMethods(ret.contentWindow);
-                                    //         customShims(ret.contentWindow);
-                                    //     }
-                                    //     else ret.addEventListener("load", function(){
-                                    //         createShimForDOMMethods(ret.contentWindow);
-                                    //         customShims(ret.contentWindow);
-                                    //     })
-                                    // }
-                                    return ret;
-                                };
-                                self[_class].prototype[classKey].__isShimmed__ = true
-                                self[_class].prototype[classKey].__orig__ = origMethod;
-                            } else {
-                                self[_class].prototype[classKey] = function(){
-                                    var thisObj = this;
-                                    for (var i=0;i<arguments.length;i++){
-                                        var arg = arguments[i];
-                                        if (arg && arg.__isProxy)
-                                            arguments[i] = arg.__target;
-                                    }
-                                    if (thisObj && thisObj.__isProxy)
-                                        thisObj = thisObj.__target;
-                                    if (arguments[0] && arguments[0].nodeName == "SCRIPT"){
-                                        // if (arguments[0].async == 1)
-                                        //     arguments[0].async = 0;
-                                    }
-                                    /*If regex testing, return the original method*/
-                                    if ( (origMethod.name == "test" || origMethod.name =="exec") && arguments[0] && arguments[0].__isShimmed__)
-                                        arguments[0] = arguments[0].__orig__;
-                                    return origMethod.apply(thisObj,arguments);
-                                };
-                                self[_class].prototype[classKey].__isShimmed__ = true
-                                self[_class].prototype[classKey].__orig__ = origMethod;
-                            }
-                         }
+                                    // TODO: change the corresponding field of arg proxy
+                                    // if thisObject is already attached, the given arg is also getting
+                                    // attached to the tree after this call
+                                }
+
+                                if (origMethod.name == "getElementById" || origMethod.name == "querySelector")  {
+                                    console.log(_shadowStackHead);
+                                    customLocalStorage[_shadowStackHead]["DOM_read"] = true;
+                                    attachedToDOMTree = true;
+                                }
+                                if (thisObj && thisObj.__isProxy)
+                                    thisObj = thisObj.__target;
+                                for (var i=0; i < arguments.length; i++){
+                                    var arg = arguments[i];
+                                    if (arg && arg.__isProxy)
+                                        arguments[i] = arg.__target;
+                                }
+
+                                /*If regex testing, return the original method*/
+                                if ( (origMethod.name == "test" || origMethod.name =="exec") && arguments[0] && arguments[0].__isShimmed__)
+                                    arguments[0] = arguments[0].__orig__;
+
+                                const retVal = origMethod.apply(thisObj, arguments);
+                                if (retVal && typeof retVal === "object" && retVal.nodeType) {
+                                    debugger;
+                                    return createDOMProxy(retVal, attachedToDOMTree);
+                                }
+                                return retVal;
+                            };
+                            self[_class].prototype[classKey].__isShimmed__ = true
+                            self[_class].prototype[classKey].__orig__ = origMethod;
+                        }
                     } catch (e){};
                 });
             });
@@ -894,7 +921,7 @@ function __declTracerObject__(window) {
     }
 
     // closure_id is only applicable when the type is closure
-    var proxyEncapsulation =  function(rootObject, type, closure_id) {
+    var proxyEncapsulation =  function(rootObject, type, closure_id, attached) {
 
         var ObjectTree = {};
         var objectIdCounter = 1;
@@ -907,6 +934,8 @@ function __declTracerObject__(window) {
         var rootType = type;
         if (rootType == "argument" || rootType == "this" || rootType == "closure")
             parentFunctionId = _shadowStackHead;
+        /***** HORCRUX *****/
+        let attachedToDOMTree = (rootType == "DOMNode" && attached);
         /* Initialize the object tree with window as the root object*/
         ObjectToId.set(rootObject,0);
         idToObject[0] = rootObject;
@@ -1201,6 +1230,8 @@ function __declTracerObject__(window) {
             if (key == "__target") return target;
             if (key == "__debug") return parentFunctionId;
             if (key == "__isClosureObj") return target[key];
+            /***** HORCRUX *****/
+            if (key == "__isAttachedToDOMTree") return attachedToDOMTree;
 
             var method = Reflect.get(target,key);
 
@@ -1213,7 +1244,7 @@ function __declTracerObject__(window) {
             if (desc && desc.configurable == false && desc.writable == false/*&& nonConfigurableOnly.indexOf(key)>=0*/) {
                 return handleNonConfigurableProperty(target, key);
             }
-            var isWinObj,cors={};
+            // var isWinObj,cors={};
             // if (isWinObj = isWindow(method,cors)){
             //     // if (!cors.v) loggerFunction(target, key, method, rootType+"_reads");
             //     return isWinObj;
@@ -1242,12 +1273,12 @@ function __declTracerObject__(window) {
                 // return method;
             }
             /* If method type if function, don't wrap in proxy for now */
-            if (method && (typeof method === 'object' || typeof method=== "function") && !outOfScopeProperties.includes(key) ) {
-              if (isDOMInheritedProperty(method)){
+            if (method && (typeof method === 'object' || typeof method === "function") && !outOfScopeProperties.includes(key)) {
+                // if (isDOMInheritedProperty(method)) {
                 // if (_shadowStackHead)
                 //     nonCacheableNodes[_shadowStackHead] = "DOM";
                 // return method;
-              }
+                // }
               var desc = customMethods.getOwnPropertyDescriptor(target, key);
               if (desc && ! desc.configurable && !desc.writable) return handleNonConfigurableProperty(target, key);
               window.proxyReadCount++;
@@ -2956,6 +2987,13 @@ function __declTracerObject__(window) {
                             else delete processedSig[nodeId];
 
                         }
+                        /***** HORCRUX *****/
+                        signature[nodeId] &&  signature[nodeId].DOM_read && processedSig[nodeId] &&
+                        (processedSig[nodeId].push(['DOM_read', signature[nodeId].DOM_read]));
+
+                        signature[nodeId] &&  signature[nodeId].DOM_write && processedSig[nodeId] &&
+                        (processedSig[nodeId].push(['DOM_write', signature[nodeId].DOM_write]));
+
                         signature[nodeId] &&  signature[nodeId].IBF && processedSig[nodeId] && (
                             processedSig[nodeId].push(['IBF',signature[nodeId].IBF]));
 
