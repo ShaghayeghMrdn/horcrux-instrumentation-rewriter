@@ -211,7 +211,7 @@ function instrumentHTML(src, fondueOptions) {
     }
     // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
     if (program.pattern != "timing")
-        src = doctype + "\n<script>\n" +  /*deterministicCode + omniStringify +*/ fondue.instrumentationPrefix(options, program.pattern) + "\n</script>\n" + src;
+        src = doctype + "\n<script>\n" +  deterministicCode + omniStringify + fondue.instrumentationPrefix(options, program.pattern) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
          staticInfo.rtiDebugInfo.matchedNodes.length);
