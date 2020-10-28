@@ -687,17 +687,17 @@ function __declTracerObject__(window) {
             if (pageLoaded || _shadowStackHead in nonCacheableNodes) return domObject;
             var nodeId = _shadowStackHead ? _shadowStackHead : null;
             if (!nodeId) {
-                console.error('nodeId is null: THIS SHOULD NOT HAPPEN!');
+                console.error('nodeId is null: THIS SHOULD NOT HAPPEN FOR HORCRUX!');
                 return domObject;
             }
             if (domObject.__isProxy) {
                 console.log('domObj is already a proxy!!');
                 domObject = domObject.__target;
             }
-            console.log(`DOM Node: ${domObject}, attached: ${attachedToDOMTree}`);
-            var proxyHandler = proxyEncapsulation(domObject, "DOMNode", null, attachedToDOMTree);
+            // console.log(`DOM Node: ${domObject}, attached: ${attachedToDOMTree}`);
+            var proxyHandler = proxyEncapsulation(domObject, "DOM_NODE", null, attachedToDOMTree);
             var domProxy = new Proxy(domObject, proxyHandler);
-            // TODO: Add this dom proxy to a map or something!!!
+            // TODO (Shaghayegh): Test/confirm if I should keep track of created DOM proxies!
             return domProxy;
         }
 
@@ -935,7 +935,8 @@ function __declTracerObject__(window) {
         if (rootType == "argument" || rootType == "this" || rootType == "closure")
             parentFunctionId = _shadowStackHead;
         /***** HORCRUX *****/
-        let attachedToDOMTree = (rootType == "DOMNode" && attached);
+        let isDOMNode = (rootType == "DOM_NODE");
+        let attachedToDOMTree = !!attached;
         /* Initialize the object tree with window as the root object*/
         ObjectToId.set(rootObject,0);
         idToObject[0] = rootObject;
@@ -1231,6 +1232,7 @@ function __declTracerObject__(window) {
             if (key == "__debug") return parentFunctionId;
             if (key == "__isClosureObj") return target[key];
             /***** HORCRUX *****/
+            if (key == "__isDOMNode") return isDOMNode;
             if (key == "__isAttachedToDOMTree") return attachedToDOMTree;
 
             var method = Reflect.get(target,key);
@@ -1308,18 +1310,30 @@ function __declTracerObject__(window) {
               return method;
             }
           },
-          set (target, key, value, receiver) {
+          set(target, key, value, receiver) {
             var cors={}, method;
-            if (!isWindow(value,cors))
-                loggerFunction(target, key, value,rootType + "_writes");
+            /***** HORCRUX *****/
+            /* Added the second condition: filter out the writes related to local DOM nodes! */
+            if (!isWindow(value, cors) && rootType != "DOM_NODE")
+                loggerFunction(target, key, value, rootType + "_writes");
             window.proxyWriteCount++;
             if (specialSetKets.indexOf(key)>=0 && value && value.__isProxy){
                 value = value.__target;
                 return Reflect.set(target, key, value);
             }
+            /* Example: if node is a global var, we want to capture: node.textContent = "..." */
+            if (receiver.__isDOMNode && receiver.__isAttachedToDOMTree) {
+                // console.log(`Updating the value of ${key} for an attached DOM node (${target.nodeName})!`);
+                customLocalStorage[_shadowStackHead]["DOM_write"] = true;
+            }
             /*The final value set should always be the actual value*/
-            if (value && value.__isProxy)
+            if (value && value.__isProxy) {
+                if (value.__isDOMNode) {
+                    attachedToDOMTree = value.__isAttachedToDOMTree;
+                    isDOMNode = value.__isDOMNode;
+                }
                 value = value.__target;
+            }
             /*if rewriting closure object, rewrite the underlying object as well*/
             if (target.__isClosureObj){
                 var setter = "set_"+key;
