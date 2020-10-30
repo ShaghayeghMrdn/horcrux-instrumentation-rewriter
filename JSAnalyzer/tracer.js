@@ -720,7 +720,20 @@ function __declTracerObject__(window) {
                 "HTMLCanvasElement", "CanvasRenderingContext2D", "CanvasGradient", "CanvasPattern",
                 "ImageBitMap", "ImageData", "TextMetrics", "Path2D", "CSSCounterStyleRule", "Element",
                 "RegExp", "Crypto", "Object", "Map", "MediaDevices","StorageManager","CacheStorage",
-                "NodeList"
+                "NodeList", "ChildNode"
+            ];
+
+            const DOMReadAPIs = ["getElementById", "getElementsByTagName",
+                "getElementsByClassName", "getElementsByTagNameNS",
+                "querySelector", "querySelectorAll",
+                "compareDocumentPosition", "contains"
+            ];
+
+            // TODO: Handle "write", "writeln":
+            // Wouldn't be useful to wrap the return value in a proxy, but at least should mark DOM_write
+            const DOMWriteAPIs = ["insertBefore",
+                "appendChild", "replaceChild", "removeChild", "remove",
+                "insertAdjacentElement", "insertAdjacentHTML", "insertAdjacentText"
             ];
 
             HTMLNames.forEach((_class)=>{
@@ -734,7 +747,7 @@ function __declTracerObject__(window) {
                                 /***** HORCRUX *****/
                                 // indicating whether the retVal is a node already attached to DOM tree or not
                                 let attachedToDOMTree = false;
-                                if (origMethod.name == "appendChild" || origMethod.name == "insertBefore") {
+                                if (DOMWriteAPIs.includes(origMethod.name)) {
                                     // this object is attached to DOM tree.
                                     // so any changes to it affects the DOM  tree.
                                     if (thisObj && thisObj.__isAttachedToDOMTree) {
@@ -746,7 +759,7 @@ function __declTracerObject__(window) {
                                     // attached to the tree after this call
                                 }
 
-                                if (origMethod.name == "getElementById" || origMethod.name == "querySelector")  {
+                                if (DOMReadAPIs.includes(origMethod.name))  {
                                     console.log(_shadowStackHead);
                                     customLocalStorage[_shadowStackHead]["DOM_read"] = true;
                                     attachedToDOMTree = true;
@@ -764,8 +777,10 @@ function __declTracerObject__(window) {
                                     arguments[0] = arguments[0].__orig__;
 
                                 const retVal = origMethod.apply(thisObj, arguments);
-                                if (retVal && typeof retVal === "object" && retVal.nodeType) {
-                                    debugger;
+                                /* For methods like "compareDocumentPosition" and "contains"
+                                the returned value type is bitmask and boolean, respectively, so
+                                it does not need to be wrapped in proxy! */
+                                if (retVal && typeof retVal === "object") { //&& retVal.nodeType
                                     return createDOMProxy(retVal, attachedToDOMTree);
                                 }
                                 return retVal;
@@ -1252,7 +1267,10 @@ function __declTracerObject__(window) {
             //     return isWinObj;
             // }
 
-            _ret = loggerFunction(target, key, method, rootType + "_reads");
+            /***** HORCRUX *****/
+            /* Added the condition to filter out the reads related to local DOM nodes! */
+            if (rootType != "DOM_NODE")
+                _ret = loggerFunction(target, key, method, rootType + "_reads");
 
             if (method && method.__isProxy) {
                 // if (rootType == "global" || method.__isProxy == "global")
@@ -1302,6 +1320,17 @@ function __declTracerObject__(window) {
               // console.log(target);
               var _proxyMethod = methodToProxy.get(method);
               if (_proxyMethod) return _proxyMethod;
+                /***** HORCRUX *****/
+                /* Example: if target is a DOM collection and key is an index
+                returned element should also be a DOM node -- set isDOMNode and attachedToDOMTree
+                */
+                if (receiver.__isDOMNode && receiver.__isAttachedToDOMTree) {
+                    customLocalStorage[_shadowStackHead]["DOM_read"] = true;
+                    // TODO (Shaghayegh)? I'm not sure if I have to add this to the DOM map and if type DOM_NODE is ok
+                    // test this with local variables
+                    // var proxyHandler = proxyEncapsulation(method, "DOM_NODE", null, attachedToDOMTree);
+                    // proxyMethod = new Proxy(method, proxyHandler);
+                }
               // var proxyHandler = rootType == "global"  ? handler : _shadowStackHead ? invocationToProxy[_shadowStackHead][1] : handler;
               var proxyMethod = new Proxy(method, handler);
               methodToProxy.set(method, proxyMethod);
@@ -1328,6 +1357,7 @@ function __declTracerObject__(window) {
             }
             /*The final value set should always be the actual value*/
             if (value && value.__isProxy) {
+                // TODO (Shaghayegh):
                 if (value.__isDOMNode) {
                     attachedToDOMTree = value.__isAttachedToDOMTree;
                     isDOMNode = value.__isDOMNode;
