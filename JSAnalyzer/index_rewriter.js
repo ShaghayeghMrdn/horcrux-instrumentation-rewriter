@@ -22,8 +22,11 @@ function mergeInto(options, defaultOptions) {
     return defaultOptions;
 }
 
-var makeId = function (type, path, node) {
-    let loc = node.loc;
+const makeId = function (type, path, node) {
+    // This should be consistent with makeId in index_plugin.js & index.js.
+    if (node.id)
+        var loc = node.id.loc;
+    else var loc = node.loc;
     return path + '-'
          + type + '-'
          + loc.start.line + '-'
@@ -32,12 +35,46 @@ var makeId = function (type, path, node) {
          + loc.end.column;
 };
 
+/* Helper function/var for detecting in-built function and overrides */
+const inBuiltOverrides = ["tostring", "tojson", "toprimitive", "typeof"];
+const isInBuiltFunction = function(fn){
+    if (!fn)
+        return false;
+    try {
+        var _e = eval(fn);
+        if (typeof _e == "function")
+            return true;
+        return false;
+    } catch (e){
+        return false;
+    }
+}
+
+/*
+Marks the function containing the node provided as argument, as uncacheable
+*/
+const markFunctionUnCacheable = function(node, reason){
+    var functionNode = util.getFunctionIdentifier(node);
+    if (functionNode){
+        if(!uncacheableFunctions[reason])
+            uncacheableFunctions[reason]=[];
+        if (uncacheableFunctions[reason].indexOf(functionNode)<0)
+            uncacheableFunctions[reason].push(functionNode);
+    }
+}
+
 
 function instrument(src, options) {
     var shebang = '', m;
     if (m = /^(#![^\n]+)\n/.exec(src)) {
         shebang = m[1];
         src = src.slice(shebang.length);
+    }
+
+    if (options.cg){
+        // options.myCg includes only the root invocations that are within this piece of JS
+        options.myCg = options.cg.filter(node => node.indexOf(options.path) >= 0);
+        console.log(`Only instrumenting ${options.myCg.length} function(s) from "${options.path}" script`);
     }
 
     const {wrappedSrc, instrumented} = traceFilter(src, options);
@@ -79,9 +116,11 @@ var traceFilter = function (content, options) {
     // console.log(options);
 
     try {
-        var ASTNodes = []; // List of all the nodes in the abstract syntax tree
-        var ASTSourceMap = new Map();
-        var fala = function () {
+        let ASTNodes = []; // List of all the nodes in the abstract syntax tree
+        let ASTSourceMap = new Map();
+        let instrumentedNodes = [];
+
+        let fala = function () {
             var m = falafel.apply(this, arguments);
             return {
                 map: function () { return '' },
@@ -89,13 +128,13 @@ var traceFilter = function (content, options) {
                 toString: function () { return m.toString() },
             };
         };
-        var update = function (node) {
+        let update = function (node) {
             node.update(Array.prototype.slice.call(arguments, 1).join(''));
         };
 
         content = globalWrapper.wrap(content, fala);
         result.wrappedSrc = content;
-        // var instrumentedNodes = [];
+
         let falafelOutput = fala({
             source: content,
             locations: true,
@@ -109,6 +148,21 @@ var traceFilter = function (content, options) {
         });
 
 
+        // Mark the root invocations that are given in the roots (cg) file
+        if (options.cg) {
+            ASTNodes.forEach(node => {
+                if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
+                    var index = makeId('function', options.path, node);
+                    if (options.myCg.indexOf(index) >= 0) {
+                        console.log("[Static analyzer] Function matching reported a match")
+                        instrumentedNodes.push(node);
+                    } else {
+                        markFunctionUnCacheable(node,"RTI");
+                    }
+                }
+            });
+        }
+
         ASTNodes.forEach((node) => {
             if (node.type === "Program") {
                 /* Ayush: If JS program is perpended  and appended with whitespace,
@@ -119,6 +173,26 @@ var traceFilter = function (content, options) {
                 if (options.jsInHTML){
                     update(node, '\n',node.source().replace(/^\s+|\s+$/g, ''),'\n');
                 }
+            }
+            else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
+
+                var fnName = util.getNameFromFunction(node);
+                if ((options.rti || options.cg) &&
+                    instrumentedNodes.indexOf(node) >= 0 &&
+                    ((fnName && inBuiltOverrides.filter(e => fnName.toLowerCase().indexOf(e) >= 0).length)
+                    || isInBuiltFunction(fnName))) {
+                    console.log("[Static Analyzer] Unhandled: in built overrides in source code," + fnName);
+                    markFunctionUnCacheable(node,"RTI");
+                }
+
+                var index = makeId('function', options.path, node);
+                if ((options.myRti || options.myCg) && uncacheableFunctions["RTI"].indexOf(node) >= 0)
+                    return;
+
+                // dropping the enclosing {}s
+                var nodeBody = node.body.source().substring(1, node.body.source().length-1);
+                let newBody = '{\nlet body = ' + JSON.stringify(nodeBody) + ';\n}';
+                update(node.body, newBody);
             }
 
         });
