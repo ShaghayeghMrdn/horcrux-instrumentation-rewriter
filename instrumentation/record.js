@@ -1,5 +1,6 @@
 
 
+const rewriter = require("../JSAnalyzer/index_rewriter.js");
 var fondue = require("../JSAnalyzer/index.js");
 var fondue_plugin = require("../JSAnalyzer/index_plugin.js");
 var fondue_replay = require("../JSAnalyzer/index_replay.js");
@@ -37,7 +38,7 @@ program
     .option("-t , --type [type]", "[HTML | Javascript (js)]", "html")
     .option("-j, --js-profile [file]","profile containing js runtime information")
     .option("-c, --cg-info [file]","profile containing call graph")
-    .option("-p, --pattern [pattern]","instrumentation pattern, either cg, or signature")
+    .option("-p, --pattern [pattern]","instrumentation pattern, either cg, record (signature), or none")
     .parse(process.argv)
 
 /*
@@ -50,6 +51,8 @@ if (program.pattern == "record")
     instrumentor = fondue;
 else if (program.pattern == "cg" || program.pattern == "timing")
     instrumentor = fondue_plugin;
+else if (program.pattern == "none")
+    instrumentor = rewriter;
 else instrumentor = fondue_replay;
 
 var staticInfo = instrumentor.staticInfo;
@@ -93,12 +96,12 @@ function instrumentHTML(src, fondueOptions) {
     // src = pretty(src);
 
     //set instrumentor for testing phase which doesn't call the main script
-    if (program.pattern == "record")
-        instrumentor = fondue;
-    else if (program.pattern == "cg" || program.pattern == "timing")
-        instrumentor = fondue_plugin;
-    else instrumentor = fondue_replay;
-        console.log("Pattern for current instrumentation: " + fondueOptions.pattern);
+    // if (program.pattern == "record")
+    //     instrumentor = fondue;
+    // else if (program.pattern == "cg" || program.pattern == "timing")
+    //     instrumentor = fondue_plugin;
+    // else instrumentor = fondue_replay;
+    console.log("Pattern for current instrumentation: " + fondueOptions.pattern);
 
     console.log("Instrumenting a html file");
     var scriptLocs = [];
@@ -181,8 +184,14 @@ function instrumentHTML(src, fondueOptions) {
         if (program.pattern == "timing")
             prefix="";
         // console.log("Instrumenting " + JSON.stringify(loc));
-        src = src.slice(0, loc.start)  + instrumentJavaScript(prefix + script, options, true) + src.slice(loc.end);
+        src = src.slice(0, loc.start) + instrumentJavaScript(prefix + script, options, true) + src.slice(loc.end);
         // console.log("And the final src is :" + src)
+    }
+
+    /***** HORCRUX *****/
+    /* No need to add any extra code to the top of the HTML right now! */
+    if (program.pattern == "none") {
+        return src;
     }
 
     if (!scriptLocs.length)
