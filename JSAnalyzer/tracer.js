@@ -2180,9 +2180,9 @@ function __declTracerObject__(window) {
             // customLocalStorage[cacheIndex].startTime = window.performance.now();
         } else {
             // if (!(cacheIndex in callGraph))
-            // callGraph[cacheIndex] = [];
+            callGraph[cacheIndex] = [];
             if (_shadowStackHead) {
-                // callGraph[_shadowStackHead].push(cacheIndex)
+                callGraph[_shadowStackHead].push(cacheIndex)
             } else {
                 timingInfo[cacheIndex] = [];
                 rootInvocs.push(cacheIndex);
