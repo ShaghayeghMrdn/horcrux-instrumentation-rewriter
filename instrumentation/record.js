@@ -39,6 +39,7 @@ program
     .option("-j, --js-profile [file]","profile containing js runtime information")
     .option("-c, --cg-info [file]","profile containing call graph")
     .option("-p, --pattern [pattern]","instrumentation pattern, either cg, record (signature), or rewrite")
+    .option("-s, --signature [file]", "final signature containing function dependencies")
     .parse(process.argv)
 
 /*
@@ -377,6 +378,24 @@ var main = function(){
         } catch (err){
             console.error("Error while reading the call graph Profile " + err);
             fondueOptions = mergeInto(fondueOptions, {cg: [], cgTime:[]});
+            return;
+        }
+    }
+    if (program.signature) {
+        try {
+            let sig = JSON.parse(fs.readFileSync(program.signature), "utf-8");
+            fondueOptions = mergeInto(fondueOptions, {signature: sig});
+        } catch (err) {
+            console.error("Error while parsing the signature file", err);
+            // fondueOptions = mergeInto(fondueOptions, {signature: {}});
+            return;
+        }
+    }
+    if (program.pattern == "rewrite") {
+        // check if all the needed files are given
+        if (!fondueOptions.cg || !fondueOptions.signature) {
+            console.error("Error while rewriting: " +
+                        "roots or signature file is not provided");
             return;
         }
     }

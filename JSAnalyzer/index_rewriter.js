@@ -65,16 +65,14 @@ const markFunctionUnCacheable = function(node, reason){
 
 
 function instrument(src, options) {
+    // options.cg sould not be null at this point, have checked in reocrd.js
+    options.myCg = options.cg.filter(node => node.indexOf(options.path) >= 0);
+    console.log(`Only instrumenting ${options.myCg.length} function(s) from "${options.path}" script`);
+
     var shebang = '', m;
     if (m = /^(#![^\n]+)\n/.exec(src)) {
         shebang = m[1];
         src = src.slice(shebang.length);
-    }
-
-    if (options.cg){
-        // options.myCg includes only the root invocations that are within this piece of JS
-        options.myCg = options.cg.filter(node => node.indexOf(options.path) >= 0);
-        console.log(`Only instrumenting ${options.myCg.length} function(s) from "${options.path}" script`);
     }
 
     const {wrappedSrc, instrumented} = traceFilter(src, options);
@@ -157,7 +155,7 @@ var traceFilter = function (content, options) {
                         console.log("[Static analyzer] Function matching reported a match")
                         instrumentedNodes.push(node);
                     } else {
-                        markFunctionUnCacheable(node,"RTI");
+                        markFunctionUnCacheable(node, "RTI");
                     }
                 }
             });
@@ -182,16 +180,32 @@ var traceFilter = function (content, options) {
                     ((fnName && inBuiltOverrides.filter(e => fnName.toLowerCase().indexOf(e) >= 0).length)
                     || isInBuiltFunction(fnName))) {
                     console.log("[Static Analyzer] Unhandled: in built overrides in source code," + fnName);
-                    markFunctionUnCacheable(node,"RTI");
+                    markFunctionUnCacheable(node, "RTI");
                 }
-
-                var index = makeId('function', options.path, node);
-                if ((options.myRti || options.myCg) && uncacheableFunctions["RTI"].indexOf(node) >= 0)
+                /* If a node is marked as uncacheable: it is either a built-in
+                function invocation or non-root invocation. Therefore, there is
+                no need to rewrite it's body. */
+                if (uncacheableFunctions["RTI"].indexOf(node) >= 0)
                     return;
 
+                let index = makeId('function', options.path, node);
                 // dropping the enclosing {}s
-                var nodeBody = node.body.source().substring(1, node.body.source().length-1);
-                let newBody = '{\nlet body = ' + JSON.stringify(nodeBody) + ';\n}';
+                let nodeBody = node.body.source().substring(1, node.body.source().length-1);
+                let rootSignature = options.signature[index]
+                if (!rootSignature || !rootSignature["sig"]) {
+                    console.log("WARN: could not find a signature" +
+                                `for root invocation ${index}` +
+                                " ... not changing the body!");
+                    return;
+                }
+                rootSignature = rootSignature["sig"];
+
+                let newBody = '{\nlet body = ' +
+                                JSON.stringify(nodeBody) + ';\n' +
+                                'let signature = ' +
+                                JSON.stringify(rootSignature) + ';\n' +
+                                '}';
+                console.log(newBody);
                 update(node.body, newBody);
             }
 
