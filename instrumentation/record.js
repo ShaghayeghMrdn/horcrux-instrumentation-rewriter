@@ -38,7 +38,7 @@ program
     .option("-t , --type [type]", "[HTML | Javascript (js)]", "html")
     .option("-j, --js-profile [file]","profile containing js runtime information")
     .option("-c, --cg-info [file]","profile containing call graph")
-    .option("-p, --pattern [pattern]","instrumentation pattern, either cg, record (signature), or none")
+    .option("-p, --pattern [pattern]","instrumentation pattern, either cg, record (signature), or rewrite")
     .parse(process.argv)
 
 /*
@@ -51,7 +51,7 @@ if (program.pattern == "record")
     instrumentor = fondue;
 else if (program.pattern == "cg" || program.pattern == "timing")
     instrumentor = fondue_plugin;
-else if (program.pattern == "none")
+else if (program.pattern == "rewrite")
     instrumentor = rewriter;
 else instrumentor = fondue_replay;
 
@@ -181,6 +181,8 @@ function instrumentHTML(src, fondueOptions) {
         //Add the script offset to be sent to the instrumentation script
         // options.scriptOffset = loc;
         var prefix = src.slice(0, loc.start).replace(/[^\n]/g, " "); // padding it out so line numbers make sense
+        // newlineCount = (prefix.match(/\n/g) || []).length;
+        // console.log('# of \\n:', newlineCount);
         if (program.pattern == "timing")
             prefix="";
         // console.log("Instrumenting " + JSON.stringify(loc));
@@ -190,7 +192,7 @@ function instrumentHTML(src, fondueOptions) {
 
     /***** HORCRUX *****/
     /* No need to add any extra code to the top of the HTML right now! */
-    if (program.pattern == "none") {
+    if (program.pattern == "rewrite") {
         return src;
     }
 
