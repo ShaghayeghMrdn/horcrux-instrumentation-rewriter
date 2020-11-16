@@ -37,9 +37,10 @@ program
     .option("-n, --name [name]", "name of the file being instrumented")
     .option("-t , --type [type]", "[HTML | Javascript (js)]", "html")
     .option("-j, --js-profile [file]","profile containing js runtime information")
-    .option("-c, --cg-info [file]","profile containing call graph")
+    .option("-c, --cg-info [file]", "an array containing root invocations")
     .option("-p, --pattern [pattern]","instrumentation pattern, either cg, record (signature), or rewrite")
     .option("-s, --signature [file]", "final signature containing function dependencies")
+    .option("-g, --callGraph [file]", "final call graph file")
     .parse(process.argv)
 
 /*
@@ -381,21 +382,25 @@ var main = function(){
             return;
         }
     }
-    if (program.signature) {
+    if (program.callGraph && program.signature) {
         try {
+            let callGraph = JSON.parse(fs.readFileSync(program.callGraph), "utf-8");
             let sig = JSON.parse(fs.readFileSync(program.signature), "utf-8");
-            fondueOptions = mergeInto(fondueOptions, {signature: sig});
+            fondueOptions = mergeInto(fondueOptions, {signature: sig, callGraph: callGraph});
         } catch (err) {
-            console.error("Error while parsing the signature file", err);
+            console.error("Error while parsing either callGraph or signature file", err);
             // fondueOptions = mergeInto(fondueOptions, {signature: {}});
             return;
         }
     }
     if (program.pattern == "rewrite") {
         // check if all the needed files are given
-        if (!fondueOptions.cg || !fondueOptions.signature) {
+        if (!fondueOptions.cg ||
+            !fondueOptions.signature ||
+            !fondueOptions.callGraph) {
             console.error("Error while rewriting: " +
-                        "roots or signature file is not provided");
+                        "one or more of roots(cg), callGraph, or signature" +
+                        "files are not provided");
             return;
         }
     }
