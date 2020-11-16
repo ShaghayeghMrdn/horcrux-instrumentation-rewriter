@@ -204,6 +204,7 @@ var traceFilter = function (content, options) {
                                 JSON.stringify(nodeBody) + ';\n' +
                                 'let signature = ' +
                                 JSON.stringify(rootSignature) + ';\n' +
+                                '__callScheduler__(body, signature);\n' +
                                 '}';
                 console.log(newBody);
                 update(node.body, newBody);

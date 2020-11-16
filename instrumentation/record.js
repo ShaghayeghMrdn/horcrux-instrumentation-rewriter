@@ -25,6 +25,7 @@ var OMNISTRINGIFYPATH = "../JSAnalyzer/omni.min.js";
 var omniStringify = fs.readFileSync(OMNISTRINGIFYPATH, "utf-8");
 var domJson = fs.readFileSync("../JSAnalyzer/domJson.js","utf-8");
 var worker = fs.readFileSync("../JSAnalyzer/worker.js","utf-8");
+const horcrux_scheduler = fs.readFileSync("../horcrux-scheduler/scheduler.js", "utf-8");
 
 var hostDir = "../tests/hostSrc/";
 var hostUrl = "http://goelayu4929.eecs.umich.edu:99/hostSrc/";
@@ -192,12 +193,6 @@ function instrumentHTML(src, fondueOptions) {
         // console.log("And the final src is :" + src)
     }
 
-    /***** HORCRUX *****/
-    /* No need to add any extra code to the top of the HTML right now! */
-    if (program.pattern == "rewrite") {
-        return src;
-    }
-
     if (!scriptLocs.length)
         var options = mergeInto(fondueOptions, {});
     // remove the doctype if there was one (it gets put back below)
@@ -223,7 +218,18 @@ function instrumentHTML(src, fondueOptions) {
         // console.log("updated instrumentation files");
     }
     // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
-    if (program.pattern != "timing")
+    /***** HORCRUX *****/
+    /* Adding prefixes to to the HTML to do 2 things:
+    1. Force the determinism on the client side for now (without concolic execution)
+    2. Add the Horcrux main scheduler code. */
+    if (program.pattern == "rewrite") {
+        src = doctype +
+            "\n<script>\n" +
+            deterministicCode +
+            "\n" + horcrux_scheduler +
+            "\n</script>\n" + src;
+    }
+    else if (program.pattern != "timing")
         src = doctype + "\n<script>\n" +  deterministicCode + omniStringify + fondue.instrumentationPrefix(options, program.pattern) + "\n</script>\n" + src;
     // console.log("ANd the ultimately final source being" + src)
     console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
