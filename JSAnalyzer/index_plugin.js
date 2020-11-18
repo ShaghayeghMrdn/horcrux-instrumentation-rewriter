@@ -9,7 +9,6 @@ var mergeDeep = require('deepmerge');
 var scope = require('./scopeAnalyzer.js');
 var util = require('./util.js');
 var signature = require('./signature.js');
-var globalWrapper = require('./global-code-wrapper.js');
 var e2eTesting = false;
 var anonCounter = 0;
 var node2index = new Map();
@@ -45,7 +44,7 @@ var makeId = function (type, path, node) {
          + loc.end.line + '-'
          + loc.end.column;
         var name = node.id != undefined ? node.id.name : "function_" + anonCounter++;
-        
+
         // functionCounter = functionCounter + 1;
         // console.log( " function counter is " + functionCounter)
         // simpleFunctions[origPath] = id;
@@ -151,7 +150,7 @@ var traceFilter = function (content, options) {
     var processed = content;
 
     try {
-        var fala, update, sourceNodes, functionNameToLocation = {}; // Dictionary: key is function name, value is an array containing all the locations it was defined. 
+        var fala, update, sourceNodes, functionNameToLocation = {}; // Dictionary: key is function name, value is an array containing all the locations it was defined.
 
         var ASTNodes = []; // List of all the nodes in the abstract syntax tree
         var ASTSourceMap = new Map();
@@ -205,7 +204,6 @@ var traceFilter = function (content, options) {
             // return ((src.indexOf("random") >= 0) || (src.indexOf("Date") >= 0));
         }
 
-        content = globalWrapper.wrap(content, fala);
 
         var instrumentedNodes = [];
         m = fala({
@@ -227,7 +225,7 @@ var traceFilter = function (content, options) {
                 if (matchedNode){
                     instrumentedNodes.push(matchedNode);
                     // staticInfo.rtiDebugInfo.matchedNodes.push(rtiNode);
-                } 
+                }
             })
 
             ASTNodes.forEach((node)=>{
@@ -237,7 +235,7 @@ var traceFilter = function (content, options) {
                     }
                 }
             })
-        } 
+        }
         else if (options.cg) {
             var instrumentedNodes = [], remainingRTINodes =[];
             ASTNodes.forEach((node)=>{
@@ -252,7 +250,7 @@ var traceFilter = function (content, options) {
                 }
 
             });
-        }  
+        }
 
 
 
@@ -272,7 +270,7 @@ var traceFilter = function (content, options) {
         }
 
         ASTNodes.forEach((node)=>{
-            if (node.type === "Program") { 
+            if (node.type === "Program") {
                 /*
                 Is Js is appended with whitespaces, remove it before updating the program node
                 since the whitespace is included in the program source in falafel v 2.1.0
@@ -284,11 +282,11 @@ var traceFilter = function (content, options) {
 
                 /*
                 Some JS files don't have access to the global execution context and they have a dynamically generated
-                html file, therefore create dummy tracer functions, just to avoid runtime errors. 
+                html file, therefore create dummy tracer functions, just to avoid runtime errors.
                 */
 
                 var tracerCheck = `\n(function(){if (typeof __tracer == 'undefined' && typeof window != 'undefined')
-                 { __tracer = {cacheInit:(arg)=>{}, 
+                 { __tracer = {cacheInit:(arg)=>{},
                     exitFunction: (arg,ret)=>{return ret}};
                  }
                 })();\n`;
@@ -298,7 +296,7 @@ var traceFilter = function (content, options) {
                 })();\n`;
                 if (node.source().indexOf("__tracer") >=0)
                     update(node, options.prefix,tracerCheck,sourceNodes(node))
-                else 
+                else
                     update(node, options.prefix,sourceNodes(node))
             } else if (node.type == "CallExpression" || node.type == "NewExpression") {
                 return;
@@ -319,10 +317,10 @@ var traceFilter = function (content, options) {
 
                     // if (node.callee.type == "SequenceExpression")
                     //     update(node, ' ',options.tracer_name+".logCallee((",node.callee.source(),'),',node.source(),")");
-                    // else 
+                    // else
                     //     update(node, ' ',options.tracer_name+".logCallee(",node.callee.source(),',',node.source(),")");
                 }
-            } 
+            }
 
 
             else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
@@ -340,7 +338,7 @@ var traceFilter = function (content, options) {
                     return;
 
                 var isRoot = node.id && node.id.name.indexOf(IIFE_NAME)>=0 ? true : false;
-                
+
                 if (isNonDeterministic(node.source())){
                     staticInfo.rtiDebugInfo.ND.push(index);
                 }
@@ -359,9 +357,9 @@ var traceFilter = function (content, options) {
                 // if (!containsReturn)
                     update(node.body, node.body.source(),' \n } finally {',
                          _traceEnd, JSON.stringify(index), ',true);\n }}');
-                // else 
+                // else
                     // update(node.body, node.body.source(),'}');
-                
+
             } /*else if (node.type == "ReturnStatement") {
                 var _functionId = util.getFunctionIdentifier(node);
                 if (_functionId) {
@@ -372,9 +370,9 @@ var traceFilter = function (content, options) {
                     if (node.argument && node.argument.type == "SequenceExpression" ) {
                         var returnValue = node.argument.expressions[node.argument.expressions.length - 1];
                         var preReturns = node.argument.expressions.slice(0,-1).map(function(e){return e.source()}).join();
-                        update(node, 'return ',preReturns ,',', options.tracer_name, 
+                        update(node, 'return ',preReturns ,',', options.tracer_name,
                         '.exitFunction(', JSON.stringify(functionId), ',',returnValue.source() ,',arguments',');');
-                    
+
                     } else {
                             update(node, "return ", options.tracer_name, '.exitFunction(', JSON.stringify(functionId),
                              ',', node.argument?node.argument.source():"null",',arguments',");");

@@ -1,5 +1,5 @@
-
-
+const falafel = require('falafel');
+const globalWrapper = require('../JSAnalyzer/global-code-wrapper.js');
 const rewriter = require("../JSAnalyzer/index_rewriter.js");
 var fondue = require("../JSAnalyzer/index.js");
 var fondue_plugin = require("../JSAnalyzer/index_plugin.js");
@@ -65,6 +65,15 @@ staticInfo.staticUncacheableFunctions = {};
 //Create file for communicating information back to the python script
 var returnInfoFile = program.input + ".info";
 fs.writeFileSync(returnInfoFile,"");
+
+let fala = function () {
+    var m = falafel.apply(this, arguments);
+    return {
+        map: function () { return '' },
+        chunks: m.chunks,
+        toString: function () { return m.toString() },
+    };
+};
 
 function instrumentHTML(src, fondueOptions) {
 
@@ -167,6 +176,36 @@ function instrumentHTML(src, fondueOptions) {
             var scriptEnd = scriptBegin + endMatch.index;
             scriptLocs.push({ start: scriptBegin, end: scriptEnd , offset: scriptOffset});
             lastScriptEnd = scriptEnd;
+        }
+    }
+    /***** HORCRUX *****/
+    /* First make pass and wrap all IIFE code in anonymous functions
+    before instrumentation. Since wrapping code shifts the column indexes.
+    The new column indexes are the ones reported by falafel static analyzer
+    during each instrumentation. However, the pieces of wrapped code are never
+    put together.
+    In the rewriting phase, I need to be able to retrieve a function source
+    code using the wrapped function locations. So instead of wrapping pieces of
+    IIFE one by one, here we wrap IIFEs in one pass and put them together as
+    updated src before starting the instrumentation pass (in reverse order)
+    where updated (wrapped) script locations are used.
+    */
+    // iterate over the scripts (forward) and globally wrap each one
+    for (let i = 0; i < scriptLocs.length; ++i) {
+        let loc = scriptLocs[i];
+        const scriptSrc = src.slice(loc.start, loc.end);
+        const wrappedSrc = globalWrapper.wrap(scriptSrc, fala);
+        src = src.slice(0, loc.start) + wrappedSrc + src.slice(loc.end);
+        // shift the end of this script and the rest of below scripts locations
+        const shift = wrappedSrc.length - scriptSrc.length;
+        loc.end += shift;
+        for (let j = i+1; j < scriptLocs.length; ++j) {
+            scriptLocs[j].start += shift;
+            scriptLocs[j].end += shift;
+        }
+        // just to double-check the locations -- remove later
+        if (wrappedSrc !== src.slice(loc.start, loc.end)) {
+            console.error('---------- BAD NEWS ----------');
         }
     }
 

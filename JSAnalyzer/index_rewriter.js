@@ -1,7 +1,6 @@
 const falafel = require('falafel');
 const fs = require('fs');
 const util = require('./util.js');
-const globalWrapper = require('./global-code-wrapper.js');
 const IIFE_NAME = "__HORCRUX__";
 
 /* Shaghayegh: I probably will not need these staticInfo,
@@ -72,27 +71,22 @@ function instrument(src, options) {
     var shebang = '', m;
     if (m = /^(#![^\n]+)\n/.exec(src)) {
         shebang = m[1];
+        console.log(`INFO: shebang: ${shebang}`);
         src = src.slice(shebang.length);
     }
 
-    const {wrappedSrc, instrumented} = traceFilter(src, options);
-    // console.log(instrumented.toString());
-    // console.log('---------------------------');
+    const instrumented = traceFilter(src, options);
     var output = {
         toString: function () {
             return shebang + instrumented.toString();
-        },
-        wrappedSrc: wrappedSrc,
+        }
     };
     return output;
 }
 
 
 var traceFilter = function (content, options) {
-    let result = {
-        wrappedSrc: content,
-        instrumented: content,
-    };
+    let instrumented = content;
 
     if (content.trim() === '') {
         return result;
@@ -130,10 +124,7 @@ var traceFilter = function (content, options) {
             node.update(Array.prototype.slice.call(arguments, 1).join(''));
         };
 
-        content = globalWrapper.wrap(content, fala);
-        result.wrappedSrc = content;
-
-        let falafelOutput = fala({
+        let instrumented = fala({
             source: content,
             locations: true,
             ranges: true,
@@ -191,10 +182,9 @@ var traceFilter = function (content, options) {
                 let index = makeId('function', options.path, node);
                 // dropping the enclosing {}s
                 let nodeBody = node.body.source().substring(1, node.body.source().length-1);
-                let rootSignature = options.signature[index]
+                let rootSignature = options.signature[index];
                 if (!rootSignature || !rootSignature["sig"]) {
-                    console.log("WARN: could not find a signature" +
-                                `for root invocation ${index}` +
+                    console.log(`WARN: no signature for ${index}` +
                                 " ... not changing the body!");
                     return;
                 }
@@ -206,17 +196,16 @@ var traceFilter = function (content, options) {
                                 JSON.stringify(rootSignature) + ';\n' +
                                 '__callScheduler__(body, signature);\n' +
                                 '}';
-                console.log(newBody);
+                // console.log(newBody);
                 update(node.body, newBody);
             }
 
         });
 
-        result.instrumented = falafelOutput;
     } catch (e) {
         console.error('[PARSING EXCEPTION]' + e);
     } finally {
-        return result;
+        return instrumented;
     }
 }
 

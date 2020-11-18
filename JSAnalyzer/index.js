@@ -14,7 +14,6 @@ var properties = require ("properties");
 var e2eTesting = false;
 var path = require('path');
 var babel = require('babel-core');
-var globalWrapper = require('./global-code-wrapper.js');
 var scriptName = path.basename(__filename);
 var functionCounter = 0;
 var minFunctionTime = 2;// Minimum function time worth replaying is 2ms -> emperically decided
@@ -836,7 +835,6 @@ var traceFilter = function (content, options) {
 			}
 		}
 
-		content = globalWrapper.wrap(content, fala);
 
 		// console.log(esprima.parse(content));
 		var instrumentedNodes = [];
