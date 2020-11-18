@@ -220,6 +220,12 @@ def instrument(root, fileType, output_directory,args,file):
     _log_path = log_directory+"/"+output_directory+"/" + get_valid_filename(filename) + "/"
     subprocess.call("mkdir -p {}".format(_log_path), shell=True)
 
+    # /***** HORCRUX *****/
+    # save the wrapped HTML file in the log folder
+    if (fileType == "html"):
+        wrapped_src_path = _log_path + "wrapped.html"
+        command += " -w "+wrapped_src_path
+
     log_file=open(_log_path+"logs","w")
     error_file=open(_log_path+"errors","w")
     # if (args.instOutput != "ND" or fileType == "html"):

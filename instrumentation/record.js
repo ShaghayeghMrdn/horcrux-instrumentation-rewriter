@@ -41,7 +41,8 @@ program
     .option("-c, --cg-info [file]", "an array containing root invocations")
     .option("-p, --pattern [pattern]","instrumentation pattern, either cg, record (signature), or rewrite")
     .option("-s, --signature [file]", "final signature containing function dependencies")
-    .option("-g, --callGraph [file]", "final call graph file")
+    .option("-g, --call-graph [file]", "final call graph file")
+    .option("-w, --wrapped-src [file]", "File path to save the globally wrapped HTML file")
     .parse(process.argv)
 
 /*
@@ -207,6 +208,11 @@ function instrumentHTML(src, fondueOptions) {
         if (wrappedSrc !== src.slice(loc.start, loc.end)) {
             console.error('---------- BAD NEWS ----------');
         }
+    }
+
+    if (program.wrappedSrc) {
+        console.log(`Wrote to wrappedSrc: ${program.wrappedSrc}`);
+        fs.writeFileSync(program.wrappedSrc, src);
     }
 
     // process the scripts in reverse order
