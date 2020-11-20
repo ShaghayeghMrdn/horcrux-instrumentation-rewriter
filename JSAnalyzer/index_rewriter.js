@@ -23,9 +23,9 @@ function mergeInto(options, defaultOptions) {
 
 const makeId = function (type, path, node) {
     // This should be consistent with makeId in index_plugin.js & index.js.
-    if (node.id)
-        var loc = node.id.loc;
-    else var loc = node.loc;
+    // if (node.id)
+    //     var loc = node.id.loc;
+    var loc = node.loc;
     return path + '-'
          + type + '-'
          + loc.start.line + '-'
@@ -124,7 +124,7 @@ var traceFilter = function (content, options) {
             node.update(Array.prototype.slice.call(arguments, 1).join(''));
         };
 
-        let instrumented = fala({
+        let falafelOutput = fala({
             source: content,
             locations: true,
             ranges: true,
@@ -202,6 +202,7 @@ var traceFilter = function (content, options) {
 
         });
 
+        instrumented = falafelOutput;
     } catch (e) {
         console.error('[PARSING EXCEPTION]' + e);
     } finally {

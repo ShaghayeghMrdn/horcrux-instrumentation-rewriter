@@ -202,9 +202,9 @@ function instrument(src, options) {
 
 
 var makeId = function (type, path, node) {
-	if (node.id)
-		var loc = node.id.loc;
-	else var loc = node.loc
+	// if (node.id)
+	// 	var loc = node.id.loc;
+	var loc = node.loc
 	if (e2eTesting) {
 		// console.log(functionCounter);
 		var origPath = path + '-'

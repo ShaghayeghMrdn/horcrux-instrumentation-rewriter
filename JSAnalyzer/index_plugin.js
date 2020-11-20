@@ -30,9 +30,9 @@ function mergeInto(options, defaultOptions) {
 }
 
 var makeId = function (type, path, node) {
-    if (node.id)
-        var loc = node.id.loc;
-    else var loc = node.loc
+    // if (node.id)
+    //     var loc = node.id.loc;
+    var loc = node.loc
     if (e2eTesting) {
         if (node2index.get(node))
             return node2index.get(node);

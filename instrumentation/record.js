@@ -214,6 +214,8 @@ function instrumentHTML(src, fondueOptions) {
         console.log(`Wrote to wrappedSrc: ${program.wrappedSrc}`);
         fs.writeFileSync(program.wrappedSrc, src);
     }
+    // send in the wrapped HTML source as part of options
+    fondueOptions = mergeInto({htmlSrc: src}, fondueOptions);
 
     // process the scripts in reverse order
     for (var i = scriptLocs.length - 1; i >= 0; i--) {
@@ -424,7 +426,7 @@ var main = function(){
             var cg = _cg;
             // var cgTime = _cg.map(e=>e[2]);
             // console.log(cg);
-            fondueOptions = mergeInto(fondueOptions, {cg: cg});
+            fondueOptions = mergeInto({cg: cg}, fondueOptions);
             staticInfo.rtiDebugInfo.ALL = cg.length;
             // console.log("cg nodes:" + cg);
         } catch (err){
@@ -437,7 +439,7 @@ var main = function(){
         try {
             let callGraph = JSON.parse(fs.readFileSync(program.callGraph), "utf-8");
             let sig = JSON.parse(fs.readFileSync(program.signature), "utf-8");
-            fondueOptions = mergeInto(fondueOptions, {signature: sig, callGraph: callGraph});
+            fondueOptions = mergeInto({signature: sig, callGraph: callGraph}, fondueOptions);
         } catch (err) {
             console.error("Error while parsing either callGraph or signature file", err);
             // fondueOptions = mergeInto(fondueOptions, {signature: {}});
