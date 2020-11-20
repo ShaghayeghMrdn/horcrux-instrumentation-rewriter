@@ -12,6 +12,61 @@ staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matched
 staticInfo.uncacheableFunctions = uncacheableFunctions;
 
 
+/* Rewriting helper function:
+ returns the definition of callee functions, called by current
+ function (identified by currentLoc). Nested functions that are
+ defined inside the current function body are excluded!
+*/
+function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
+    // look up the needed definitions in options.htmlLines
+    let calleeDefs = "";
+    calleeIndexes.forEach(function(calleeIndex){
+        const parts = calleeIndex.split('-');
+        const start_line = parts[parts.length-4],   // loc.start.line
+            start_col = parts[parts.length-3],   // loc.start.column
+            end_line = parts[parts.length-2],       // loc.end.line
+            end_col = parts[parts.length-1];     // loc.end.column
+
+        const defStartsInside = (
+            (start_line > currentLoc.start.line) ||
+            (start_line == currentLoc.start.line &&
+                start_col > currentLoc.start.column));
+
+        const defEndsInside = (
+            (end_line < currentLoc.end.line) ||
+            (end_line == currentLoc.end.line &&
+                end_col < currentLoc.end.column));
+
+        if (!(defStartsInside && defEndsInside)) {
+            // callee is defined outside currentFn
+            console.log(`current: ${JSON.stringify(currentLoc)}`);
+            console.log(`OUTSIDE: ${calleeIndex} -----`);
+            if (end_line > htmlSrcLines.length ||
+                end_col > htmlSrcLines[end_line-1].length) {
+                console.error(`ERROR: ${calleeIndex} falls out of HTML!`);
+                return;
+            }
+            if (start_line == end_line) {
+                // single-line function definition case
+                const line = htmlSrcLines[start_line-1];
+                calleeDefs += line.substring(start_col-1, end_col);
+            } else {
+                // multi-line function definition case
+                let i = start_line-1;
+                calleeDefs += htmlSrcLines[i].substring(start_col-1) + '\n';
+                // attention: i is increased and then condition is evaluated
+                while ((++i) < end_line-1) {
+                    calleeDefs += htmlSrcLines[i] + '\n';
+                }
+                // add the last line: now i is end_line-1
+                calleeDefs += htmlSrcLines[i].substring(0, end_col);
+            }
+            calleeDefs += '\n';
+        }
+    });
+    return JSON.stringify(calleeDefs);
+};
+
 function mergeInto(options, defaultOptions) {
     for (var key in options) {
         if (options[key] !== undefined) {
@@ -112,7 +167,7 @@ var traceFilter = function (content, options) {
         let ASTSourceMap = new Map();
         let instrumentedNodes = [];
 
-        let fala = function () {
+        const fala = function () {
             var m = falafel.apply(this, arguments);
             return {
                 map: function () { return '' },
@@ -120,7 +175,7 @@ var traceFilter = function (content, options) {
                 toString: function () { return m.toString() },
             };
         };
-        let update = function (node) {
+        const update = function (node) {
             node.update(Array.prototype.slice.call(arguments, 1).join(''));
         };
 
@@ -190,11 +245,21 @@ var traceFilter = function (content, options) {
                 }
                 rootSignature = rootSignature["sig"];
 
-                let newBody = '{\nlet body = ' +
+                const calleeFunctions = options.callGraph[index];
+                if (!Array.isArray(calleeFunctions)) {
+                    console.error(`Error: no callGraph entry for ${index}`);
+                    return;
+                }
+                const fnDefs = getNestedFnBodies(node.loc,
+                                                calleeFunctions,
+                                                options.htmlSrcLines);
+
+                let newBody = '{\n\tlet body = ' +
+                                (fnDefs + ' + ') +
                                 JSON.stringify(nodeBody) + ';\n' +
-                                'let signature = ' +
+                                '\tlet signature = ' +
                                 JSON.stringify(rootSignature) + ';\n' +
-                                '__callScheduler__(body, signature);\n' +
+                                '\t__callScheduler__(body, signature);\n' +
                                 '}';
                 // console.log(newBody);
                 update(node.body, newBody);

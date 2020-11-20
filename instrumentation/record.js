@@ -215,7 +215,7 @@ function instrumentHTML(src, fondueOptions) {
         fs.writeFileSync(program.wrappedSrc, src);
     }
     // send in the wrapped HTML source as part of options
-    fondueOptions = mergeInto({htmlSrc: src}, fondueOptions);
+    fondueOptions = mergeInto({htmlSrcLines: src.split('\n')}, fondueOptions);
 
     // process the scripts in reverse order
     for (var i = scriptLocs.length - 1; i >= 0; i--) {
