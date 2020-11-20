@@ -23,9 +23,9 @@ function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
     calleeIndexes.forEach(function(calleeIndex){
         const parts = calleeIndex.split('-');
         const start_line = parts[parts.length-4],   // loc.start.line
-            start_col = parts[parts.length-3],   // loc.start.column
+            start_col = parts[parts.length-3],      // loc.start.column
             end_line = parts[parts.length-2],       // loc.end.line
-            end_col = parts[parts.length-1];     // loc.end.column
+            end_col = parts[parts.length-1];        // loc.end.column
 
         const defStartsInside = (
             (start_line > currentLoc.start.line) ||
@@ -39,19 +39,15 @@ function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
 
         if (!(defStartsInside && defEndsInside)) {
             // callee is defined outside currentFn
-            console.log(`current: ${JSON.stringify(currentLoc)}`);
-            console.log(`OUTSIDE: ${calleeIndex} -----`);
             if (end_line > htmlSrcLines.length ||
                 end_col > htmlSrcLines[end_line-1].length) {
                 console.error(`ERROR: ${calleeIndex} falls out of HTML!`);
                 return;
             }
             if (start_line == end_line) {
-                // single-line function definition case
                 const line = htmlSrcLines[start_line-1];
                 calleeDefs += line.substring(start_col-1, end_col);
             } else {
-                // multi-line function definition case
                 let i = start_line-1;
                 calleeDefs += htmlSrcLines[i].substring(start_col-1) + '\n';
                 // attention: i is increased and then condition is evaluated
