@@ -26,6 +26,7 @@ var omniStringify = fs.readFileSync(OMNISTRINGIFYPATH, "utf-8");
 var domJson = fs.readFileSync("../JSAnalyzer/domJson.js","utf-8");
 var worker = fs.readFileSync("../JSAnalyzer/worker.js","utf-8");
 const horcrux_scheduler = fs.readFileSync("../horcrux-scheduler/scheduler.js", "utf-8");
+const horcrux_web_worker = fs.readFileSync("../horcrux-scheduler/worker.html", "utf-8");
 
 var hostDir = "../tests/hostSrc/";
 var hostUrl = "http://goelayu4929.eecs.umich.edu:99/hostSrc/";
@@ -265,12 +266,15 @@ function instrumentHTML(src, fondueOptions) {
         // console.log("updated instrumentation files");
     }
     // src = doctype + createScriptTag("omni.min.js") + createScriptTag("deterministic.js")  + createScriptTag("tracer.js") + src;
+
     /***** HORCRUX *****/
-    /* Adding prefixes to to the HTML to do 2 things:
-    1. Force the determinism on the client side for now (without concolic execution)
-    2. Add the Horcrux main scheduler code. */
+    /* Adding prefixes to to the HTML to do 3 things:
+    1. Add the web worker(s) code
+    2. Force the determinism on the client side for now (without concolic execution)
+    3. Add the Horcrux main scheduler code. */
     if (program.pattern == "rewrite") {
         src = doctype +
+            horcrux_web_worker +
             "\n<script>\n" +
             deterministicCode +
             "\n" + horcrux_scheduler +

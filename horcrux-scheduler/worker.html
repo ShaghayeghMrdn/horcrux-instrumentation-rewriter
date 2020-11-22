@@ -1,0 +1,24 @@
+<script id='__horcrux_worker__' type='javascript/worker'>
+    let workerSetup = Date.now();
+    // send a message to main thread to confirm setup is done
+    self.postMessage({'status': 'setup', 'ts': workerSetup});
+
+    self.addEventListener('message', (event) => {
+        let inputReceived = Date.now();
+        console.log(`worker received ${event.data}`);
+        console.log(event.data.fnArgs);
+        if (event.data.fnBody != null) {
+            // here expect to receive the function source
+            let funcStart = Date.now();
+            let source = new Function(event.data.fnArgs, event.data.fnBody);
+            // call the constructed function
+            source();
+            let runtime = Date.now() - funcStart;
+            self.postMessage({
+                'status': 'executed',
+                'inputReceived': inputReceived,
+                'runtime': runtime
+            });
+        }
+ });
+</script>
