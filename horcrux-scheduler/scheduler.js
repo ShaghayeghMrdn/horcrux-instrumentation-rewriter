@@ -39,14 +39,19 @@ function __defineScheduler__() {
 
     /**
      * Main thread 'message' event handler.
-     * @param {event} event Received message from worker in .data property
+     * @param {MessageEvent} event Received message from worker in .data property
      */
     function mainThreadListener(event) {
         console.log(`Main received: ${JSON.stringify(event.data)}`);
-        if (event.data.status == 'setup') {
-            // TODO
-            const setupTime = event.data.ts;
-            console.log(`worker setup time: ${setupTime}`);
+        if (event.data.id === 'undefined' || event.data.id >= numOfWorkers) {
+            console.error('Error: web worker message does not indicate the id');
+            return;
+        }
+        const worker = workers[event.data.id];
+        if (event.data.status == 'ready') {
+            const setupTime = event.data.setupDone - worker.setupStart;
+            console.log(`worker #${worker.id} setup time: ${setupTime}`);
+            availableWorkers.push(worker);
         }
         /*else if (event.data.status == 'executed') {
             const inputTime = event.data.inputReceived - inputStart;
@@ -77,8 +82,11 @@ function __defineScheduler__() {
                 assignedFunction: null,
                 inputStart: null,
             };
+            /* This message is not necessary to start the web worker, it
+             has already started, but more importantly it tells the web worker
+             its id. */
+            worker.postMessage({'cmd': 'start', 'id': workerId});
             workers.push(workerInfo);
-            availableWorkers.push(workerInfo);
         }
     };
 };

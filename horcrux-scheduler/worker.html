@@ -1,24 +1,34 @@
 <script id='__horcrux_worker__' type='javascript/worker'>
-    let workerSetup = Date.now();
-    // send a message to main thread to confirm setup is done
-    self.postMessage({'status': 'setup', 'ts': workerSetup});
+    const setupDone = Date.now();
+// workerId is set through the 'start' cmd sent from main
+// The worker should include its workerId in all of its messages to main
+let workerId = 0;
 
-    self.addEventListener('message', (event) => {
-        let inputReceived = Date.now();
-        console.log(`worker received ${event.data}`);
+self.addEventListener('message', (event) => {
+    const inputReceived = Date.now();
+    console.log(`Worker received ${JSON.stringify(event.data)}`);
+    if (event.data.cmd == 'start') {
+        workerId = event.data.id;
+        // send a message to main thread to confirm setup is done
+        self.postMessage({'status': 'ready',
+                          'id': workerId,
+                          'setupDone': setupDone});
+    } else if (event.data.cmd == 'execute') {
         console.log(event.data.fnArgs);
         if (event.data.fnBody != null) {
             // here expect to receive the function source
-            let funcStart = Date.now();
-            let source = new Function(event.data.fnArgs, event.data.fnBody);
+            const funcStart = Date.now();
+            const source = new Function(event.data.fnArgs, event.data.fnBody);
             // call the constructed function
             source();
-            let runtime = Date.now() - funcStart;
+            const runtime = Date.now() - funcStart;
             self.postMessage({
                 'status': 'executed',
+                'id': workerId,
                 'inputReceived': inputReceived,
-                'runtime': runtime
+                'runtime': runtime,
             });
         }
- });
+    }
+});
 </script>
