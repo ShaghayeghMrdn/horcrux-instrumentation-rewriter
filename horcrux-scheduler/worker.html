@@ -14,21 +14,27 @@ self.addEventListener('message', (event) => {
                           'id': workerId,
                           'setupDone': setupDone});
     } else if (event.data.cmd == 'execute') {
-        console.log(event.data.fnArgs);
-        if (event.data.fnBody != null) {
-            // here expect to receive the function source
-            const funcStart = Date.now();
-            const source = new Function(event.data.fnArgs, event.data.fnBody);
-            // call the constructed function
-            source();
-            const runtime = Date.now() - funcStart;
-            self.postMessage({
-                'status': 'executed',
-                'id': workerId,
-                'inputReceived': inputReceived,
-                'runtime': runtime,
-            });
+        const fnBody = event.data.fnBody;
+        const fnArgs = event.data.fnArgs;
+        if (fnBody === 'undefined' || fnArgs === 'undefined') {
+            const errorMsg = 'Error: function body or args are undefined';
+            console.error(errorMsg);
+            // TODO: send errorMsg back to main
+            return;
         }
+        const funcStart = Date.now();
+        // initialize window var in the worker's global scope
+        self.window = event.data.window;
+        console.log(`worker global scope: ${JSON.stringify(self.window)}`);
+        const reconstructed = new Function(fnArgs, fnBody);
+        reconstructed();
+        const runtime = Date.now() - funcStart;
+        self.postMessage({
+            'status': 'executed',
+            'id': workerId,
+            'window': self.window,
+            'runtime': runtime,
+        });
     }
 });
 </script>

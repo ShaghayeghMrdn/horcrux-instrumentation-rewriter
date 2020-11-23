@@ -12,6 +12,8 @@ function __defineScheduler__() {
     // List of available workers
     const availableWorkers = [];
     setUpWorkers();
+    // Horcrux special event queue: holds functions in order to be executed
+    const horcruxQueue = [];
 
     /** Wakes up the main scheduler to handle:
      * case 1: TODO
@@ -22,24 +24,84 @@ function __defineScheduler__() {
      * @param {Array} fnSignature list of function dependencies
      */
     window.__callScheduler__ = function(fnBody, fnSignature) {
-        const fnArgs = '';
-        // prepare the input arguments for the fnBody using the signature
-        fnSignature.forEach((dependency) => {
-            if (dependency[0].startsWith('closure')) {
-                console.error('Cannot handle:', dependency);
-            } else if (!dependency[0].startsWith('global')) {
-                console.log('Besides global and cloure:', dependency);
-            }
-            // no action is needed, if it's a global dependency
-        });
-        console.log('LOG: fnArgs:"' + fnArgs + '"');
-        const reconstructed = new Function(fnArgs, fnBody);
-        reconstructed();
+        // case 2: called from IIFE: offload a web worker if one is available
+        if (availableWorkers.length > 0) {
+            const workerInfo = availableWorkers.shift();
+            offloadToWorker(workerInfo, fnBody, fnSignature);
+        } else {
+            // TODO: Add to the special event queue
+            console.log(`Akh Akh!`);
+            horcruxQueue.push({'fnBody': fnBody, 'fnSignature': fnSignature});
+        }
     };
 
-    /**
-     * Main thread 'message' event handler.
-     * @param {MessageEvent} event Received message from worker in .data property
+    /** Offloads a function to a web worker using postMessage
+     * @param {Object} worker wrapper around actual worker object
+     * @param {string} fnBody stringified function body to be offloaded
+     * @param {Array} fnSignature list of function dependencies
+     */
+    function offloadToWorker(worker, fnBody, fnSignature) {
+        const fnArgs = [];
+        const windowClone = {};
+        const inputValues = [];
+        const outputValues = [];
+        // prepare the input arguments for the fnBody using the signature
+        fnSignature.forEach((dependency) => {
+            const scopeAccess = dependency[0].split('_');
+            if (scopeAccess[0] == 'global') {
+                const name = dependency[1].substring(4); // removes ';;;;'
+                handleGlobalDependency(scopeAccess[1], name);
+            } else if (scopeAccess[0] == 'closure') {
+                console.error('Cannot handle:', dependency);
+            } else {
+                console.log('Besides global and cloure:', dependency);
+            }
+        });
+        console.log('LOG: fnArgs:"' + fnArgs + '"');
+        worker.assignedDependencies = fnSignature;
+        worker.executing = true;
+        worker.workerObj.postMessage({
+            'cmd': 'execute',
+            'fnBody': fnBody,
+            'fnArgs': fnArgs.toString(),
+            'window': windowClone,
+            'inputValues': inputValues,
+            'outputValues': outputValues,
+        });
+
+        /* private helper functions for handling dependencies */
+        /**
+         * @param {string} access 'reads' or 'writes'
+         * @param {string} name global variable name without window.
+         */
+        function handleGlobalDependency(access, name) {
+            // for cases where window.name is accessed (read or write)
+            // if window.name is undefined, it will not be passed to worker
+            windowClone[name] = window[name];
+            if (access == 'reads') {
+                console.log(`reads global ${name} = ${window[name]}`);
+                // for case where name is accessed (without window.)
+                inputValues.push({'var': name, 'value': window[name]});
+            } else if (access == 'writes') {
+                console.log(`writes to global ${name}`);
+                outputValues.push(name);
+            }
+        };
+    };
+
+    /** Takes care of applying the worker updates/outputs to the main
+     * @param {Object} workerWindow updated window in worker scope
+     */
+    function applyWorkerUpdates(workerWindow) {
+        for (name in workerWindow) {
+            if (workerWindow[name] !== 'undefined') {
+                window[name] = workerWindow[name];
+            }
+        }
+    };
+
+    /** Main thread 'message' event handler.
+     * @param {MessageEvent} event Received message from worker in event.data
      */
     function mainThreadListener(event) {
         console.log(`Main received: ${JSON.stringify(event.data)}`);
@@ -52,12 +114,17 @@ function __defineScheduler__() {
             const setupTime = event.data.setupDone - worker.setupStart;
             console.log(`worker #${worker.id} setup time: ${setupTime}`);
             availableWorkers.push(worker);
+            // TODO: tof mali ro dorost konam
+            if (horcruxQueue.length > 0) {
+                const head = horcruxQueue.shift();
+                offloadToWorker(worker, head.fnBody, head.fnSignature);
+            }
+        } else if (event.data.status == 'executed') {
+            const workerId = event.data.id;
+            console.log(`worker #${workerId}: runtime=${event.data.runtime}`);
+            applyWorkerUpdates(event.data.window);
+            // TODO: free up worker using event.data.id
         }
-        /*else if (event.data.status == 'executed') {
-            const inputTime = event.data.inputReceived - inputStart;
-            const runtime = event.data.runtime;
-            console.log(`input time: ${inputTime}, runtime: ${runtime}`);
-        }*/
     }
 
     /**
@@ -79,8 +146,8 @@ function __defineScheduler__() {
                 id: workerId,
                 workerObj: worker,
                 setupStart: start,
-                assignedFunction: null,
-                inputStart: null,
+                executing: false,
+                assignedDependencies: null,
             };
             /* This message is not necessary to start the web worker, it
              has already started, but more importantly it tells the web worker
@@ -96,4 +163,4 @@ if (typeof __scheduler__ === 'undefined') {
 }
 
 
-//  LocalWords:  workerId workerInfo
+//  LocalWords:  workerId workerInfo postMessage
