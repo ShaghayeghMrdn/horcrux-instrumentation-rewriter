@@ -57,7 +57,6 @@ function __defineScheduler__() {
                 console.log('Besides global and cloure:', dependency);
             }
         });
-        console.log('LOG: fnArgs:"' + fnArgs + '"');
         worker.assignedDependencies = fnSignature;
         worker.executing = true;
         worker.workerObj.postMessage({
@@ -105,25 +104,28 @@ function __defineScheduler__() {
      */
     function mainThreadListener(event) {
         console.log(`Main received: ${JSON.stringify(event.data)}`);
-        if (event.data.id === 'undefined' || event.data.id >= numOfWorkers) {
+        const workerId = event.data.id;
+        if (workerId === 'undefined' || workerId >= numOfWorkers) {
             console.error('Error: web worker message does not indicate the id');
             return;
         }
-        const worker = workers[event.data.id];
+        const worker = workers[workerId];
         if (event.data.status == 'ready') {
             const setupTime = event.data.setupDone - worker.setupStart;
             console.log(`worker #${worker.id} setup time: ${setupTime}`);
             availableWorkers.push(worker);
-            // TODO: tof mali ro dorost konam
-            if (horcruxQueue.length > 0) {
-                const head = horcruxQueue.shift();
-                offloadToWorker(worker, head.fnBody, head.fnSignature);
-            }
         } else if (event.data.status == 'executed') {
-            const workerId = event.data.id;
             console.log(`worker #${workerId}: runtime=${event.data.runtime}`);
             applyWorkerUpdates(event.data.window);
-            // TODO: free up worker using event.data.id
+            // free up the worker and add it to available workers
+            worker.assignedDependencies = null;
+            worker.executing = false;
+            availableWorkers.push(worker);
+        }
+        // TODO: tof mali ro dorost konam
+        if (horcruxQueue.length > 0) {
+            const head = horcruxQueue.shift();
+            offloadToWorker(worker, head.fnBody, head.fnSignature);
         }
     }
 
