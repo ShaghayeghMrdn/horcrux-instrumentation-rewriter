@@ -1,6 +1,7 @@
 const falafel = require('falafel');
 const globalWrapper = require('../JSAnalyzer/global-code-wrapper.js');
 const rewriter = require("../JSAnalyzer/index_rewriter.js");
+const windowRewriter = require("../JSAnalyzer/index_window.js");
 var fondue = require("../JSAnalyzer/index.js");
 var fondue_plugin = require("../JSAnalyzer/index_plugin.js");
 var fondue_replay = require("../JSAnalyzer/index_replay.js");
@@ -194,9 +195,20 @@ function instrumentHTML(src, fondueOptions) {
     */
     // iterate over the scripts (forward) and globally wrap each one
     for (let i = 0; i < scriptLocs.length; ++i) {
+        const options = mergeInto(fondueOptions, {});
+        options.origPath = options.path;
+        options.path = options.path + "-script-" + i;
+        options.include_prefix = false;
+        options.jsInHTML = true;
+
         let loc = scriptLocs[i];
         const scriptSrc = src.slice(loc.start, loc.end);
-        const wrappedSrc = globalWrapper.wrap(scriptSrc, fala);
+        // wrap each IIFE in an anonymous function
+        let wrappedSrc = globalWrapper.wrap(scriptSrc, fala);
+
+        // rewrite all global variables to use window.
+        wrappedSrc = windowRewriter.instrument(wrappedSrc, options).toString()
+
         src = src.slice(0, loc.start) + wrappedSrc + src.slice(loc.end);
         // shift the end of this script and the rest of below scripts locations
         const shift = wrappedSrc.length - scriptSrc.length;
