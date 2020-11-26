@@ -27,7 +27,7 @@ var omniStringify = fs.readFileSync(OMNISTRINGIFYPATH, "utf-8");
 var domJson = fs.readFileSync("../JSAnalyzer/domJson.js","utf-8");
 var worker = fs.readFileSync("../JSAnalyzer/worker.js","utf-8");
 const horcrux_scheduler = fs.readFileSync("../horcrux-scheduler/scheduler.js", "utf-8");
-const horcrux_web_worker = fs.readFileSync("../horcrux-scheduler/worker.html", "utf-8");
+const horcrux_web_worker = fs.readFileSync("../horcrux-scheduler/worker.js", "utf-8");
 
 var hostDir = "../tests/hostSrc/";
 var hostUrl = "http://goelayu4929.eecs.umich.edu:99/hostSrc/";
@@ -286,7 +286,9 @@ function instrumentHTML(src, fondueOptions) {
     3. Add the Horcrux main scheduler code. */
     if (program.pattern == "rewrite") {
         src = doctype +
+            "\n<script id='__horcrux_worker__' type='javascript/worker'>\n" +
             horcrux_web_worker +
+            "\n</script>\n" +
             "\n<script>\n" +
             deterministicCode +
             "\n" + horcrux_scheduler +

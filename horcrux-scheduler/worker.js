@@ -1,4 +1,3 @@
-<script id='__horcrux_worker__' type='javascript/worker'>
     const setupDone = Date.now();
 // workerId is set through the 'start' cmd sent from main
 // The worker should include its workerId in all of its messages to main
@@ -37,4 +36,3 @@ self.addEventListener('message', (event) => {
         });
     }
 });
-</script>
