@@ -12,15 +12,15 @@ staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matched
 staticInfo.uncacheableFunctions = uncacheableFunctions;
 
 
-/* Rewriting helper function:
- returns the definition of callee functions, called by current
- function (identified by currentLoc). Nested functions that are
- defined inside the current function body are excluded!
-*/
+/** Rewriting helper function:
+ * returns an array containing the definitions of callee functions called by
+ * current function (identified by currentLoc). Nested functions that are
+ * defined inside the current function body are excluded!
+ */
 function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
     // look up the needed definitions in options.htmlLines
-    let calleeDefs = "";
-    calleeIndexes.forEach(function(calleeIndex){
+    const calleeDefs = [];
+    calleeIndexes.forEach(function(calleeIndex) {
         const parts = calleeIndex.split('-');
         const start_line = parts[parts.length-4],   // loc.start.line
             start_col = parts[parts.length-3],      // loc.start.column
@@ -39,6 +39,7 @@ function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
 
         if (!(defStartsInside && defEndsInside)) {
             // callee is defined outside currentFn
+            let fnDef = "";
             if (end_line > htmlSrcLines.length ||
                 end_col > htmlSrcLines[end_line-1].length) {
                 console.error(`ERROR: ${calleeIndex} falls out of HTML!`);
@@ -46,21 +47,21 @@ function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
             }
             if (start_line == end_line) {
                 const line = htmlSrcLines[start_line-1];
-                calleeDefs += line.substring(start_col-1, end_col);
+                fnDef += line.substring(start_col-1, end_col);
             } else {
                 let i = start_line-1;
-                calleeDefs += htmlSrcLines[i].substring(start_col-1) + '\n';
+                fnDef += htmlSrcLines[i].substring(start_col-1) + '\n';
                 // attention: i is increased and then condition is evaluated
                 while ((++i) < end_line-1) {
-                    calleeDefs += htmlSrcLines[i] + '\n';
+                    fnDef += htmlSrcLines[i] + '\n';
                 }
                 // add the last line: now i is end_line-1
-                calleeDefs += htmlSrcLines[i].substring(0, end_col);
+                fnDef += htmlSrcLines[i].substring(0, end_col);
             }
-            calleeDefs += '\n';
+            calleeDefs.push(fnDef+'\n');
         }
     });
-    return JSON.stringify(calleeDefs);
+    return calleeDefs;
 };
 
 function mergeInto(options, defaultOptions) {
@@ -251,8 +252,9 @@ var traceFilter = function (content, options) {
                                                 options.htmlSrcLines);
 
                 let newBody = '{\n\tlet body = ' +
-                                (fnDefs + ' + ') +
                                 JSON.stringify(nodeBody) + ';\n' +
+                                '\tlet fnDefs= ' +
+                                JSON.stringify(fnDefs) + ';\n' +
                                 '\tlet signature = ' +
                                 JSON.stringify(rootSignature) + ';\n' +
                                 '\t__callScheduler__(body, signature);\n' +

@@ -1550,10 +1550,11 @@ var traceFilter = function (content, options) {
 					// var functionId = makeId('function', options.path, _functionId);
 
 					// argReads.length && node.callee.type != "FunctionExpression" && rewriteArguments(argReads);
-					// commented these 3 lines so that global functions are not rewritten to use window
-					// if (options.useProxy) {
-					// 	readArray.forEach(rewriteWindow);
-					// }
+					/* Shaghayegh: comment these 3 lines if you want global
+					 functions not to use window anymore */
+					if (options.useProxy) {
+						readArray.forEach(rewriteWindow);
+					}
 					rewriteClosure(antiLocal,_functionId);
 					// antiLocal.length && Array.prototype.push.apply(functionToNonLocals[functionId], antiLocal);
 					// antiLocal.forEach(function(read){

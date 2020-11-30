@@ -35,6 +35,38 @@ function __defineScheduler__() {
         }
     };
 
+    /** Helper function for JSON stringify when the value is a function
+     * @param {string} key
+     * @param {string} value
+     * @return {string} stringified value
+     */
+    function functionStringifier(key, value) {
+        if (typeof(value) === 'function') {
+            return value.toString();
+        }
+        return value;
+    }
+
+    /** Helper function for JSON parse when the value is a function
+     * @param {string} key
+     * @param {string} value
+     * @return {string} stringified functions is reconstructed as functions
+     */
+    function functionReviver(key, value) {
+        if (key === '') return value;
+        if (typeof value === 'string') {
+            const rfunc = /function[^\(]*\(([^\)]*)\)[^\{]*{([^\}]*)\}/;
+            const match = value.match(rfunc);
+            if (match) {
+                const args = match[1].split(',').map(function(arg) {
+                    return arg.replace(/\s+/, '');
+                });
+                return new Function(args, match[2]);
+            }
+        }
+        return value;
+    }
+
     /** Offloads a function to a web worker using postMessage
      * @param {Object} worker wrapper around actual worker object
      * @param {string} fnBody stringified function body to be offloaded
@@ -63,7 +95,7 @@ function __defineScheduler__() {
             'cmd': 'execute',
             'fnBody': fnBody,
             'fnArgs': fnArgs.toString(),
-            'window': windowClone,
+            'window': JSON.stringify(windowClone, functionStringifier),
             'inputValues': inputValues,
             'outputValues': outputValues,
         });
@@ -77,14 +109,12 @@ function __defineScheduler__() {
             // for cases where window.name is accessed (read or write)
             // if window.name is undefined, it will not be passed to worker
             windowClone[name] = window[name];
-            if (access == 'reads') {
-                console.log(`reads global ${name} = ${window[name]}`);
-                // for case where name is accessed (without window.)
-                inputValues.push({'var': name, 'value': window[name]});
-            } else if (access == 'writes') {
+            if (access == 'writes') {
                 console.log(`writes to global ${name}`);
                 outputValues.push(name);
             }
+            // else if (access == 'reads')
+            // console.log(`reads global ${name} = ${window[name]}`);
         };
     };
 
@@ -116,7 +146,8 @@ function __defineScheduler__() {
             availableWorkers.push(worker);
         } else if (event.data.status == 'executed') {
             console.log(`worker #${workerId}: runtime=${event.data.runtime}`);
-            applyWorkerUpdates(event.data.window);
+            const workerWindow = JSON.parse(event.data.window, functionReviver);
+            applyWorkerUpdates(workerWindow);
             // free up the worker and add it to available workers
             worker.assignedDependencies = null;
             worker.executing = false;
