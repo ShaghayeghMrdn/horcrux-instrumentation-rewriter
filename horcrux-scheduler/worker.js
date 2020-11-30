@@ -4,10 +4,10 @@ const setupDone = Date.now();
 let workerId = 0;
 
 /** Helper function for JSON stringify when the value is a function
-    * @param {string} key
-    * @param {string} value
-    * @return {string} stringified value
-    */
+ * @param {string} key
+ * @param {string} value
+ * @return {string} stringified value
+ */
 function functionStringifier(key, value) {
     if (typeof(value) === 'function') {
         return value.toString();
@@ -16,10 +16,10 @@ function functionStringifier(key, value) {
 }
 
 /** Helper function for JSON parse when the value is a function
-    * @param {string} key
-    * @param {string} value
-    * @return {string} stringified functions is reconstructed as functions
-    */
+ * @param {string} key
+ * @param {string} value
+ * @return {string} stringified functions is reconstructed as functions
+ */
 function functionReviver(key, value) {
     if (typeof value === 'string') {
         const rfunc = /function[^\(]*\(([^\)]*)\)[^\{]*\{([\s\S]*)\}/;
@@ -32,6 +32,31 @@ function functionReviver(key, value) {
         }
     }
     return value;
+}
+
+/** Assign closure variables to worker scope as closure variables
+ * @param {Array} inputValues
+ */
+function initializeClosures(inputValues) {
+    for (const key in inputValues) {
+        if (Object.prototype.hasOwnProperty.call(inputValues, key)) {
+            self[key] = inputValues[key];
+        }
+    }
+}
+
+/** Copy updated closure variables to be sent back to main
+ * @param {Array} outputValues
+ * @return {Object} a cloned version of updated closure variables
+ */
+function cloneClosures(outputValues) {
+    const cloned = {};
+    outputValues.forEach(outputName => {
+        console.log(outputName);
+        const parts = outputName.split(';;;;');
+        cloned[parts[0]] = self[parts[0]];
+    });
+    return cloned;
 }
 
 
@@ -55,14 +80,19 @@ self.addEventListener('message', (event) => {
         const funcStart = Date.now();
         // initialize window var in the worker's global scope
         self.window = JSON.parse(event.data.window, functionReviver);
-        console.log(`worker global scope: ${JSON.stringify(self.window)}`);
+        // initialize the closure variables
+        initializeClosures(event.data.inputValues);
+        console.log(`worker scope: ${JSON.stringify(self)}`);
         const reconstructed = new Function(fnArgs, fnBody);
         reconstructed();
+        const updatedClosures = cloneClosures(event.data.outputValues);
+        console.log(`updated closures: ${JSON.stringify(updatedClosures)}`);
         const runtime = Date.now() - funcStart;
         self.postMessage({
             'status': 'executed',
             'id': workerId,
             'window': JSON.stringify(self.window, functionStringifier),
+            'updated': updatedClosures,
             'runtime': runtime,
         });
     }

@@ -14,6 +14,8 @@ function __defineScheduler__() {
     setUpWorkers();
     // Horcrux special event queue: holds functions in order to be executed
     const horcruxQueue = [];
+    // Map of updated closure variables
+    const closureMap = new Map();
 
     /** Wakes up the main scheduler to handle:
      * case 1: TODO
@@ -79,11 +81,12 @@ function __defineScheduler__() {
         // prepare the input arguments for the fnBody using the signature
         fnSignature.forEach((dependency) => {
             const scopeAccess = dependency[0].split('_');
+            const name = dependency[1].substring(4); // removes ';;;;'
             if (scopeAccess[0] == 'global') {
-                const name = dependency[1].substring(4); // removes ';;;;'
                 handleGlobalDependency(scopeAccess[1], name);
             } else if (scopeAccess[0] == 'closure') {
-                console.error('Cannot handle:', dependency);
+                const value = (scopeAccess[2] == 'reads') ? dependency[2] : '';
+                handleClosureDependency(scopeAccess[2], name, value);
             } else {
                 console.log('Besides global and cloure:', dependency);
             }
@@ -108,23 +111,43 @@ function __defineScheduler__() {
             // for cases where window.name is accessed (read or write)
             // if window.name is undefined, it will not be passed to worker
             windowClone[name] = window[name];
-            if (access == 'writes') {
-                console.log(`writes to global ${name}`);
+        };
+
+        /**
+         * @param {string} access 'reads' or 'writes'
+         * @param {string} name closure variable name and possibly value.
+         */
+        function handleClosureDependency(access, name, value) {
+            if (access == 'reads') {
+                console.log(`reads closure ${name} = ${value}`);
+                const valueParts = value.split(';;&;;');
+                inputValues[name] = JSON.parse(valueParts[0]);
+                // read from closureMap is no longer needed as we have values
+            }
+            else if (access == 'writes') {
                 outputValues.push(name);
             }
-            // else if (access == 'reads')
-            // console.log(`reads global ${name} = ${window[name]}`);
         };
+
     };
 
     /** Takes care of applying the worker updates/outputs to the main
      * @param {Object} workerWindow updated window in worker scope
+     * @param {Object} updatedClosures updated closure variables
      */
-    function applyWorkerUpdates(workerWindow) {
-        for (name in workerWindow) {
+    function applyWorkerUpdates(workerWindow, updatedClosures) {
+        for (const name in workerWindow) {
             if (workerWindow[name] !== 'undefined') {
                 window[name] = workerWindow[name];
             }
+        }
+        for (const name in updatedClosures) {
+            if (updatedClosures[name] !== 'undefined') {
+                closureMap.set(name, updatedClosures[name]);
+            }
+        }
+        for (let [key, value] of closureMap.entries()) {
+            console.log(key + ' = ' + JSON.stringify(value));
         }
     };
 
@@ -146,7 +169,7 @@ function __defineScheduler__() {
         } else if (event.data.status == 'executed') {
             console.log(`worker #${workerId}: runtime=${event.data.runtime}`);
             const workerWindow = JSON.parse(event.data.window, functionReviver);
-            applyWorkerUpdates(workerWindow);
+            applyWorkerUpdates(workerWindow, event.data.updated);
             // free up the worker and add it to available workers
             worker.assignedDependencies = null;
             worker.executing = false;
