@@ -53,9 +53,8 @@ function __defineScheduler__() {
      * @return {string} stringified functions is reconstructed as functions
      */
     function functionReviver(key, value) {
-        if (key === '') return value;
         if (typeof value === 'string') {
-            const rfunc = /function[^\(]*\(([^\)]*)\)[^\{]*{([^\}]*)\}/;
+            const rfunc = /function[^\(]*\(([^\)]*)\)[^\{]*\{([\s\S]*)\}/;
             const match = value.match(rfunc);
             if (match) {
                 const args = match[1].split(',').map(function(arg) {
