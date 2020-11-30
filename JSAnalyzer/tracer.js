@@ -1126,26 +1126,21 @@ function __declTracerObject__(window) {
             //     nonCacheableNodes[nodeId] = "signature size exceeds limit";
             // }
 
-            // if (childLogStr == null) {
-
-            //     childLogStr = stringifier.stringify(value,state,1);
-            //     if (childLogStr && childLogStr instanceof Error){
-            //         nonCacheableNodes[nodeId] = childLogStr.message;
-            //         // _shadowStackHead = null;
-            //         return 1;
-
-            //      } //else if (!childLogStr && logType.indexOf("reads")>=0 && childLogStr != "")
-            //         // childLogStr = "void 0";
-            // }
-
 
             // Doesn't make sense to log function reads, as I currently don't have a correct way of stringifying them
             if (!customLocalStorage[nodeId][logType])
                 customLocalStorage[nodeId][logType]=[];
             if (logType.indexOf("reads")>=0) {
-                if (logType.indexOf('closure')>=0)
+                if (logType.indexOf('closure') >=0 ) {
                     logType = `${closureScope}_reads`;
-                var log = [logType, rootId, key, childLogStr,childId ];
+                    childLogStr = stringifier.stringify(value, state, 1);
+                    if (childLogStr && childLogStr instanceof Error){
+                        nonCacheableNodes[nodeId] = childLogStr.message;
+                        return 1;
+                    }
+                    console.log(`---closure_reads value: ${childLogStr}---`);
+                }
+                var log = [logType, rootId, key, childLogStr, childId];
                 customLocalStorage[nodeId].readKeys.add(logType);
                 customLocalStorage[nodeId].push(log);
                 // customLocalStorage[nodeId][logType].push(log);
