@@ -44,10 +44,16 @@ var pruneSig = function(sig) {
             stringified.push(JSON.stringify([dep[0], dep[1]]));
         } else { // closure_..._reads/writes
             if (scopeAccess.length >= 3) {
-                stringified.push(JSON.stringify([dep[0], dep[1], dep[2]]));
+                if (scopeAccess[scopeAccess.length-1] == 'reads') {
+                    // include the closure_reads value
+                    const value = Array.isArray(dep[2]) ? dep[2][0] : dep[2];
+                    stringified.push(JSON.stringify([dep[0], dep[1], value]));
+                } else {
+                    // no need to print values for closure_writes
+                    stringified.push(JSON.stringify([dep[0], dep[1], dep[2]]));
+                }
             }
             // else {
-            //     // skip adding this dependency to stringified
             //     console.log(`Expected closure_LOC_reads: ${dep[0]}`);
             // }
         }
