@@ -1,5 +1,5 @@
 /*
-This modules process root signatures 
+This modules process root signatures
 Uses the root invocations to get root functions
 Uses signature information to extract root signatures
 Uses timing information to patch the root signatures with their times
@@ -35,7 +35,7 @@ var pruneSig = function(sig){
     if (!sig) return [];
     return sig
         .filter(e=>e[0].indexOf("global")>=0 || e[0].indexOf("closure")>=0)
-        .map(e=>JSON.stringify([e[0],e[1]]));
+        .map(e=>JSON.stringify([e[0],e[1], e[2]]));
 }
 
 var getRootFns = function(rootInvocs){
@@ -116,7 +116,7 @@ var cumulateRootSigs = function(rootFns, sigData, timingInfo){
 }
 
 function main(){
-    var ti = parse(program.timing).value, 
+    var ti = parse(program.timing).value,
         sig = parse(program.sig).value,
         roots = parse(program.roots);
 
@@ -127,7 +127,7 @@ function main(){
     // var roots = getRootFns(_roots);
     var accSigs = cumulateRootSigs(roots, sig, ti);
     program.output &&
-        fs.writeFileSync(program.output, JSON.stringify(accSigs));
+        fs.writeFileSync(program.output, JSON.stringify(accSigs, null, 2));
 }
 
 main();

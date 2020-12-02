@@ -14,7 +14,10 @@ function __defineScheduler__() {
     setUpWorkers();
     // Horcrux special event queue: holds functions in order to be executed
     const horcruxQueue = [];
-    // Map of updated closure variables
+    /** Map from closure def location to defined variables in that location.
+        value is a dictionary of variable names to their corresponding values
+     * @type{Object.<string, Object.<string, Object>>}
+     */
     const closureMap = new Map();
 
     /** Wakes up the main scheduler to handle:
@@ -31,8 +34,6 @@ function __defineScheduler__() {
             const workerInfo = availableWorkers.shift();
             offloadToWorker(workerInfo, fnBody, fnSignature);
         } else {
-            // TODO: Add to the special event queue
-            console.log(`Akh Akh!`);
             horcruxQueue.push({'fnBody': fnBody, 'fnSignature': fnSignature});
         }
     };
@@ -77,7 +78,11 @@ function __defineScheduler__() {
         const fnArgs = [];
         const windowClone = {};
         const inputValues = [];
-        const outputValues = [];
+        /** a dictionary of closure definition location to closure variables
+         * defined in that location and updated in the worker
+         * @type{Object.<string, string[]>}
+         */
+        const outputValues = {};
         // prepare the input arguments for the fnBody using the signature
         fnSignature.forEach((dependency) => {
             const scopeAccess = dependency[0].split('_');
@@ -85,8 +90,10 @@ function __defineScheduler__() {
             if (scopeAccess[0] == 'global') {
                 handleGlobalDependency(scopeAccess[1], name);
             } else if (scopeAccess[0] == 'closure') {
-                const value = (scopeAccess[2] == 'reads') ? dependency[2] : '';
-                handleClosureDependency(scopeAccess[2], name, value);
+                console.assert(scopeAccess.length == 3, 'Expected length = 3');
+                const access = scopeAccess[2]; // "reads" or "writes"
+                const value = (access == 'reads') ? dependency[2] : '';
+                handleClosureDependency(scopeAccess[1], access, name, value);
             } else {
                 console.log('Besides global and cloure:', dependency);
             }
@@ -113,27 +120,43 @@ function __defineScheduler__() {
             windowClone[name] = window[name];
         };
 
-        /**
+        /** Preparing closure dependencies to be passed to worker
+         * @param {string} location of surrounding function that defines closure
          * @param {string} access 'reads' or 'writes'
-         * @param {string} name closure variable name and possibly value.
+         * @param {string} name closure variable name (might be path)
+         * @param {string} value of the closure variable that is read
          */
-        function handleClosureDependency(access, name, value) {
+        function handleClosureDependency(location, access, name, value) {
             if (access == 'reads') {
-                console.log(`reads closure ${name} = ${value}`);
-                const valueParts = value.split(';;&;;');
-                inputValues[name] = JSON.parse(valueParts[0]);
-                // read from closureMap is no longer needed as we have values
-            }
-            else if (access == 'writes') {
-                outputValues.push(name);
+                // console.log(`reads closure ${name} = ${value}`);
+                const nameParts = name.split(';;;;');
+                if (nameParts.length == 1) {
+                    const valueParts = value.split(';;&;;');
+                    if (valueParts[1] == 'object' &&
+                        valueParts[3] == 'Object') {
+                        inputValues[name] = JSON.parse(valueParts[0]);
+                        if (!closureMap.has(location)) {
+                            closureMap.set(location, {name: inputValues[name]});
+                        } else {
+                            // just double-checking the values in closureMap
+                            const old = closureMap.get(location);
+                            console.log(old[name], 'vs', inputValues[name]);
+                        }
+                    }
+                }
+            } else if (access == 'writes') {
+                if (outputValues[location] === undefined) {
+                    outputValues[location] = [];
+                }
+                outputValues[location].push(name);
             }
         };
-
     };
 
     /** Takes care of applying the worker updates/outputs to the main
      * @param {Object} workerWindow updated window in worker scope
-     * @param {Object} updatedClosures updated closure variables
+     * @param {Object.<string, Object>} updatedClosures dictionary from
+     * closure definition location to the updated closure variables
      */
     function applyWorkerUpdates(workerWindow, updatedClosures) {
         for (const name in workerWindow) {
@@ -141,13 +164,17 @@ function __defineScheduler__() {
                 window[name] = workerWindow[name];
             }
         }
-        for (const name in updatedClosures) {
-            if (updatedClosures[name] !== 'undefined') {
-                closureMap.set(name, updatedClosures[name]);
+        for (const location in updatedClosures) {
+            if (closureMap.has(location)) {
+                // TODO: should not set the whole object
+                // if parts of object is sent from worker only those fields
+                // need to be updated here
+                closureMap.get(location);
+                closureMap.set(location, updatedClosures[location]);
             }
         }
-        for (let [key, value] of closureMap.entries()) {
-            console.log(key + ' = ' + JSON.stringify(value));
+        for (const [key, value] of closureMap.entries()) {
+            console.log(`closureMap: ${key} = ${JSON.stringify(value)}`);
         }
     };
 
@@ -164,10 +191,10 @@ function __defineScheduler__() {
         const worker = workers[workerId];
         if (event.data.status == 'ready') {
             const setupTime = event.data.setupDone - worker.setupStart;
-            console.log(`worker #${worker.id} setup time: ${setupTime}`);
+            // console.log(`worker #${worker.id} setup time: ${setupTime}`);
             availableWorkers.push(worker);
         } else if (event.data.status == 'executed') {
-            console.log(`worker #${workerId}: runtime=${event.data.runtime}`);
+            // console.log(`worker #${workerId}: runtime=${event.data.runtime}`);
             const workerWindow = JSON.parse(event.data.window, functionReviver);
             applyWorkerUpdates(workerWindow, event.data.updated);
             // free up the worker and add it to available workers
@@ -218,4 +245,4 @@ if (typeof __scheduler__ === 'undefined') {
 }
 
 
-//  LocalWords:  workerId workerInfo postMessage
+//  LocalWords:  workerId workerInfo postMessage closureMap updatedClosures

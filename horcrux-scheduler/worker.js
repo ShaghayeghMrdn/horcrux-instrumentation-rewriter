@@ -46,17 +46,22 @@ function initializeClosures(inputValues) {
 }
 
 /** Copy updated closure variables to be sent back to main
- * @param {Array} outputValues
- * @return {Object} a cloned version of updated closure variables
+ * @param {Object.<string, string[]>} outputValues
+ * @return {Object.<string, Object>} a clone of updated closure variables
  */
 function cloneClosures(outputValues) {
-    const cloned = {};
-    outputValues.forEach(outputName => {
-        console.log(outputName);
-        const parts = outputName.split(';;;;');
-        cloned[parts[0]] = self[parts[0]];
+    const updated = {};
+    Object.keys(outputValues).forEach((location) => {
+        const updatedVars = outputValues[location];
+        updated[location] = {};
+        updatedVars.forEach((varName) => {
+            const parts = varName.split(';;;;');
+            // TODO: more efficient way would be to only send back the inner
+            // field which is updated instead of the whole object
+            updated[location][parts[0]] = self[parts[0]];
+        });
     });
-    return cloned;
+    return updated;
 }
 
 
@@ -82,11 +87,12 @@ self.addEventListener('message', (event) => {
         self.window = JSON.parse(event.data.window, functionReviver);
         // initialize the closure variables
         initializeClosures(event.data.inputValues);
-        console.log(`worker scope: ${JSON.stringify(self)}`);
         const reconstructed = new Function(fnArgs, fnBody);
         reconstructed();
         const updatedClosures = cloneClosures(event.data.outputValues);
-        console.log(`updated closures: ${JSON.stringify(updatedClosures)}`);
+        if (Object.keys(updatedClosures).length !== 0) {
+            console.log('Worker updated closures:', updatedClosures);
+        }
         const runtime = Date.now() - funcStart;
         self.postMessage({
             'status': 'executed',
