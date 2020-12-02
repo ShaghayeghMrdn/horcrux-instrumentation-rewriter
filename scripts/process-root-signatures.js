@@ -31,11 +31,28 @@ var parse = function(f){
     }
 }
 
-var pruneSig = function(sig){
+var pruneSig = function(sig) {
     if (!sig) return [];
-    return sig
-        .filter(e=>e[0].indexOf("global")>=0 || e[0].indexOf("closure")>=0)
-        .map(e=>JSON.stringify([e[0],e[1], e[2]]));
+    const filtered = sig.filter(dep => (dep[0].startsWith("global") ||
+            dep[0].startsWith("closure") ||
+            dep[0].startsWith("DOM")))
+    const stringified = [];
+    filtered.forEach((dep) => { // each dependency is a list itself
+        // each dependency is a list: scopeAccess, varName (, value)?
+        const scopeAccess = dep[0].split('_');
+        if (scopeAccess[0] == "global" || scopeAccess[0] == "DOM") {
+            stringified.push(JSON.stringify([dep[0], dep[1]]));
+        } else { // closure_..._reads/writes
+            if (scopeAccess.length >= 3) {
+                stringified.push(JSON.stringify([dep[0], dep[1], dep[2]]));
+            }
+            // else {
+            //     // skip adding this dependency to stringified
+            //     console.log(`Expected closure_LOC_reads: ${dep[0]}`);
+            // }
+        }
+    });
+    return stringified;
 }
 
 var getRootFns = function(rootInvocs){
