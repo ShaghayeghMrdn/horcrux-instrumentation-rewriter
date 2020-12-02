@@ -145,7 +145,7 @@ def get_valid_filename(s):
     return re.sub(r'(?u)[^-\w.]', '', s)
 
 
-def instrument(root, fileType, output_directory,args,file):
+def instrument(root, fileType, output_directory, args, file):
     f = open(os.path.join(root,file), "rb")
     http_response = http_record_pb2.RequestResponse()
     http_response.ParseFromString(f.read())
@@ -205,6 +205,12 @@ def instrument(root, fileType, output_directory,args,file):
             # os._exit(0)
     else: f.write(http_response.response.body)
     f.close()
+    # /***** HORCRUX *****/
+    if (args.instOutput == "rewrite"):
+        inst_file_name = url + ";;;;" + origPath
+        command = " record.js -i {} -n '{}' -t {} -p {}".format(TEMP_FILE, inst_file_name, fileType, args.instOutput)
+        command += " -c {} -g {} -s {}".format(args.cgInfo, args.callGraph, args.signature)
+        print('-----'+command+'-----')
     if (args.jsProfile):
     #Pass into the nodejs instrumentation script
         command = " {} -i {} -n '{}' -t {} -j {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile, args.instOutput)
@@ -398,10 +404,12 @@ if __name__ == "__main__":
     parser.add_argument('input', help='path to input directory')
     parser.add_argument('output', help='path to output directory')
     parser.add_argument('instOutput', help='type of instrumentation to perform',
-     default="record", choices=["cg","record", "replay","timing"])
+        default="record", choices=["cg", "record", "rewrite"])
     parser.add_argument('logDir', help='path to log output directory')
     parser.add_argument('--jsProfile', help='path to the js profile')
-    parser.add_argument('--cgInfo',help="path to the cg info")
+    parser.add_argument('--cgInfo', help="path to the roots file")
+    parser.add_argument('--callGraph', help="path to the call graph file")
+    parser.add_argument('--signature', help="path to the final signature file")
     parser.add_argument('--debug',help="enable node debugging using -inspect flag")
     args = parser.parse_args()
     main(args)
