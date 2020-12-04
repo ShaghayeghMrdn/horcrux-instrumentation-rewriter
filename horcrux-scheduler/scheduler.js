@@ -31,12 +31,13 @@ function __defineScheduler__() {
         }
         const head = horcruxQueue.shift();
         if (head.touchDOM) {
-            executeOnMain(head.fnBody, head.fnSignature);
+            executeOnMain(head.index, head.fnBody, head.fnSignature);
         } else {
             // try to offload it if there is an idle worker
             if (availableWorkers.length > 0) {
                 const worker = availableWorkers.shift();
-                offloadToWorker(worker, head.fnBody, head.fnSignature);
+                offloadToWorker(worker,
+                    head.index, head.fnBody, head.fnSignature);
             }
         }
     }
@@ -46,19 +47,20 @@ function __defineScheduler__() {
      * it adds the function to our Horcrux queue.
      * -- This function is defined as a property of window so that
      * it can be called from inside rewritten IIFE and async functions.
+     * @param {string} index location of function that invoked callScheduler
      * @param {string} fnBody stringified function body, sent to constructor
      * @param {Array} fnSignature list of function dependencies
      * @param {boolean} touchDOM whether the to-be function is accessing DOM
      */
-    window.__callScheduler__ = function(fnBody, fnSignature, touchDOM) {
+    window.__callScheduler__ = function(index, fnBody, fnSignature, touchDOM) {
         if (!touchDOM &&
             horcruxQueue.length == 0 &&
             availableWorkers.length > 0) {
             const workerInfo = availableWorkers.shift();
-            offloadToWorker(workerInfo, fnBody, fnSignature);
+            offloadToWorker(workerInfo, index, fnBody, fnSignature);
         } else {
             // Shorthand property names -- e.g., {a:a, b:b, c:c}
-            horcruxQueue.push({fnBody, fnSignature, touchDOM});
+            horcruxQueue.push({index, fnBody, fnSignature, touchDOM});
         }
     };
 
@@ -95,10 +97,11 @@ function __defineScheduler__() {
 
     /** Offloads a function to a web worker using postMessage
      * @param {Object} worker wrapper around actual worker object
+     * @param {string} index original function location
      * @param {string} fnBody stringified function body to be offloaded
      * @param {Array} fnSignature list of function dependencies
      */
-    function offloadToWorker(worker, fnBody, fnSignature) {
+    function offloadToWorker(worker, index, fnBody, fnSignature) {
         const fnArgs = [];
         const windowClone = {};
         const inputValues = [];
@@ -124,6 +127,7 @@ function __defineScheduler__() {
         });
         worker.assignedDependencies = fnSignature;
         worker.executing = true;
+        console.log(`Offloading ${index} to worker`);
         worker.workerObj.postMessage({
             'cmd': 'execute',
             'fnBody': fnBody,
@@ -267,7 +271,7 @@ function __defineScheduler__() {
      * assign each closure variable to an input argument with the same name
      * Passing these values as input arguments should solve the problem.
      */
-    function executeOnMain(fnBody, fnSignature) {
+    function executeOnMain(index, fnBody, fnSignature) {
         let fnArgs = '';
         fnSignature.forEach((dependency) => {
             const scopeAccess = dependency[0].split('_');
@@ -281,6 +285,7 @@ function __defineScheduler__() {
             }
         });
 
+        console.log(`Executing ${index} on main`);
         // reconstruct the function
         const reconstructed = new Function(fnArgs, fnBody);
         reconstructed();

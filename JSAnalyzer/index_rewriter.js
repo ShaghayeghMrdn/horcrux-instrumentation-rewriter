@@ -248,6 +248,13 @@ var traceFilter = function (content, options) {
                         touchDOM = true;
                     } else {
                         dependencies.push(dependency);
+                        // if the first part of variable name is 'document'
+                        // then the function is touching DOM
+                        const parts = dependency[1].split(';;;;');
+                        // variable name starts with ;;;; so skip index 0
+                        if (parts[1] == 'document') {
+                            touchDOM = true;
+                        }
                     }
                 });
 
@@ -266,8 +273,8 @@ var traceFilter = function (content, options) {
                                 JSON.stringify(fnDefs) + ';\n' +
                                 '\tconst signature = ' +
                                 JSON.stringify(dependencies) + ';\n' +
-                                '\t__callScheduler__(body, signature, ' +
-                                `touchDOM = ${touchDOM});\n` +
+                                `\t__callScheduler__("${index}", ` +
+                                `body, signature, touchDOM = ${touchDOM});\n` +
                                 '}';
                 // console.log(newBody);
                 update(node.body, newBody);
