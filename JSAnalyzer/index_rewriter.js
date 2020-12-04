@@ -234,13 +234,22 @@ var traceFilter = function (content, options) {
                 let index = makeId('function', options.path, node);
                 // dropping the enclosing {}s
                 let nodeBody = node.body.source().substring(1, node.body.source().length-1);
-                let rootSignature = options.signature[index];
+                const rootSignature = options.signature[index];
                 if (!rootSignature || !rootSignature["sig"]) {
                     console.log(`WARN: no signature for ${index}` +
                                 " ... not changing the body!");
                     return;
                 }
-                rootSignature = rootSignature["sig"];
+                let touchDOM = false;
+                const dependencies = [];
+                rootSignature["sig"].forEach((dependency) => {
+                    if (dependency[0] == 'DOM_read'
+                        || dependency[0] == 'DOM_write') {
+                        touchDOM = true;
+                    } else {
+                        dependencies.push(dependency);
+                    }
+                });
 
                 const calleeFunctions = options.callGraph[index];
                 if (!Array.isArray(calleeFunctions)) {
@@ -251,13 +260,14 @@ var traceFilter = function (content, options) {
                                                 calleeFunctions,
                                                 options.htmlSrcLines);
 
-                let newBody = '{\n\tlet body = ' +
+                const newBody = '{\n\tconst body = ' +
                                 JSON.stringify(nodeBody) + ';\n' +
-                                '\tlet fnDefs= ' +
+                                '\tconst fnDefs= ' +
                                 JSON.stringify(fnDefs) + ';\n' +
-                                '\tlet signature = ' +
-                                JSON.stringify(rootSignature) + ';\n' +
-                                '\t__callScheduler__(body, signature);\n' +
+                                '\tconst signature = ' +
+                                JSON.stringify(dependencies) + ';\n' +
+                                '\t__callScheduler__(body, signature, ' +
+                                `touchDOM = ${touchDOM});\n` +
                                 '}';
                 // console.log(newBody);
                 update(node.body, newBody);

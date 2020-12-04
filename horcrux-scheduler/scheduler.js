@@ -15,26 +15,50 @@ function __defineScheduler__() {
     // Horcrux special event queue: holds functions in order to be executed
     const horcruxQueue = [];
     /** Map from closure def location to defined variables in that location.
-        value is a dictionary of variable names to their corresponding values
-     * @type{Object.<string, Object.<string, Object>>}
+     * value is a dictionary of variable names to their corresponding values
+     * @type {Object.<string, Object.<string, Object>>}
      */
     const closureMap = new Map();
 
-    /** Wakes up the main scheduler to handle:
-     * case 1: TODO
-     * case 2: when a function wanted to be invoked inside <script>
+    /** Wakes up the scheduler to execute the next function in the queue
+     * Gets called when either the worker or the main thread has finished
+     * executing the previous function.
+     */
+    function executeNextFunction() {
+        if (horcruxQueue.length == 0) {
+            console.log('DONE!');
+            return;
+        }
+        const head = horcruxQueue.shift();
+        if (head.touchDOM) {
+            executeOnMain(head.fnBody, head.fnSignature);
+        } else {
+            // try to offload it if there is an idle worker
+            if (availableWorkers.length > 0) {
+                const worker = availableWorkers.shift();
+                offloadToWorker(worker, head.fnBody, head.fnSignature);
+            }
+        }
+    }
+
+    /** Gets called from inside a rewritten IIFE (<script>).
+     * If possible, offloads the function to a web worker right away, otherwise
+     * it adds the function to our Horcrux queue.
      * -- This function is defined as a property of window so that
      * it can be called from inside rewritten IIFE and async functions.
      * @param {string} fnBody stringified function body, sent to constructor
      * @param {Array} fnSignature list of function dependencies
+     * @param {boolean} touchDOM whether the to-be function is accessing DOM
      */
-    window.__callScheduler__ = function(fnBody, fnSignature) {
-        // case 2: called from IIFE: offload a web worker if one is available
-        if (availableWorkers.length > 0) {
+    window.__callScheduler__ = function(fnBody, fnSignature, touchDOM) {
+        if (!touchDOM &&
+            horcruxQueue.length == 0 &&
+            availableWorkers.length > 0) {
             const workerInfo = availableWorkers.shift();
             offloadToWorker(workerInfo, fnBody, fnSignature);
         } else {
-            horcruxQueue.push({'fnBody': fnBody, 'fnSignature': fnSignature});
+            // Shorthand property names -- e.g., {a:a, b:b, c:c}
+            horcruxQueue.push({fnBody, fnSignature, touchDOM});
         }
     };
 
@@ -95,7 +119,7 @@ function __defineScheduler__() {
                 const value = (access == 'reads') ? dependency[2] : '';
                 handleClosureDependency(scopeAccess[1], access, name, value);
             } else {
-                console.log('Besides global and cloure:', dependency);
+                console.error('Besides global and closure:', dependency);
             }
         });
         worker.assignedDependencies = fnSignature;
@@ -191,10 +215,9 @@ function __defineScheduler__() {
         const worker = workers[workerId];
         if (event.data.status == 'ready') {
             const setupTime = event.data.setupDone - worker.setupStart;
-            // console.log(`worker #${worker.id} setup time: ${setupTime}`);
+            worker['setupTime'] = setupTime;
             availableWorkers.push(worker);
         } else if (event.data.status == 'executed') {
-            // console.log(`worker #${workerId}: runtime=${event.data.runtime}`);
             const workerWindow = JSON.parse(event.data.window, functionReviver);
             applyWorkerUpdates(workerWindow, event.data.updated);
             // free up the worker and add it to available workers
@@ -202,11 +225,8 @@ function __defineScheduler__() {
             worker.executing = false;
             availableWorkers.push(worker);
         }
-        // TODO: tof mali ro dorost konam
-        if (horcruxQueue.length > 0) {
-            const head = horcruxQueue.shift();
-            offloadToWorker(worker, head.fnBody, head.fnSignature);
-        }
+        // wake up the scheduler to continue
+        executeNextFunction();
     }
 
     /**
@@ -238,6 +258,36 @@ function __defineScheduler__() {
             workers.push(workerInfo);
         }
     };
+
+    /** Executes the given function here (on the main thread) by reconstructing
+     * it similar to how web workers do it.
+     * Note: If there is a closure variable which was created/updated by workers
+     * then must use the value tracked by closureMap.
+     * To provide access to closure variables in the reconstructed function,
+     * assign each closure variable to an input argument with the same name
+     * Passing these values as input arguments should solve the problem.
+     */
+    function executeOnMain(fnBody, fnSignature) {
+        let fnArgs = '';
+        fnSignature.forEach((dependency) => {
+            const scopeAccess = dependency[0].split('_');
+            const name = dependency[1].substring(4); // removes ';;;;'
+            if (scopeAccess[0] == 'closure') {
+                console.assert(scopeAccess.length == 3, 'Expected length = 3');
+                const access = scopeAccess[2]; // "reads" or "writes"
+                const value = (access == 'reads') ? dependency[2] : '';
+                console.error(access, name, value);
+                // TODO: handle setting the variables somehow
+            }
+        });
+
+        // reconstruct the function
+        const reconstructed = new Function(fnArgs, fnBody);
+        reconstructed();
+        // TODO: handle the updated closure variables again
+        // then wake up the scheduler
+        executeNextFunction();
+    }
 };
 
 if (typeof __scheduler__ === 'undefined') {
