@@ -11,6 +11,31 @@ const uncacheableFunctions = util.uncacheableFunctions;
 staticInfo.rtiDebugInfo = {totalNodes:[], matchedNodes:[], ALLUrls : [], matchedUrls: [], ND:[]};
 staticInfo.uncacheableFunctions = uncacheableFunctions;
 
+/** Checks if the location referred by otherIndex is enclosed in current loc
+ * @param {string} otherIndex taken from signature or call graph
+ * @param {SourceLocation} currentLoc current node.loc object
+ * @return {boolean} returns true if other index is enclosed
+ */
+function isEnclosed (otherIndex, currentLoc) {
+    const parts = otherIndex.split('-');
+    const start_line = parts[parts.length-4],   // loc.start.line
+        start_col = parts[parts.length-3],      // loc.start.column
+        end_line = parts[parts.length-2],       // loc.end.line
+        end_col = parts[parts.length-1];        // loc.end.column
+
+    const defStartsInside = (
+        (start_line > currentLoc.start.line) ||
+        (start_line == currentLoc.start.line &&
+            start_col > currentLoc.start.column));
+
+    const defEndsInside = (
+        (end_line < currentLoc.end.line) ||
+        (end_line == currentLoc.end.line &&
+            end_col < currentLoc.end.column));
+
+    return (defStartsInside && defEndsInside);
+}
+
 
 /** Rewriting helper function:
  * returns an array containing the definitions of callee functions called by
@@ -27,17 +52,7 @@ function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
             end_line = parts[parts.length-2],       // loc.end.line
             end_col = parts[parts.length-1];        // loc.end.column
 
-        const defStartsInside = (
-            (start_line > currentLoc.start.line) ||
-            (start_line == currentLoc.start.line &&
-                start_col > currentLoc.start.column));
-
-        const defEndsInside = (
-            (end_line < currentLoc.end.line) ||
-            (end_line == currentLoc.end.line &&
-                end_col < currentLoc.end.column));
-
-        if (!(defStartsInside && defEndsInside)) {
+        if (!isEnclosed(calleeIndex, currentLoc)) {
             // callee is defined outside currentFn
             let fnDef = "";
             if (end_line > htmlSrcLines.length ||
@@ -195,7 +210,7 @@ var traceFilter = function (content, options) {
                 if (node.type == "FunctionDeclaration" || node.type == "FunctionExpression") {
                     var index = makeId('function', options.path, node);
                     if (options.myCg.indexOf(index) >= 0) {
-                        console.log("[Static analyzer] Function matching reported a match")
+                        // console.log("[Static analyzer] Function matching reported a match")
                         instrumentedNodes.push(node);
                     } else {
                         markFunctionUnCacheable(node, "RTI");
@@ -247,7 +262,21 @@ var traceFilter = function (content, options) {
                         || dependency[0] == 'DOM_write') {
                         touchDOM = true;
                     } else {
-                        dependencies.push(dependency);
+                        // if closure variable dependencies are enclosed in
+                        // the function body, then skip that dependency
+                        const firstUnder = dependency[0].indexOf('_');
+                        const lastUnder = dependency[0].lastIndexOf('_');
+                        console.assert(firstUnder != -1,
+                            `Expected at least one '_' in ${dependency[0]}`);
+                        if (dependency[0].substring(0, firstUnder) == 'closure') {
+                            const location = dependency[0].substring(firstUnder+1, lastUnder);
+                            // console.log(location, 'vs', node.loc);
+                            if (!isEnclosed(location, node.loc)) {
+                                dependencies.push(dependency);
+                            }
+                        } else {
+                            dependencies.push(dependency);
+                        }
                         // if the first part of variable name is 'document'
                         // then the function is touching DOM
                         const parts = dependency[1].split(';;;;');
