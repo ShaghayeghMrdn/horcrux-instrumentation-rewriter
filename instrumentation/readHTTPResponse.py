@@ -184,13 +184,13 @@ def instrument(root, fileType, output_directory, args, file):
             http_response.response.body = unchunk(http_response.response.body)
             markedToBeDeleted.append(header.key)
 
-    print "Marked to be deleted headers are: " , markedToBeDeleted
+    # print "Marked to be deleted headers are: " , markedToBeDeleted
 
     print "Instrumenting: {} is a {} file".format(file, fileType)
     f = open(TEMP_FILE, "w")
     if gzip:
         try:
-            print "Decompressing {} ...with type {}".format(file, gzipType)
+            # print "Decompressing {} ...with type {}".format(file, gzipType)
             if gzipType.lower() != "br":
                 decompressed_data = zlib.decompress(bytes(bytearray(http_response.response.body)), zlib.MAX_WBITS|32)
             else:
@@ -210,8 +210,7 @@ def instrument(root, fileType, output_directory, args, file):
         inst_file_name = url + ";;;;" + origPath
         command = " record.js -i {} -n '{}' -t {} -p {}".format(TEMP_FILE, inst_file_name, fileType, args.instOutput)
         command += " -c {} -g {} -s {}".format(args.cgInfo, args.callGraph, args.signature)
-        print('-----'+command+'-----')
-    if (args.jsProfile):
+    elif (args.jsProfile):
     #Pass into the nodejs instrumentation script
         command = " {} -i {} -n '{}' -t {} -j {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile, args.instOutput)
     elif (args.cgInfo):
@@ -347,7 +346,7 @@ def main(args):
                 copyFile = True
                 fileType = "None"
 
-                print "Checking: {} file : {}".format(file, file_counter)
+                # print "Checking: {} file : {}".format(file, file_counter)
                 for header in http_response.response.header:
                     if header.key.lower() == "content-type":
                         if "javascript" in header.value.lower():
@@ -360,7 +359,7 @@ def main(args):
                             htmlFiles.append(file)
 
                 if copyFile or any(lib.lower() in http_response.request.first_line.lower() for lib in third_party_libraries):
-                    print "Simply copying the file without modification.. "
+                    # print "Simply copying the file without modification.. "
                     # print http_response.request.first_line
                     copy(os.path.join(root,file), os.path.join(args.output, output_directory))
 

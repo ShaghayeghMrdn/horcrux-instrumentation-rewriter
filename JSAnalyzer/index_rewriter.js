@@ -141,7 +141,7 @@ var traceFilter = function (content, options) {
     let instrumented = content;
 
     if (content.trim() === '') {
-        return result;
+        return instrumented;
     }
     var defaultOptions = {
         path: '<anonymous>',
