@@ -42,7 +42,7 @@ function isEnclosed (otherIndex, currentLoc) {
  * current function (identified by currentLoc). Nested functions that are
  * defined inside the current function body are excluded!
  */
-function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
+function getNestedFnBodies (currentLoc, calleeIndexes, srcLines) {
     // look up the needed definitions in options.htmlLines
     const calleeDefs = [];
     calleeIndexes.forEach(function(calleeIndex) {
@@ -55,23 +55,23 @@ function getNestedFnBodies (currentLoc, calleeIndexes, htmlSrcLines) {
         if (!isEnclosed(calleeIndex, currentLoc)) {
             // callee is defined outside currentFn
             let fnDef = "";
-            if (end_line > htmlSrcLines.length ||
-                end_col > htmlSrcLines[end_line-1].length) {
+            if (end_line > srcLines.length ||
+                end_col > srcLines[end_line-1].length) {
                 console.error(`ERROR: ${calleeIndex} falls out of HTML!`);
                 return;
             }
             if (start_line == end_line) {
-                const line = htmlSrcLines[start_line-1];
+                const line = srcLines[start_line-1];
                 fnDef += line.substring(start_col-1, end_col);
             } else {
                 let i = start_line-1;
-                fnDef += htmlSrcLines[i].substring(start_col-1) + '\n';
+                fnDef += srcLines[i].substring(start_col-1) + '\n';
                 // attention: i is increased and then condition is evaluated
                 while ((++i) < end_line-1) {
-                    fnDef += htmlSrcLines[i] + '\n';
+                    fnDef += srcLines[i] + '\n';
                 }
                 // add the last line: now i is end_line-1
-                fnDef += htmlSrcLines[i].substring(0, end_col);
+                fnDef += srcLines[i].substring(0, end_col);
             }
             calleeDefs.push(fnDef+'\n');
         }
@@ -131,9 +131,9 @@ const markFunctionUnCacheable = function(node, reason){
 
 
 function instrument(src, options) {
-    // options.cg sould not be null at this point, have checked in reocrd.js
+    // options.cg should not be null at this point, have checked in reocrd.js
     options.myCg = options.cg.filter(node => node.indexOf(options.path) >= 0);
-    console.log(`Only instrumenting ${options.myCg.length} function(s) from "${options.path}" script`);
+    console.log(`Instrumenting ${options.myCg.length} function(s) from "${options.path}"`);
 
     var shebang = '', m;
     if (m = /^(#![^\n]+)\n/.exec(src)) {
@@ -294,7 +294,7 @@ var traceFilter = function (content, options) {
                 }
                 const fnDefs = getNestedFnBodies(node.loc,
                                                 calleeFunctions,
-                                                options.htmlSrcLines);
+                                                options.srcLines);
 
                 const newBody = '{\n\tconst body = ' +
                                 JSON.stringify(nodeBody) + ';\n' +
@@ -312,11 +312,14 @@ var traceFilter = function (content, options) {
         });
 
         instrumented = falafelOutput;
-    } catch (e) {
-        console.error('[PARSING EXCEPTION]' + e);
-    } finally {
         return instrumented;
+    } catch (e) {
+        console.error('[PARSING EXCEPTION] ' + e);
+        throw e;
     }
+    // } finally {
+    //     return instrumented;
+    // }
 }
 
 module.exports = {

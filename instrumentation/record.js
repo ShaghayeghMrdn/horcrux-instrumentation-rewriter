@@ -44,7 +44,7 @@ program
     .option("-p, --pattern [pattern]","instrumentation pattern, either cg, record (signature), or rewrite")
     .option("-s, --signature [file]", "final signature containing function dependencies")
     .option("-g, --call-graph [file]", "final call graph file")
-    .option("-w, --wrapped-src [file]", "File path to save the globally wrapped HTML file")
+    .option("-w, --wrapped-src-path [file]", "File path to save the globally wrapped HTML file")
     .parse(process.argv)
 
 /*
@@ -223,12 +223,14 @@ function instrumentHTML(src, fondueOptions) {
         }
     }
 
-    if (program.wrappedSrc) {
-        console.log(`Wrote to wrappedSrc: ${program.wrappedSrc}`);
-        fs.writeFileSync(program.wrappedSrc, src);
+    if (program.wrappedSrcPath) {
+        console.log(`Wrote to wrappedSrc: ${program.wrappedSrcPath}`);
+        fs.writeFileSync(program.wrappedSrcPath, src);
     }
-    // send in the wrapped HTML source as part of options
-    fondueOptions = mergeInto({htmlSrcLines: src.split('\n')}, fondueOptions);
+    if (program.pattern == "rewrite") {
+        // send in the wrapped HTML source as part of options
+        fondueOptions = mergeInto({srcLines: src.split('\n')}, fondueOptions);
+    }
 
     // process the scripts in reverse order
     for (var i = scriptLocs.length - 1; i >= 0; i--) {
@@ -382,15 +384,30 @@ function instrumentJavaScript(src, fondueOptions, jsInHTML) {
     console.log("Instrumenting a js file")
     var fondueOptions = mergeInto({include_prefix: false}, fondueOptions);
     fondueOptions.jsInHTML = jsInHTML
-    if (IsJsonString(src)){
+    if (IsJsonString(src)) {
         if (jsInHTML)
             return src.replace(/^\s+|\s+$/g, '');
         else return src;
     }
-    // if (!jsInHTML){
-    //     src = jsBeauty(src);
-    // }
-    // src = fondue_plugin.instrument(src, fondueOptions).toString();
+
+    // if this is an external script source, it has not been globally wrapped
+    // and the global variables are not rewritten to use window
+    if (!jsInHTML) {
+        // wrap each IIFE in an anonymous function
+        let wrappedSrc = globalWrapper.wrap(src, fala);
+        // rewrite all global variables to use window.
+        wrappedSrc = windowRewriter.instrument(wrappedSrc, fondueOptions).toString();
+        // update the src
+        src = wrappedSrc;
+        if (program.wrappedSrcPath) {
+            console.log(`Wrote to wrappedSrc: ${program.wrappedSrcPath}`);
+            fs.writeFileSync(program.wrappedSrcPath, src);
+        }
+        if (program.pattern == "rewrite") {
+            fondueOptions = mergeInto({srcLines: src.split('\n')}, fondueOptions);
+        }
+    }
+
     src = instrumentor.instrument(src, fondueOptions).toString();
     if (program.type == "js") {
         console.log("[rtiDebugInfo]" + staticInfo.rtiDebugInfo.totalNodes.length,
@@ -473,6 +490,9 @@ var main = function(){
                         "one or more of roots(cg), callGraph, or signature" +
                         "files are not provided");
             return;
+        }
+        if (!program.wrappedSrcPath) {
+            console.error("Error: rewriter expected --wrappedSrcPath (-w)");
         }
     }
     src = fs.readFileSync(program.input,"utf-8")

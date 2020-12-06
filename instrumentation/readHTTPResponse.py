@@ -159,7 +159,6 @@ def instrument(root, fileType, output_directory, args, file):
     gzipType = ""
     TEMP_FILE = "tmp"
     iframe_script_path = "iframeJs2/"
-    log_directory = args.logDir
 
     if len(filename) > 50:
         filename = filename[-50:]
@@ -205,6 +204,8 @@ def instrument(root, fileType, output_directory, args, file):
             # os._exit(0)
     else: f.write(http_response.response.body)
     f.close()
+
+    valid_file_name = get_valid_filename(filename)
     # /***** HORCRUX *****/
     if (args.instOutput == "rewrite"):
         inst_file_name = url + ";;;;" + origPath
@@ -222,26 +223,28 @@ def instrument(root, fileType, output_directory, args, file):
         command = "node --inspect-brk={}".format(node_debugging_port) + command
     else:
         command = "node " + command
-    _log_path = log_directory+"/"+output_directory+"/" + get_valid_filename(filename) + "/"
-    subprocess.call("mkdir -p {}".format(_log_path), shell=True)
+
+    _log_path = os.path.join(args.logDir, output_directory, valid_file_name)
+    if (not os.path.exists(_log_path)):
+        os.makedirs(_log_path)
 
     # /***** HORCRUX *****/
-    # save the wrapped HTML file in the log folder
-    if (fileType == "html"):
-        wrapped_src_path = _log_path + "wrapped.html"
-        command += " -w "+wrapped_src_path
+    # save the wrapped source file in the log folder
+    if (fileType == "html" or fileType == "js"):
+        wrapped_src_path = os.path.join(_log_path, "wrapped." + fileType)
+        command += (" -w " + wrapped_src_path)
 
-    log_file=open(_log_path+"logs","w")
-    error_file=open(_log_path+"errors","w")
+    log_file = open(os.path.join(_log_path, "logs"), "w")
+    error_file = open(os.path.join(_log_path, "errors"), "w")
     # if (args.instOutput != "ND" or fileType == "html"):
-    print "Executing ", command
-    cmd = subprocess.call(command, stdout=log_file, stderr =error_file, shell=True)
+    # print "Executing ", command
+    cmd = subprocess.call(command, stdout=log_file, stderr=error_file, shell=True)
 
     try:
         returnInfoFile = TEMP_FILE + ".info";
         returnInfo = open(returnInfoFile,'r').readline();
 
-        open(_log_path + "info","w").write(returnInfo)
+        open(os.path.join(_log_path, "info"), "w").write(returnInfo)
         # open (TEMP_FILE + ".time","w").write(str(static_analysis_overhead))
     except IOError as e:
         print "Error while reading info file" + str(e)
@@ -368,7 +371,7 @@ def main(args):
 
     pool = mp.Pool(mp.cpu_count())
 
-    instrument_singleton = partial(instrument, root, "js",output_directory, args)
+    instrument_singleton = partial(instrument, root, "js", output_directory, args)
 
     pool.map(instrument_singleton, jsFiles)
     pool.close()
@@ -376,7 +379,7 @@ def main(args):
     # for jsFile in jsFiles:
     #     instrument(jsFile,root, "js", output_directory,args)
 
-    instrument_singleton = partial(instrument, root, "html",output_directory, args)
+    instrument_singleton = partial(instrument, root, "html", output_directory, args)
     # for pid in childPids:
     #     print "waiting on pid", pid
     #     os.waitpid(pid,0)
