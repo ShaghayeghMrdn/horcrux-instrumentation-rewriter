@@ -381,7 +381,7 @@ function dumpStaticInformation_uncacheable(options){
 
 
 function instrumentJavaScript(src, fondueOptions, jsInHTML) {
-    console.log("Instrumenting a js file")
+    // console.log("Instrumenting a js file");
     var fondueOptions = mergeInto({include_prefix: false}, fondueOptions);
     fondueOptions.jsInHTML = jsInHTML
     if (IsJsonString(src)) {

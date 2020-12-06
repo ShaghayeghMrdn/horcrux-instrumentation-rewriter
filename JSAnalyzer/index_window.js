@@ -154,12 +154,9 @@ function instrument(src, options) {
 		staticInfo.rtiDebugInfo.ALLUrls = ALLUrls;
 		staticInfo.rtiDebugInfo.matchedUrls = staticInfo.rtiDebugInfo.matchedUrls.concat(matchedUrls);
 	} else if (options.cg){
-		console.log("List of functions to be instrumented: " + options.cg.length);
 		options.myCg = options.cg.filter(node=>node.indexOf(options.path+"-")>=0);
 		options.myCg = unique(options.myCg)
-		if (options.e2eTesting) options.myCg = options.cg;
 		staticInfo.rtiDebugInfo.totalNodes = staticInfo.rtiDebugInfo.totalNodes.concat(options.myCg);
-		console.log("Only instrumenting the following functions from the current script " + options.myCg);
 	}
 
 	var defaultOptions = {

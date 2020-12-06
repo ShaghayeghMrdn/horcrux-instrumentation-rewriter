@@ -42,11 +42,34 @@ function isEnclosed (otherIndex, currentLoc) {
  * current function (identified by currentLoc). Nested functions that are
  * defined inside the current function body are excluded!
  */
-function getNestedFnBodies (currentLoc, calleeIndexes, srcLines) {
+function getNestedFnBodies (calleeIndexes, currentLoc, origPath, srcLines) {
     // look up the needed definitions in options.htmlLines
     const calleeDefs = [];
     calleeIndexes.forEach(function(calleeIndex) {
         const parts = calleeIndex.split('-');
+        let calleePath = '';
+        // parts[parts.length-5] -> "function" keyword
+        // therefore to build callee original path just go up to -5, but
+        let calleePathBound = parts.length - 5;
+        // parts[parts.length-6] -> might be a number if callee was in HTML
+        // parts[parts.length-7] -> might be "script" if callee was in HTML
+        if (parts.length > 7 &&
+            parts[parts.length-7] == 'script' &&
+            parseInt(parts[parts.length-6]) != 'NaN') {
+            // then the callee was defined inside an HTML, skip -6 and -7
+            calleePathBound -= 2;
+        }
+        for (let i = 0; i < calleePathBound; ++i) {
+            calleePath += (parts[i] + '-');
+        }
+        // remove the extra '-' at the end
+        calleePath = calleePath.slice(0, -1);
+        if (calleePath != origPath) {
+            // TODO: later have to figure out how to get function bodies that
+            // are not defined in this file and to get those files wrapped src
+            console.log(`WARN: ${calleePath} function called in ${origPath}`);
+            return;
+        }
         const start_line = parts[parts.length-4],   // loc.start.line
             start_col = parts[parts.length-3],      // loc.start.column
             end_line = parts[parts.length-2],       // loc.end.line
@@ -57,7 +80,7 @@ function getNestedFnBodies (currentLoc, calleeIndexes, srcLines) {
             let fnDef = "";
             if (end_line > srcLines.length ||
                 end_col > srcLines[end_line-1].length) {
-                console.error(`ERROR: ${calleeIndex} falls out of HTML!`);
+                console.error(`ERROR: ${calleeIndex} falls out of src!`);
                 return;
             }
             if (start_line == end_line) {
@@ -133,7 +156,8 @@ const markFunctionUnCacheable = function(node, reason){
 function instrument(src, options) {
     // options.cg should not be null at this point, have checked in reocrd.js
     options.myCg = options.cg.filter(node => node.indexOf(options.path) >= 0);
-    console.log(`Instrumenting ${options.myCg.length} function(s) from "${options.path}"`);
+    const rootNum = options.myCg.length;
+    console.log(`>>>>>[${options.path}]: instrument ${rootNum} function(s)`);
 
     var shebang = '', m;
     if (m = /^(#![^\n]+)\n/.exec(src)) {
@@ -227,7 +251,7 @@ var traceFilter = function (content, options) {
                 Shaghayegh: Added a starting and trailing \n
                 in order to have <script> tags in separate lines. */
                 if (options.jsInHTML){
-                    update(node, '\n',node.source().replace(/^\s+|\s+$/g, ''),'\n');
+                    update(node, '\n', node.source().replace(/^\s+|\s+$/g, ''), '\n');
                 }
             }
             else if ((node.type == "FunctionDeclaration" || node.type == "FunctionExpression")) {
@@ -261,6 +285,12 @@ var traceFilter = function (content, options) {
                     if (dependency[0] == 'DOM_read'
                         || dependency[0] == 'DOM_write') {
                         touchDOM = true;
+                        return;
+                    }
+                    if (typeof dependency[0] !== "string" ||
+                        typeof dependency[1] !== "string") {
+                        console.log(`WARN: ignored [${dependency}]: ${index}`);
+                        return;
                     } else {
                         // if closure variable dependencies are enclosed in
                         // the function body, then skip that dependency
@@ -292,9 +322,8 @@ var traceFilter = function (content, options) {
                     console.error(`Error: no callGraph entry for ${index}`);
                     return;
                 }
-                const fnDefs = getNestedFnBodies(node.loc,
-                                                calleeFunctions,
-                                                options.srcLines);
+                const fnDefs = getNestedFnBodies(calleeFunctions, node.loc,
+                    options.origPath, options.srcLines);
 
                 const newBody = '{\n\tconst body = ' +
                                 JSON.stringify(nodeBody) + ';\n' +
