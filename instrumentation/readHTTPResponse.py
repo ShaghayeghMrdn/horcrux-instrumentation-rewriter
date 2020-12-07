@@ -206,11 +206,18 @@ def instrument(root, fileType, output_directory, args, file):
     f.close()
 
     valid_file_name = get_valid_filename(filename)
+    _log_path = os.path.join(args.logDir, output_directory, valid_file_name)
+    if (not os.path.exists(_log_path)):
+        os.makedirs(_log_path)
+
     # /***** HORCRUX *****/
     if (args.instOutput == "rewrite"):
         inst_file_name = url + ";;;;" + origPath
         command = " record.js -i {} -n '{}' -t {} -p {}".format(TEMP_FILE, inst_file_name, fileType, args.instOutput)
         command += " -c {} -g {} -s {}".format(args.cgInfo, args.callGraph, args.signature)
+        # save the wrapped source file in the log folder
+        if (fileType == "html" or fileType == "js"):
+            command += " -w {}".format(os.path.join(_log_path, "wrapped." + fileType))
     elif (args.jsProfile):
     #Pass into the nodejs instrumentation script
         command = " {} -i {} -n '{}' -t {} -j {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile, args.instOutput)
@@ -224,15 +231,6 @@ def instrument(root, fileType, output_directory, args, file):
     else:
         command = "node " + command
 
-    _log_path = os.path.join(args.logDir, output_directory, valid_file_name)
-    if (not os.path.exists(_log_path)):
-        os.makedirs(_log_path)
-
-    # /***** HORCRUX *****/
-    # save the wrapped source file in the log folder
-    if (fileType == "html" or fileType == "js"):
-        wrapped_src_path = os.path.join(_log_path, "wrapped." + fileType)
-        command += (" -w " + wrapped_src_path)
 
     log_file = open(os.path.join(_log_path, "logs"), "w")
     error_file = open(os.path.join(_log_path, "errors"), "w")
