@@ -1,10 +1,9 @@
 const webWorkerScriptID = '__horcrux_worker__';
-const numOfWorkers = 1;
+const numOfWorkers = 2;
 
 /**
  * defines the __callScheduler__ function globally which acts as wake up call.
  * sets up a number of workers, and adds them to the list of available workers.
- * TODO: initialize Horcrux special event queue
  */
 function __defineScheduler__() {
     // List of all workers
@@ -20,6 +19,79 @@ function __defineScheduler__() {
      */
     const closureMap = new Map();
 
+    /** Checks if the two given functions have dependency conflicts.
+     * Two functions have dependency conflicts if both of them are sharing
+     * access to one variable and one of the accesses is write (e.g., R-W,
+     * W-R, W-W). There is not a dependency conflict if both of functions are
+     * just reading the variable.
+     * @param {Array} candidateSignature
+     * @param {Array} otherSignature
+     * @return {boolean} returns true if there is any conflict
+     */
+    function _hasConflict(candidateSignature, otherSignature) {
+        let conflict = false;
+        for (let i = 0; i < candidateSignature.length; ++i) {
+            const candidateDep = candidateSignature[i];
+            const lastIndex = candidateDep[0].lastIndexOf('_');
+            const scope = candidateDep[0].substring(0, lastIndex);
+            const readWrite = candidateDep[0].substring(lastIndex+1);
+            for (let j = 0; j < otherSignature.length; ++j) {
+                const otherDep = otherSignature[j];
+                const otherLastIndex = otherDep[0].lastIndexOf('_');
+                if (scope !== otherDep[0].substring(0, otherLastIndex)) {
+                    continue;
+                }
+                const otherReadWrite = otherDep[0].substring(otherLastIndex+1);
+                if (readWrite === 'reads' && otherReadWrite === 'reads') {
+                    continue;
+                }
+                if (candidateDep[1].includes(otherDep[1]) ||
+                    otherDep[1].includes(candidateDep[1])) {
+                    conflict = true;
+                    break;
+                }
+            }
+            if (conflict) {
+                break;
+            }
+        }
+        return conflict;
+    }
+
+    /** Makes sure the given candidate function does not have any dependency
+     * conflicts with either any of the functions running on the web workers
+     * or the ones ahead of it in the queue.
+     * @param {Object.<index, fnBody, fnSignature, touchDOM>} candidate
+     * @return {boolean} returns false if candidate has any dependency conflict
+     */
+    function _safeToExecute(candidate) {
+        let safe = true;
+        // first check the already offloaded functions
+        for (let i = 0; i < workers.length; ++i) {
+            if (workers[i].executing &&
+                _hasConflict(candidate.fnSignature, workers[i].signature)) {
+                safe = false;
+                break;
+            }
+        }
+        if (!safe) {
+            return false;
+        }
+        for (let i = 0; i < horcruxQueue.length; ++i) {
+            if (horcruxQueue[i] == candidate) {
+                // found itself; Have checked all functions ahead of it
+                break;
+            }
+            if (_hasConflict(candidate.fnSignature,
+                horcruxQueue[i].fnSignature)) {
+                safe = false;
+                break;
+            }
+        }
+        return safe;
+    }
+
+
     /** Wakes up the scheduler to execute the next function in the queue
      * Gets called when either the worker or the main thread has finished
      * executing the previous function.
@@ -29,22 +101,56 @@ function __defineScheduler__() {
             console.log('DONE!');
             return;
         }
-        const head = horcruxQueue.shift();
-        if (head.touchDOM) {
-            executeOnMain(head.index, head.fnBody, head.fnSignature);
-        } else {
-            // try to offload it if there is an idle worker
-            if (availableWorkers.length > 0) {
-                const worker = availableWorkers.shift();
-                offloadToWorker(worker,
-                    head.index, head.fnBody, head.fnSignature);
+        let domPause = false;
+        if (availableWorkers.length > 0 && !domPause) {
+            let qindex = 0;
+            while (qindex < horcruxQueue.length) {
+                const candidate = horcruxQueue[qindex];
+                if (candidate.touchDOM) {
+                    domPause = true;
+                    break;
+                } else {
+                    if (_safeToExecute(candidate)) {
+                        // found a candidate
+                        break;
+                    }
+                }
+                qindex += 1;
+            }
+            if (!domPause) {
+                if (qindex !== horcruxQueue.length) {
+                    // no DOM in queue and found a candidate that is safe
+                    // take qindex-th item out of queue, returns array of size 1
+                    const candidate = horcruxQueue.splice(qindex, 1);
+                    const worker = availableWorkers.shift();
+                    offloadToWorker(worker,
+                        candidate[0].index,
+                        candidate[0].fnBody,
+                        candidate[0].fnSignature);
+                }
+            } else if (domPause && qindex == 0) {
+                // if the head of queue is touching dom
+                if (_safeToExecute(horcruxQueue[qindex])) {
+                    // and has no conflict with the ones executing on workers
+                    const head = horcruxQueue.shift();
+                    domPause = false;
+                    executeOnMain(head.index, head.fnBody, head.fnSignature);
+                } else {
+                    // cannot execute yet, has to wait on some worker to finish
+                    console.log('DOM pause! Has to wait for worker to finish');
+                    return;
+                }
+            } else {
+                console.log('DOM pause! Has to wait for others to finish');
+                return;
             }
         }
     }
 
     /** Gets called from inside a rewritten IIFE (<script>).
-     * If possible, offloads the function to a web worker right away, otherwise
-     * it adds the function to our Horcrux queue.
+     * It adds the function to Horcrux queue and delegates the offloading
+     * decision to scheduler wake-up call!
+     * @see executeNextFunction.
      * -- This function is defined as a property of window so that
      * it can be called from inside rewritten IIFE and async functions.
      * @param {string} index location of function that invoked callScheduler
@@ -53,15 +159,11 @@ function __defineScheduler__() {
      * @param {boolean} touchDOM whether the to-be function is accessing DOM
      */
     window.__callScheduler__ = function(index, fnBody, fnSignature, touchDOM) {
-        if (!touchDOM &&
-            horcruxQueue.length == 0 &&
-            availableWorkers.length > 0) {
-            const workerInfo = availableWorkers.shift();
-            offloadToWorker(workerInfo, index, fnBody, fnSignature);
-        } else {
-            // Shorthand property names -- e.g., {a:a, b:b, c:c}
-            horcruxQueue.push({index, fnBody, fnSignature, touchDOM});
-        }
+        // Shorthand property names -- e.g., {a:a, b:b, c:c}
+        horcruxQueue.push({index, fnBody, fnSignature, touchDOM});
+        // call executeNextFunction since there might be an idle worker waiting
+        // and none of the previously present functions could be offloaded to it
+        executeNextFunction();
     };
 
     /** Helper function for JSON stringify when the value is a function
@@ -125,7 +227,7 @@ function __defineScheduler__() {
                 console.error('Besides global and closure:', dependency);
             }
         });
-        worker.assignedDependencies = fnSignature;
+        worker.signature = fnSignature;
         worker.executing = true;
         console.log(`Offloading ${index} to worker`);
         worker.workerObj.postMessage({
@@ -225,7 +327,7 @@ function __defineScheduler__() {
             const workerWindow = JSON.parse(event.data.window, functionReviver);
             applyWorkerUpdates(workerWindow, event.data.updated);
             // free up the worker and add it to available workers
-            worker.assignedDependencies = null;
+            worker.signature = null;
             worker.executing = false;
             availableWorkers.push(worker);
         }
@@ -236,7 +338,6 @@ function __defineScheduler__() {
     /**
      * Sets up numOfWorkers of workers using with the content of <script>
      * identified by webWorkerScriptID.
-     * @param {int} workerId
      */
     function setUpWorkers() {
         for (let workerId = 0; workerId < numOfWorkers; ++workerId) {
@@ -253,7 +354,7 @@ function __defineScheduler__() {
                 workerObj: worker,
                 setupStart: start,
                 executing: false,
-                assignedDependencies: null,
+                signature: null,
             };
             /* This message is not necessary to start the web worker, it
              has already started, but more importantly it tells the web worker
@@ -270,9 +371,12 @@ function __defineScheduler__() {
      * To provide access to closure variables in the reconstructed function,
      * assign each closure variable to an input argument with the same name
      * Passing these values as input arguments should solve the problem.
+     * @param {string} index
+     * @param {string} fnBody
+     * @param {Array} fnSignature
      */
     function executeOnMain(index, fnBody, fnSignature) {
-        let fnArgs = '';
+        const fnArgs = '';
         fnSignature.forEach((dependency) => {
             const scopeAccess = dependency[0].split('_');
             const name = dependency[1].substring(4); // removes ';;;;'
@@ -301,3 +405,4 @@ if (typeof __scheduler__ === 'undefined') {
 
 
 //  LocalWords:  workerId workerInfo postMessage closureMap updatedClosures
+//  LocalWords:  executeNextFunction
