@@ -2175,14 +2175,15 @@ function __declTracerObject__(window) {
             // customLocalStorage[cacheIndex].startTime = window.performance.now();
         } else {
             // if (!(cacheIndex in callGraph))
+            timingInfo[cacheIndex] = [];
+            timingInfo[cacheIndex].push(window.performance.now());
+
             callGraph[cacheIndex] = [];
             if (_shadowStackHead) {
                 callGraph[_shadowStackHead].push(cacheIndex)
             } else {
-                timingInfo[cacheIndex] = [];
                 rootInvocs.push(cacheIndex);
                 curRoot = cacheIndex;
-                timingInfo[cacheIndex].push(window.performance.now());
             }
 
 
@@ -2480,14 +2481,15 @@ function __declTracerObject__(window) {
         var cacheIndex = _shadowStackHead ? _shadowStackHead : null;
         if (!cacheIndex) return;
 
+        if (instrumentationPattern == "cg")
+                timingInfo[cacheIndex].push(window.performance.now());
+
         if (instrumentationPattern == "replay")
             return;
         shadowStack.pop();
         if (shadowStack.length)
             _shadowStackHead = shadowStack[shadowStack.length - 1];
         else {
-            if (instrumentationPattern == "cg")
-                timingInfo[cacheIndex].push(window.performance.now());
             _shadowStackHead = null;
         }
 
