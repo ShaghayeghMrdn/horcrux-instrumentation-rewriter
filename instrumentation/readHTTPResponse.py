@@ -218,6 +218,8 @@ def instrument(root, fileType, output_directory, args, file):
         # save the wrapped source file in the log folder
         if (fileType == "html" or fileType == "js"):
             command += " -w {}".format(os.path.join(_log_path, "wrapped." + fileType))
+    if (args.instOutput == "check-worker"):
+        command = " ../horcrux-scheduler/add_worker_shim.js -i " + TEMP_FILE
     elif (args.jsProfile):
     #Pass into the nodejs instrumentation script
         command = " {} -i {} -n '{}' -t {} -j {} -p {}".format("record.js", TEMP_FILE, url + ";;;;" +origPath,fileType,args.jsProfile, args.instOutput)
