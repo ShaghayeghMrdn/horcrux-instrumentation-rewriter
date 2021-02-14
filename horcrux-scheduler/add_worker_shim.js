@@ -1,7 +1,9 @@
 const fs = require("fs")
 const program = require('commander');
 
-program.option("-i, --input_file [input]","HTML/JS file to add the worker shim")
+program
+    .option("-i, --input [input]","HTML/JS file to add the worker shim")
+    .parse(process.argv);
 
 src = fs.readFileSync(program.input, "utf-8")
 src = `
