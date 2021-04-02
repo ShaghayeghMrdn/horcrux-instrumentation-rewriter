@@ -266,7 +266,7 @@
     "levn": "0.3.0",
     "lighthouse": "4.2.0",
     "lighthouse-logger": "1.0.1",
-    "lodash": "4.17.11",
+    "lodash": "4.17.19",
     "lodash._arraycopy": "3.0.0",
     "lodash._arrayeach": "3.0.0",
     "lodash._arraymap": "3.0.0",
