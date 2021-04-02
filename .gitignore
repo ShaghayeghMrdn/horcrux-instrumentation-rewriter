@@ -71,10 +71,6 @@ typings/
 # dotenv environment variables file
 .env
 
-#package-lock
-package-lock.json
-package.json
-
 #Ds store files
 .DS_Store
 
