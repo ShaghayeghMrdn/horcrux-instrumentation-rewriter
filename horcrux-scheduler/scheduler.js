@@ -98,7 +98,6 @@ function __defineScheduler__() {
      */
     function executeNextFunction() {
         if (horcruxQueue.length == 0) {
-            console.log('DONE!');
             return;
         }
         let domPause = false;
@@ -137,11 +136,11 @@ function __defineScheduler__() {
                     executeOnMain(head.index, head.fnBody, head.fnSignature);
                 } else {
                     // cannot execute yet, has to wait on some worker to finish
-                    console.log('DOM pause! Has to wait for worker to finish');
+                    // console.log('DOM pause! Has to wait for worker to finish');
                     return;
                 }
             } else {
-                console.log('DOM pause! Has to wait for others to finish');
+                // console.log('DOM pause! Has to wait for others to finish');
                 return;
             }
         }
@@ -214,22 +213,26 @@ function __defineScheduler__() {
         const outputValues = {};
         // prepare the input arguments for the fnBody using the signature
         fnSignature.forEach((dependency) => {
-            const scopeAccess = dependency[0].split('_');
+            // should not split using '_', since the function location might
+            // contain '_'. Instead use the first and last underline
+            const firstUnder = dependency[0].indexOf('_');
+            const lastUnder = dependency[0].lastIndexOf('_');
+            const scope = dependency[0].slice(0, firstUnder);
+            const location = dependency[0].slice(firstUnder, lastUnder);
+            const access = dependency[0].slice(lastUnder);
             const name = dependency[1].substring(4); // removes ';;;;'
-            if (scopeAccess[0] == 'global') {
-                handleGlobalDependency(scopeAccess[1], name);
-            } else if (scopeAccess[0] == 'closure') {
-                console.assert(scopeAccess.length == 3, 'Expected length = 3');
-                const access = scopeAccess[2]; // "reads" or "writes"
-                const value = (access == 'reads') ? dependency[2] : '';
-                handleClosureDependency(scopeAccess[1], access, name, value);
-            } else {
-                console.error('Besides global and closure:', dependency);
+            if (scope == 'global') {
+                handleGlobalDependency(access, name);
+            } else if (scope == 'closure') {
+                if (location != "") {
+                    const value = (access == 'reads') ? dependency[2] : '';
+                    handleClosureDependency(location, access, name, value);
+                }
             }
         });
         worker.signature = fnSignature;
         worker.executing = true;
-        console.log(`Offloading ${index} to worker`);
+        // console.log(`Offloading ${index} to worker`);
         worker.workerObj.postMessage({
             'cmd': 'execute',
             'fnBody': fnBody,
@@ -270,7 +273,6 @@ function __defineScheduler__() {
                         } else {
                             // just double-checking the values in closureMap
                             const old = closureMap.get(location);
-                            console.log(old[name], 'vs', inputValues[name]);
                         }
                     }
                 }
@@ -303,16 +305,16 @@ function __defineScheduler__() {
                 closureMap.set(location, updatedClosures[location]);
             }
         }
-        for (const [key, value] of closureMap.entries()) {
-            console.log(`closureMap: ${key} = ${JSON.stringify(value)}`);
-        }
+        // for (const [key, value] of closureMap.entries()) {
+        //     console.log(`closureMap: ${key} = ${JSON.stringify(value)}`);
+        // }
     };
 
     /** Main thread 'message' event handler.
      * @param {MessageEvent} event Received message from worker in event.data
      */
     function mainThreadListener(event) {
-        console.log(`Main received: ${JSON.stringify(event.data)}`);
+        // console.log(`Main received: ${JSON.stringify(event.data)}`);
         const workerId = event.data.id;
         if (workerId === 'undefined' || workerId >= numOfWorkers) {
             console.error('Error: web worker message does not indicate the id');
@@ -378,22 +380,24 @@ function __defineScheduler__() {
     function executeOnMain(index, fnBody, fnSignature) {
         const fnArgs = '';
         fnSignature.forEach((dependency) => {
-            const scopeAccess = dependency[0].split('_');
+            // should not split using '_', since the function location might
+            // contain '_'. Instead use the first and last underline
+            const firstUnder = dependency[0].indexOf('_');
+            const lastUnder = dependency[0].lastIndexOf('_');
+            const scope = dependency[0].slice(0, firstUnder);
+            const location = dependency[0].slice(firstUnder, lastUnder);
+            const access = dependency[0].slice(lastUnder); // "reads"/"writes"
             const name = dependency[1].substring(4); // removes ';;;;'
-            if (scopeAccess[0] == 'closure') {
-                console.assert(scopeAccess.length == 3, 'Expected length = 3');
-                const access = scopeAccess[2]; // "reads" or "writes"
+            if (scope == 'closure') {
+                // console.log('Running on main:', scopeAccess.length);
                 const value = (access == 'reads') ? dependency[2] : '';
-                console.error(access, name, value);
-                // TODO: handle setting the variables somehow
             }
         });
 
-        console.log(`Executing ${index} on main`);
+        // console.log(`Executing ${index} on main`);
         // reconstruct the function
         const reconstructed = new Function(fnArgs, fnBody);
         reconstructed();
-        // TODO: handle the updated closure variables again
         // then wake up the scheduler
         executeNextFunction();
     }

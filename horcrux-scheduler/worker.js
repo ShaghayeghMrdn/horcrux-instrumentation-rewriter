@@ -66,7 +66,7 @@ function cloneClosures(outputValues) {
 
 
 self.addEventListener('message', (event) => {
-    console.log(`Worker received ${JSON.stringify(event.data)}`);
+    // console.log(`Worker received ${JSON.stringify(event.data)}`);
     if (event.data.cmd == 'start') {
         workerId = event.data.id;
         // send a message to main thread to confirm setup is done
@@ -79,7 +79,6 @@ self.addEventListener('message', (event) => {
         if (fnBody === 'undefined' || fnArgs === 'undefined') {
             const errorMsg = 'Error: function body or args are undefined';
             console.error(errorMsg);
-            // TODO: send errorMsg back to main
             return;
         }
         const funcStart = Date.now();
@@ -91,7 +90,7 @@ self.addEventListener('message', (event) => {
         reconstructed();
         const updatedClosures = cloneClosures(event.data.outputValues);
         if (Object.keys(updatedClosures).length !== 0) {
-            console.log('Worker updated closures:', updatedClosures);
+            // console.log('Worker updated closures:', updatedClosures);
         }
         const runtime = Date.now() - funcStart;
         self.postMessage({
