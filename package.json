@@ -255,7 +255,7 @@
     "json-stringify-safe": "5.0.1",
     "json5": "0.5.1",
     "jsonify": "0.0.0",
-    "jsonpointer": "4.0.1",
+    "jsonpointer": "5.0.0",
     "jsprim": "1.4.1",
     "jszip": "2.6.1",
     "kind-of": "3.2.2",
