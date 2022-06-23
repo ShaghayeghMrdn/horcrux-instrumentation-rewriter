@@ -187,7 +187,7 @@
     "global-dirs": "0.1.1",
     "globals": "9.18.0",
     "gm": "1.23.1",
-    "got": "6.7.1",
+    "got": "11.8.5",
     "graceful-fs": "4.1.15",
     "handlebars": ">=4.5.3",
     "har-schema": "2.0.0",
