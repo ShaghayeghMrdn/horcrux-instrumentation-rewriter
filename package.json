@@ -257,7 +257,7 @@
     "jsonify": "0.0.0",
     "jsonpointer": "4.0.1",
     "jsprim": "1.4.1",
-    "jszip": "2.6.1",
+    "jszip": "2.7.0",
     "kind-of": "3.2.2",
     "latest-version": "3.1.0",
     "lazy-cache": "1.0.4",
