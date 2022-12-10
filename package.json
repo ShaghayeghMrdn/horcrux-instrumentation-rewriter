@@ -152,7 +152,7 @@
     "event-emitter": "0.3.5",
     "execa": "0.10.0",
     "exit-hook": "1.1.1",
-    "express": "4.16.4",
+    "express": "4.17.3",
     "extend": "3.0.2",
     "external-editor": "2.2.0",
     "extract-zip": "1.6.7",
